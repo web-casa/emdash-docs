@@ -1,13 +1,16 @@
 import cloudflare from "@astrojs/cloudflare";
+import sitemap from "@astrojs/sitemap";
 import starlight from "@astrojs/starlight";
 // @ts-check
 import { defineConfig } from "astro/config";
 import { LOCALE_OPTIONS } from "./src/lib/locale.js";
+import { createSitemapLastmodMap } from "./src/lib/sitemap.js";
 import { resolveSiteUrl } from "./src/lib/site-config.js";
 
 const localeLangMap = Object.fromEntries(
 	LOCALE_OPTIONS.map(({ locale, lang, label }) => [locale, { lang, label }]),
 );
+const sitemapLastmodMap = createSitemapLastmodMap();
 
 const sidebarTranslations = {
 	"Start Here": {
@@ -270,6 +273,21 @@ export default defineConfig({
 			},
 			customCss: ["./src/styles/custom.css"],
 			sidebar,
+		}),
+		sitemap({
+			i18n: {
+				defaultLocale: "root",
+				locales: Object.fromEntries(
+					LOCALE_OPTIONS.map(({ locale, lang }) => [locale, lang]),
+				),
+			},
+			serialize(item) {
+				const pathname = new URL(item.url).pathname;
+				const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/?$/u, "/");
+				const lastmod = sitemapLastmodMap.get(normalizedPath);
+
+				return lastmod ? { ...item, lastmod } : item;
+			},
 		}),
 	],
 
