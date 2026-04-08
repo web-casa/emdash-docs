@@ -62,8 +62,12 @@ const renderedHeadEntries = head
 		(entry) =>
 			!(
 				entry.tag === "link" &&
-				entry.attrs?.rel === "shortcut icon" &&
-				entry.attrs?.href === "/favicon.svg"
+				(
+					(entry.attrs?.rel === "shortcut icon" &&
+						entry.attrs?.href === "/favicon.svg") ||
+					(entry.attrs?.rel === "sitemap" &&
+						entry.attrs?.href === "/sitemap-index.xml")
+				)
 			),
 	)
 	.map((entry) => {
@@ -119,6 +123,7 @@ const websiteJsonLd =
 <meta name="apple-mobile-web-app-title" content="HiEmdash" />
 {!hasNamedMeta("theme-color") && <meta name="theme-color" content="#ea7a1f" />}
 <link rel="manifest" href="/site.webmanifest" />
+<link rel="sitemap" href="/sitemap.xml" />
 {!hasAlternate("x-default") && (
 	<link rel="alternate" hreflang="x-default" href={defaultPageUrl.toString()} />
 )}

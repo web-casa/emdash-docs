@@ -109,6 +109,19 @@ export function getLocalePath(locale) {
 	return getLocaleOption(locale).path;
 }
 
+export function getRootLocaleAliasTarget(pathname) {
+	if (pathname === "/en" || pathname === "/en/") {
+		return "/";
+	}
+
+	if (pathname.startsWith("/en/")) {
+		const target = pathname.slice(3);
+		return target.startsWith("/") ? target : `/${target}`;
+	}
+
+	return null;
+}
+
 export function getLocaleLang(locale) {
 	return getLocaleOption(locale).lang;
 }

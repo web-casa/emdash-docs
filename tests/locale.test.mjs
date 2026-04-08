@@ -6,6 +6,7 @@ import {
 	detectPreferredLocale,
 	detectPreferredLocaleFromLanguages,
 	getLocalePath,
+	getRootLocaleAliasTarget,
 	localeFromPath,
 	resolvePreferredLocale,
 } from "../src/lib/locale.js";
@@ -61,4 +62,12 @@ test("detectPreferredLocaleFromLanguages matches browser language arrays", () =>
 		detectPreferredLocaleFromLanguages(["ja-JP", "en-US"]),
 		"ja",
 	);
+});
+
+test("getRootLocaleAliasTarget maps /en aliases back to the root locale", () => {
+	assert.equal(getRootLocaleAliasTarget("/en"), "/");
+	assert.equal(getRootLocaleAliasTarget("/en/"), "/");
+	assert.equal(getRootLocaleAliasTarget("/en/getting-started/"), "/getting-started/");
+	assert.equal(getRootLocaleAliasTarget("/zh-cn/"), null);
+	assert.equal(getRootLocaleAliasTarget("/"), null);
 });

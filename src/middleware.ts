@@ -3,6 +3,7 @@ import {
 	COOKIE_MAX_AGE,
 	LOCALE_COOKIE,
 	getLocalePath,
+	getRootLocaleAliasTarget,
 	localeFromPath,
 	resolvePreferredLocale,
 } from "./lib/locale.js";
@@ -13,6 +14,20 @@ function isDocumentPath(pathname: string) {
 
 export const onRequest = defineMiddleware(async (context, next) => {
 	const { pathname } = context.url;
+	const rootLocaleAliasTarget = getRootLocaleAliasTarget(pathname);
+
+	if (rootLocaleAliasTarget) {
+		const redirectUrl = new URL(rootLocaleAliasTarget, context.url);
+		redirectUrl.search = context.url.search;
+		const response = context.redirect(redirectUrl.toString(), 301);
+		context.cookies.set(LOCALE_COOKIE, "root", {
+			path: "/",
+			maxAge: COOKIE_MAX_AGE,
+			sameSite: "lax",
+			httpOnly: false,
+		});
+		return response;
+	}
 
 	if (pathname === "/") {
 		const preferredLocale = resolvePreferredLocale({
