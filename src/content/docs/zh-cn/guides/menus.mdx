@@ -1,0 +1,280 @@
+---
+title: 导航菜单
+description: 为页眉、页脚和侧边栏创建和管理导航菜单。
+---
+
+import { Aside, Steps, Tabs, TabItem, Code } from "@astrojs/starlight/components";
+
+EmDash 菜单是通过管理界面管理的链接有序列表。菜单支持嵌套以创建下拉菜单，并且可以链接到页面、文章、分类法术语或外部 URL。
+
+## 查询菜单
+
+使用 `getMenu()` 通过其唯一名称获取菜单：
+
+```astro title="src/layouts/Base.astro"
+---
+import { getMenu } from "emdash";
+
+const primaryMenu = await getMenu("primary");
+---
+
+{primaryMenu && (
+  <nav>
+    <ul>
+      {primaryMenu.items.map(item => (
+        <li>
+          <a href={item.url}>{item.label}</a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+如果不存在具有该名称的菜单，该函数将返回 `null`。
+
+## 菜单结构
+
+菜单包含元数据和项目数组：
+
+```ts
+interface Menu {
+	id: string;
+	name: string; // Unique identifier ("primary", "footer")
+	label: string; // Display name ("Primary Navigation")
+	items: MenuItem[];
+}
+
+interface MenuItem {
+	id: string;
+	label: string;
+	url: string; // Resolved URL
+	target?: string; // "_blank" for new window
+	titleAttr?: string; // HTML title attribute
+	cssClasses?: string; // Custom CSS classes
+	children: MenuItem[]; // Nested items for dropdowns
+}
+```
+
+URL 会根据项目类型自动解析：
+
+- **页面/文章项目** 解析为 `/{collection}/{slug}`
+- **分类法项目** 解析为 `/{taxonomy}/{slug}`
+- **集合项目** 解析为 `/{collection}/`
+- **自定义链接** 直接使用提供的 URL
+
+## 渲染嵌套菜单
+
+菜单项目可以包含子项目以实现下拉导航。通过递归渲染 `children` 数组来处理嵌套：
+
+```astro title="src/components/Navigation.astro"
+---
+import { getMenu } from "emdash";
+import type { MenuItem } from "emdash";
+
+interface Props {
+  name: string;
+}
+
+const menu = await getMenu(Astro.props.name);
+---
+
+{menu && (
+  <nav class="nav">
+    <ul class="nav-list">
+      {menu.items.map(item => (
+        <li class:list={["nav-item", item.cssClasses]}>
+          <a
+            href={item.url}
+            target={item.target}
+            title={item.titleAttr}
+            aria-current={Astro.url.pathname === item.url ? "page" : undefined}
+          >
+            {item.label}
+          </a>
+          {item.children.length > 0 && (
+            <ul class="submenu">
+              {item.children.map(child => (
+                <li>
+                  <a href={child.url} target={child.target}>
+                    {child.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+<Aside>
+	使用 `aria-current="page"` 来指示导航中的当前页面。屏幕阅读器会播报此信息，并且 `[aria-current="page"]` CSS 选择器可用于设置活动链接的样式。
+</Aside>
+
+## 菜单项目类型
+
+管理界面支持五种类型的菜单项目：
+
+| 类型         | 描述                       | URL 解析                |
+| ------------ | -------------------------- | ----------------------- |
+| `page`       | 链接到页面                 | `/{collection}/{slug}` |
+| `post`       | 链接到文章                 | `/{collection}/{slug}` |
+| `taxonomy`   | 链接到分类或标签           | `/{taxonomy}/{slug}`   |
+| `collection` | 链接到集合归档页面         | `/{collection}/`       |
+| `custom`     | 外部或自定义 URL           | 直接使用                |
+
+## 列出所有菜单
+
+使用 `getMenus()` 检索所有菜单定义（不包含项目）：
+
+```ts
+import { getMenus } from "emdash";
+
+const menus = await getMenus();
+// Returns: [{ id, name, label }, ...]
+```
+
+这主要用于管理界面或调试。
+
+## 创建菜单
+
+通过 `/_emdash/admin/menus` 的管理界面创建菜单，或使用管理 API：
+
+```http
+POST /_emdash/api/menus
+Content-Type: application/json
+
+{
+  "name": "footer",
+  "label": "Footer Navigation"
+}
+```
+
+向菜单添加项目：
+
+```http
+POST /_emdash/api/menus/footer/items
+Content-Type: application/json
+
+{
+  "type": "page",
+  "referenceCollection": "pages",
+  "referenceId": "page_privacy",
+  "label": "Privacy Policy"
+}
+```
+
+添加自定义外部链接：
+
+```http
+POST /_emdash/api/menus/footer/items
+Content-Type: application/json
+
+{
+  "type": "custom",
+  "customUrl": "https://github.com/example",
+  "label": "GitHub",
+  "target": "_blank"
+}
+```
+
+## 重新排序和嵌套
+
+使用重新排序端点更新项目顺序和父子关系：
+
+```http
+POST /_emdash/api/menus/primary/reorder
+Content-Type: application/json
+
+{
+  "items": [
+    { "id": "item_1", "parentId": null, "sortOrder": 0 },
+    { "id": "item_2", "parentId": null, "sortOrder": 1 },
+    { "id": "item_3", "parentId": "item_2", "sortOrder": 0 }
+  ]
+}
+```
+
+这将使 `item_3` 成为 `item_2` 的子项，从而创建一个下拉菜单。
+
+## 完整示例
+
+以下示例展示了一个带有主导航的响应式页眉：
+
+```astro title="src/layouts/Base.astro"
+---
+import { getMenu, getSiteSettings } from "emdash";
+
+const settings = await getSiteSettings();
+const primaryMenu = await getMenu("primary");
+---
+
+<html lang="en">
+  <head>
+    <title>{settings.title}</title>
+  </head>
+  <body>
+    <header class="header">
+      <a href="/" class="logo">
+        {settings.logo ? (
+          <img src={settings.logo.url} alt={settings.logo.alt || settings.title} />
+        ) : (
+          settings.title
+        )}
+      </a>
+
+      {primaryMenu && (
+        <nav class="main-nav" aria-label="Main navigation">
+          <ul>
+            {primaryMenu.items.map(item => (
+              <li class:list={[item.cssClasses, { "has-children": item.children.length > 0 }]}>
+                <a
+                  href={item.url}
+                  target={item.target}
+                  aria-current={Astro.url.pathname === item.url ? "page" : undefined}
+                >
+                  {item.label}
+                </a>
+                {item.children.length > 0 && (
+                  <ul class="dropdown">
+                    {item.children.map(child => (
+                      <li>
+                        <a href={child.url} target={child.target}>{child.label}</a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+    </header>
+
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>
+```
+
+## API 参考
+
+### `getMenu(name)`
+
+按名称获取菜单，包含所有项目和已解析的 URL。
+
+**参数：**
+
+- `name` — 菜单的唯一标识符（字符串）
+
+**返回：** `Promise<Menu | null>`
+
+### `getMenus()`
+
+列出所有菜单定义（不包含项目）。
+
+**返回：** `Promise<Array<{ id: string; name: string; label: string }>>`

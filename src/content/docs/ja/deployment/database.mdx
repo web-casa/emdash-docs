@@ -1,0 +1,321 @@
+---
+title: データベースオプション
+description: EmDashをD1、PostgreSQL、libSQL、またはSQLiteで設定します。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDashは複数のデータベースバックエンドをサポートしています。デプロイ先に基づいて選択してください。
+
+## 概要
+
+| データベース       | 最適な用途           | デプロイ先                 |
+| -------------- | ------------------ | -------------------------- |
+| **D1**         | Cloudflare Workers | エッジ、グローバル分散型 |
+| **PostgreSQL** | 本番環境用Node.js | PostgreSQLが利用可能な任意のプラットフォーム |
+| **libSQL**     | リモートデータベース   | エッジまたはNode.js            |
+| **SQLite**     | Node.js、ローカル開発 | 単一サーバー              |
+
+## Cloudflare D1
+
+D1はCloudflareのサーバーレスSQLiteデータベースです。Cloudflare Workersにデプロイする際に使用します。
+
+```js title="astro.config.mjs"
+import { d1 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: d1({ binding: "DB" }),
+		}),
+	],
+});
+```
+
+### 設定
+
+| オプション           | タイプ     | デフォルト              | 説明                           |
+| ---------------- | -------- | -------------------- | ------------------------------------- |
+| `binding`        | `string` | —                    | `wrangler.jsonc`からのD1バインディング名 |
+| `session`        | `string` | `"disabled"`         | 読み取りレプリケーションモード（下記参照）     |
+| `bookmarkCookie` | `string` | `"__ec_d1_bookmark"` | セッションブックマーク用のクッキー名     |
+
+### セットアップ
+
+<Tabs>
+  <TabItem label="wrangler.jsonc">
+    ```jsonc
+    {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "emdash-db",
+          "database_id": "your-database-id"
+        }
+      ]
+    }
+    ```
+  </TabItem>
+  <TabItem label="wrangler.toml">
+    ```toml
+    [[d1_databases]]
+    binding = "DB"
+    database_name = "emdash-db"
+    database_id = "your-database-id"
+    ```
+  </TabItem>
+</Tabs>
+
+<Aside type="caution">
+	D1はランタイムでのDDLステートメントを許可しません。デプロイ前にWrangler CLI経由でマイグレーションを実行してください:
+	```bash wrangler d1 migrations apply emdash-db ```
+</Aside>
+
+### D1データベースの作成
+
+```bash
+wrangler d1 create emdash-db
+```
+
+### 読み取りレプリカ
+
+D1は[読み取りレプリケーション](https://developers.cloudflare.com/d1/configuration/read-replication/)をサポートしており、グローバル分散型サイトの読み取り遅延を低減できます。有効にすると、読み取りクエリは常にプライマリデータベースにアクセスする代わりに、近くのレプリカにルーティングされます。
+
+EmDashはこれを透過的に管理するためにD1 Sessions APIを使用します。`session`オプションで有効にできます:
+
+```
+js title="astro.config.mjs"
+import { d1 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: d1({
+				binding: "DB",
+				session: "auto",
+			}),
+		}),
+	],
+});
+```
+
+#### セッションモード
+
+| モード             | 動作                                                                                           |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
+| `"disabled"`     | セッションなし。すべてのクエリはプライマリに送られます。デフォルト。                                                   |
+| `"auto"`         | 匿名リクエストは最も近いレプリカから読み取ります。認証済みユーザーはブックマーククッキーを介してread-your-writes整合性を取得します。 |
+| `"primary-first"`| `"auto"`と同様ですが、最初のクエリは常にプライマリに送られます。書き込み頻度の非常に高いサイトに使用します。 |
+
+#### 仕組み
+
+- **匿名訪問者**には`first-unconstrained`が適用され、読み取りは最も近いレプリカに送られて最低遅延を実現します。匿名ユーザーは書き込みを行わないため、整合性保証は必要ありません。
+- **認証済みユーザー**（編集者、著者）にはブックマークベースのセッションが適用されます。書き込み後、ブックマーククッキーにより次のリクエストで少なくともその状態が反映されます。
+- **書き込みリクエスト**（`POST`、`PUT`、`DELETE`）は常にプライマリデータベースから開始されます。
+- **ビルド時クエリ**（Astroコンテンツコレクション）はセッションを完全にバイパスし、プライマリを直接使用します。
+
+<Aside type="tip">
+	読み取りレプリケーションは、CloudflareダッシュボードまたはREST API経由でD1データベース自体でも有効にする必要があります。`session`オプションはEmDashのクライアント側セッション管理のみを制御します。
+</Aside>
+
+<Aside>
+	匿名訪問者は数秒古いデータを表示する可能性があります。CMSではこれは想定内です — コンテンツ変更はリアルタイムではなく、ルートキャッシュが有効な場合、応答は定義上すでに古い状態です。
+</Aside>
+
+## libSQL
+
+libSQLはリモート接続をサポートするSQLiteのフォークです。Cloudflare D1なしでリモートデータベースが必要な場合に使用します。
+
+```
+js title="astro.config.mjs"
+import { libsql } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: libsql({
+				url: process.env.LIBSQL_DATABASE_URL,
+				authToken: process.env.LIBSQL_AUTH_TOKEN,
+			}),
+		}),
+	],
+});
+```
+
+### 設定
+
+| オプション      | タイプ     | 説明                                          |
+| ----------- | -------- | ---------------------------------------------------- |
+| `url`       | `string` | データベースURL（`libsql://...` または `file:...`）          |
+| `authToken` | `string` | リモートデータベース用の認証トークン（ローカルではオプション） |
+
+### ローカル開発
+
+開発中はローカルのlibSQLファイルを使用します:
+
+```js
+database: libsql({ url: "file:./data.db" });
+```
+
+## PostgreSQL
+
+PostgreSQLは、本格的なリレーショナルデータベースを必要とするNode.jsデプロイメントでサポートされています。
+
+```
+js title="astro.config.mjs"
+import { postgres } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: postgres({
+				connectionString: process.env.DATABASE_URL,
+			}),
+		}),
+	],
+});
+```
+
+### 設定
+
+接続文字列または個別のパラメータで接続できます:
+
+```js
+// Connection string
+database: postgres({
+	connectionString: "postgres://user:password@localhost:5432/emdash",
+});
+
+// 個別パラメータ
+database: postgres({
+	host: "localhost",
+	port: 5432,
+	database: "emdash",
+	user: "emdash",
+	password: process.env.DB_PASSWORD,
+	ssl: true,
+});
+```
+
+| オプション             | タイプ      | 説明                          |
+| ------------------ | --------- | ------------------------------------ |
+| `connectionString` | `string`  | PostgreSQL接続URL            |
+| `host`             | `string`  | データベースホスト                        |
+| `port`             | `number`  | データベースポート                        |
+| `database`         | `string`  | データベース名                        |
+| `user`             | `string`  | データベースユーザー                        |
+| `password`         | `string`  | データベースパスワード                    |
+| `ssl`              | `boolean` | SSLを有効化                           |
+| `pool.min`         | `number`  | 最小プール接続数（デフォルト0） |
+| `pool.max`         | `number`  | 最大プール接続数（デフォルト10）|
+
+### コネクションプーリング
+
+アダプターは内部で`pg.Pool`を使用しています。デプロイメントに基づいてプールサイズを調整してください:
+
+```js
+database: postgres({
+	connectionString: process.env.DATABASE_URL,
+	pool: { min: 2, max: 20 },
+});
+```
+
+<Aside>
+	PostgreSQLには`pg`パッケージが必要です。依存関係としてインストールしてください:
+	```bash
+	pnpm add pg
+	```
+</Aside>
+
+## SQLite
+
+better-sqlite3を使用したSQLiteは、Node.jsデプロイメントで最もシンプルなオプションです。
+
+```
+js title="astro.config.mjs"
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+		}),
+	],
+});
+```
+
+### 設定
+
+| オプション | タイプ     | 説明                   |
+| ------ | -------- | ----------------------------- |
+| `url`  | `string` | `file:`プレフィックス付きのファイルパス |
+
+### ファイルパス
+
+`url`は`file:`で始める必要があります:
+
+```js
+// Relative path
+database: sqlite({ url: "file:./data/emdash.db" });
+
+// 絶対パス
+database: sqlite({ url: "file:/var/data/emdash.db" });
+
+// 環境変数から
+database: sqlite({ url: `file:${process.env.DATABASE_PATH}` });
+```
+
+<Aside>
+	SQLiteは永続的なファイルシステムを必要とします。一時的なストレージを持つプラットフォームでは、追加の設定なしでは動作しません。
+</Aside>
+
+## マイグレーション
+
+EmDashはSQLite、libSQL、PostgreSQLのマイグレーションを自動的に処理します。D1の場合、Wrangler経由でマイグレーションを実行してください。
+
+### マイグレーションの状態を確認
+
+```bash
+npx emdash init --database ./data.db
+```
+
+このコマンドは:
+
+1. 必要に応じてデータベースファイルを作成します
+2. 保留中のマイグレーションを実行します
+3. 現在のマイグレーション状態を報告します
+
+### マイグレーションファイル
+
+マイグレーションはEmDashにバンドルされています。手動で実行するには:
+
+```bash
+# SQLite/libSQL - migrations run automatically
+
+# D1 - wrangler経由で実行
+wrangler d1 migrations apply DB
+```
+
+## 環境ベースの設定
+
+環境ごとに異なるデータベースを使用:
+
+```
+js title="astro.config.mjs"
+import { sqlite, libsql, postgres } from "emdash/db";
+import { d1 } from "@emdash-cms/cloudflare";
+
+const database = import.meta.env.PROD ? d1({ binding: "DB" }) : sqlite({ url: "file:./data.db" });
+
+export default defineConfig({
+	integrations: [emdash({ database })],
+});
+```
+
+または、環境変数に基づいて切り替え:
+
+```js
+const database = process.env.DATABASE_URL
+	? postgres({ connectionString: process.env.DATABASE_URL })
+	: sqlite({ url: "file:./data.db" });
+```

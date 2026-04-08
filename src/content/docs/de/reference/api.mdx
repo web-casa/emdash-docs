@@ -1,0 +1,493 @@
+---
+title: JavaScript-API-Referenz
+description: Programmgesteuerte API zum Abfragen und Verwalten von EmDash-Inhalten.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash exportiert Funktionen zum Abfragen von Inhalten, Verwalten von Medien und Arbeiten mit der Datenbank.
+
+## Inhaltsabfragen
+
+Die Abfragefunktionen von EmDash folgen Astros [Live-Content-Sammlungen](https://docs.astro.build/en/reference/experimental-flags/live-content-collections/)-Muster und geben `{ entries, error }` oder `{ entry, error }` für eine elegante Fehlerbehandlung zurück.
+
+### `getEmDashCollection()`
+
+Gibt alle Einträge einer Sammlung zurück.
+
+```ts
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts, error } = await getEmDashCollection("posts");
+
+if (error) {
+	console.error("Beiträge konnten nicht geladen werden:", error);
+}
+```
+
+#### Parameter
+
+| Parameter    | Typ                | Beschreibung            |
+| ------------ | ------------------ | ----------------------- |
+| `collection` | `string`           | Sammlungs-Slug          |
+| `options`    | `CollectionFilter` | Optionale Filteroptionen |
+
+#### Optionen
+
+```ts
+interface CollectionFilter {
+	status?: "draft" | "published" | "archived";
+	limit?: number;
+	where?: Record<string, string | string[]>; // Filtert nach Feld oder Taxonomie
+}
+```
+
+#### Rückgabewerte
+
+```ts
+interface CollectionResult<T> {
+		entries: ContentEntry<T>[]; // Leeres Array bei Fehler oder wenn nichts gefunden wird
+		error?: Error; // Wird gesetzt, wenn die Abfrage fehlschlägt
+}
+```
+
+#### Beispiele
+
+```ts
+// Alle veröffentlichten Beiträge laden
+const { entries: posts } = await getEmDashCollection("posts", {
+	status: "published",
+});
+
+// Hole die neuesten 5 Beiträge
+const { entries: latest } = await getEmDashCollection("posts", {
+	limit: 5,
+	status: "published",
+});
+
+// Filtere nach Taxonomie
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: "news" },
+});
+
+// Behandle Fehler
+const { entries, error } = await getEmDashCollection("posts");
+if (error) {
+		return new Response("Serverfehler", { status: 500 });
+}
+```
+
+### `getEmDashEntry()`
+
+Hole einen einzelnen Eintrag anhand von Slug oder ID.
+
+```ts
+import { getEmDashEntry } from "emdash";
+
+const { entry: post, error } = await getEmDashEntry("posts", "my-post-slug");
+
+if (!post) {
+	return Astro.redirect("/404");
+}
+```
+
+#### Parameter
+
+| Parameter    | Typ     | Beschreibung       |
+| ------------ | -------- | ------------------ |
+| `collection` | `string` | Sammlungs-Slug     |
+| `slugOrId`   | `string` | Eintrags-Slug oder ID |
+
+Der Vorschaumodus wird automatisch behandelt – die Middleware erkennt `_preview`-Tokens und stellt Entwurfsinhalte über `AsyncLocalStorage` bereit. Ein Options-Parameter ist nicht erforderlich.
+
+#### Rückgabewerte
+
+```ts
+interface EntryResult<T> {
+	entry: ContentEntry<T> | null; // null, wenn nichts gefunden wurde
+	error?: Error; // Nur bei echten Fehlern gesetzt, nicht bei "nicht gefunden"
+	isPreview: boolean; // true, wenn Entwurfsinhalt ausgeliefert wird
+}
+```
+
+#### Beispiele
+
+```ts
+// Per Slug laden
+const { entry: post } = await getEmDashEntry("posts", "hello-world");
+
+// Hole per ID
+const { entry: post } = await getEmDashEntry("posts", "01HXK5MZSN0FVXT2Q3KPRT9M7D");
+
+// Vorschau ist automatisch – isPreview ist true, wenn ein gültiges _preview-Token vorhanden ist
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+// Behandle Fehler vs. nicht gefunden
+if (error) {
+		return new Response("Serverfehler", { status: 500 });
+}
+if (!entry) {
+	return Astro.redirect("/404");
+}
+```
+
+## Inhaltstypen
+
+### `ContentEntry`
+
+Der von Abfragefunktionen zurückgegebene Eintrag:
+
+```ts
+interface ContentEntry<T = Record<string, unknown>> {
+	id: string;
+	data: T;
+	edit: EditProxy; // Annotationen für die visuelle Bearbeitung
+}
+```
+
+Der `edit`-Proxy stellt Anmerkungen für die visuelle Bearbeitung bereit. Verteile ihn auf Elemente, um Inline-Bearbeitung zu ermöglichen: `{...entry.edit.title}`. In der Produktion erzeugt dies keine Ausgabe.
+
+Das `data`-Objekt enthält alle Inhaltsfelder plus Systemfelder:
+
+- `id` - Eindeutiger Bezeichner
+- `slug` - URL-freundlicher Bezeichner
+- `status` - "draft" | "published" | "archived"
+- `createdAt` - ISO-Zeitstempel
+- `updatedAt` - ISO-Zeitstempel
+- `publishedAt` - ISO-Zeitstempel oder null
+- Plus alle benutzerdefinierten Felder, die in Ihrem Sammlungsschema definiert sind
+
+## Datenbankfunktionen
+
+### `createDatabase()`
+
+Erstelle eine Datenbankverbindung.
+
+```ts
+import { createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+```
+
+<Aside type="caution">
+	Direkter Datenbankzugriff ist für fortgeschrittene Anwendungsfälle. Bevorzugen Sie die Abfragefunktionen für den Inhaltszugriff.
+</Aside>
+
+### `runMigrations()`
+
+Führe ausstehende Datenbankmigrationen aus.
+
+```ts
+import { createDatabase, runMigrations } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const { applied } = await runMigrations(db);
+console.log(`${applied.length} Migrationen angewendet`);
+```
+
+### `getMigrationStatus()`
+
+Überprüfe den Migrationsstatus.
+
+```ts
+import { createDatabase, getMigrationStatus } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const status = await getMigrationStatus(db);
+// { applied: ["0001_core", ...], pending: [] }
+```
+
+## Repositories
+
+Niedrigstufiger Datenzugriff über Repositories.
+
+### `ContentRepository`
+
+```ts
+import { ContentRepository, createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const repo = new ContentRepository(db);
+
+// Mehrere laden
+const { items, nextCursor } = await repo.findMany("posts", {
+	limit: 10,
+	where: { status: "published" },
+});
+
+// Per ID laden
+const post = await repo.findById("posts", "01HXK5MZSN...");
+
+// Erstelle
+const newPost = await repo.create({
+	type: "posts",
+	slug: "new-post",
+		data: { title: "Neuer Beitrag", content: [] },
+	status: "draft",
+});
+
+// Aktualisiere
+const updated = await repo.update("posts", "01HXK5MZSN...", {
+		data: { title: "Aktualisierter Titel" },
+});
+
+// Lösche
+await repo.delete("posts", "01HXK5MZSN...");
+```
+
+### `MediaRepository`
+
+```ts
+import { MediaRepository, createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const repo = new MediaRepository(db);
+
+// Medien auflisten
+const { items } = await repo.findMany({ limit: 20 });
+
+// Hole per ID
+const media = await repo.findById("01HXK5MZSN...");
+
+// Erstelle (nach Upload)
+const newMedia = await repo.create({
+	filename: "photo.jpg",
+	mimeType: "image/jpeg",
+	size: 12345,
+	storageKey: "uploads/photo.jpg",
+});
+```
+
+## Schema-Registry
+
+Programmatische Schemaverwaltung.
+
+```ts
+import { SchemaRegistry, createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const registry = new SchemaRegistry(db);
+
+// Liste Sammlungen auf
+const collections = await registry.listCollections();
+
+// Hole Sammlung mit Feldern
+const postsSchema = await registry.getCollectionWithFields("posts");
+
+// Erstelle Sammlung
+await registry.createCollection({
+	slug: "products",
+	label: "Produkte",
+	labelSingular: "Produkt",
+	supports: ["drafts", "revisions"],
+});
+
+// Füge Feld hinzu
+await registry.createField("products", {
+	slug: "price",
+	label: "Preis",
+	type: "number",
+	required: true,
+});
+```
+
+## Vorschausystem
+
+### `generatePreviewToken()`
+
+Generiere ein Vorschau-Token für Entwurfsinhalte.
+
+```ts
+import { generatePreviewToken } from "emdash";
+
+const token = await generatePreviewToken({
+	contentId: "posts:01HXK5MZSN...",
+	secret: process.env.EMDASH_ADMIN_SECRET,
+	expiresIn: 3600, // 1 Stunde
+});
+```
+
+### `verifyPreviewToken()`
+
+Überprüfe ein Vorschau-Token.
+
+```ts
+import { verifyPreviewToken } from "emdash";
+
+const result = await verifyPreviewToken({
+	token,
+	secret: process.env.EMDASH_ADMIN_SECRET,
+});
+
+if (result.valid) {
+	const { cid, exp, iat } = result.payload;
+	// cid hat das Format "collection:id", z.B. "posts:my-draft-post"
+}
+```
+
+### `isPreviewRequest()`
+
+Prüfe, ob eine Anfrage ein Vorschau-Token enthält.
+
+```ts
+import { isPreviewRequest, getPreviewToken } from "emdash";
+
+if (isPreviewRequest(Astro.request)) {
+	const token = getPreviewToken(Astro.request);
+	// Vorschau-Inhalt validieren und anzeigen
+}
+```
+
+## Inhaltskonverter
+
+Konvertiere zwischen Portable Text- und ProseMirror-Formaten.
+
+```ts
+import { prosemirrorToPortableText, portableTextToProsemirror } from "emdash";
+
+// Von ProseMirror (Editor) zu Portable Text (Speicher)
+const portableText = prosemirrorToPortableText(prosemirrorDoc);
+
+// Von Portable Text zu ProseMirror
+const prosemirrorDoc = portableTextToProsemirror(portableText);
+```
+
+## Website-Einstellungen
+
+```ts
+import { getSiteSettings, getSiteSetting } from "emdash";
+
+// Hole alle Einstellungen
+const settings = await getSiteSettings();
+
+// Hole einzelne Einstellung
+const title = await getSiteSetting("siteTitle");
+```
+
+Einstellungen sind über die Laufzeit-API schreibgeschützt. Verwenden Sie die Admin-API, um sie zu aktualisieren.
+
+## Menüs
+
+```ts
+import { getMenu, getMenus } from "emdash";
+
+// Hole alle Menüs
+const menus = await getMenus();
+
+// Hole spezifisches Menü mit Elementen
+const primaryMenu = await getMenu("primary");
+
+if (primaryMenu) {
+	primaryMenu.items.forEach(item => {
+		console.log(item.label, item.url);
+			// Verschachtelte Elemente für Dropdown-Menüs
+		item.children.forEach(child => console.log("  -", child.label));
+	});
+}
+```
+
+## Taxonomien
+
+```ts
+import { getTaxonomyTerms, getTerm, getEntryTerms, getEntriesByTerm } from "emdash";
+
+// Hole alle Begriffe für eine Taxonomie (Baumstruktur für hierarchische)
+const categories = await getTaxonomyTerms("category");
+
+// Einzelnen Begriff abrufen
+const news = await getTerm("category", "news");
+
+// Begriffe abrufen, die einem Inhalteintrag zugewiesen sind
+const postCategories = await getEntryTerms("posts", "post-123", "category");
+
+// Einträge mit einem bestimmten Begriff abrufen
+const newsPosts = await getEntriesByTerm("posts", "category", "news");
+```
+
+## Widget-Bereiche
+
+```ts
+import { getWidgetArea, getWidgetAreas } from "emdash";
+
+// Alle Widget-Bereiche abrufen
+const areas = await getWidgetAreas();
+
+// Bestimmten Widget-Bereich mit Widgets abrufen
+const sidebar = await getWidgetArea("sidebar");
+
+if (sidebar) {
+	sidebar.widgets.forEach(widget => {
+		console.log(widget.type, widget.title);
+	});
+}
+```
+
+## Abschnitte
+
+```ts
+import { getSection, getSections, getSectionCategories } from "emdash";
+
+// Alle Abschnitte abrufen
+const sections = await getSections();
+
+// Abschnitte filtern
+const heroes = await getSections({ category: "hero" });
+const themeSections = await getSections({ source: "theme" });
+const results = await getSections({ search: "newsletter" });
+
+// Einzelnen Abschnitt abrufen
+const cta = await getSection("newsletter-cta");
+
+// Kategorien abrufen
+const categories = await getSectionCategories();
+```
+
+## Suche
+
+```ts
+import { search, searchCollection } from "emdash";
+
+// Globale Suche über Sammlungen hinweg
+const results = await search("hello world", {
+	collections: ["posts", "pages"],
+	status: "published",
+	limit: 20,
+});
+
+// Ergebnisse enthalten Ausschnitte mit Hervorhebungen
+results.forEach(result => {
+	console.log(result.title);
+	console.log(result.snippet); // Contains <mark> tags
+	console.log(result.score);
+});
+
+// Sammlungsspezifische Suche
+const posts = await searchCollection("posts", "typescript", {
+	limit: 10,
+});
+```
+
+## Fehlerbehandlung
+
+EmDash exportiert Fehlerklassen zur Behandlung spezifischer Fehler:
+
+```ts
+import {
+  EmDashDatabaseError,
+  EmDashValidationError,
+  EmDashStorageError,
+  SchemaError,
+} from "emdash";
+
+try {
+  await repo.create({ ... });
+} catch (error) {
+  if (error instanceof EmDashValidationError) {
+    console.error("Validation failed:", error.message);
+  }
+  if (error instanceof SchemaError) {
+    console.error("Schema error:", error.code, error.details);
+  }
+}
+```

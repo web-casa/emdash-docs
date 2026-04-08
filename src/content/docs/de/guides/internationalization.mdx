@@ -1,0 +1,334 @@
+---
+title: Internationalisierung (i18n)
+description: Übersetzen Sie Inhalte in mehrere Sprachen mit veröffentlichung pro Sprache, slugs und automatischem Fallback.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash integriert sich in [Astros eingebaute i18n-Routing](https://docs.astro.build/en/guides/internationalization/), um mehrsprachige Inhaltsverwaltung bereitzustellen. Astro übernimmt URL-Routing und Lokalisierungserkennung; EmDash übernimmt die Speicherung und Abfrage übersetzter Inhalte.
+
+Jede Übersetzung ist ein vollständiger, unabhängiger Inhalteintrag mit eigener URL (Slug), Status und Revisionshistorie. Die französische Version eines Beitrags kann sich im Entwurfsstatus befinden, während die englische Version veröffentlicht ist.
+
+## Konfiguration
+
+Aktivieren Sie i18n, indem Sie einen `i18n`-Block zu Ihrer Astro-Konfiguration hinzufügen. EmDash liest diese Konfiguration automatisch – es ist keine separate Lokalisierungseinrichtung in EmDash erforderlich.
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	i18n: {
+		defaultLocale: "en",
+		locales: ["en", "fr", "es"],
+		fallback: { fr: "en", es: "en" },
+	},
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+Wenn `i18n` in der Astro-Konfiguration nicht vorhanden ist, sind alle i18n-Funktionen deaktiviert und EmDash verhält sich wie ein einsprachiges CMS.
+
+## Wie Übersetzungen funktionieren
+
+EmDash verwendet ein **Zeile-pro-Lokalisierung**-Modell. Jede Übersetzung ist eine eigene Zeile in der Datenbank mit eigener ID, eigenem Slug und eigenem Status, die über eine gemeinsame `translation_group`-Kennung mit anderen Übersetzungen verknüpft ist.
+
+```
+ec_posts:
+id       | slug        | locale | translation_group | status
+---------|-------------|--------|-------------------|----------
+01ABC... | my-post     | en     | 01ABC...          | published
+01DEF... | mon-article | fr     | 01ABC...          | draft
+01GHI... | mi-entrada  | es     | 01ABC...          | published
+```
+
+Dieses Design bedeutet:
+
+- **Lokalisierungsspezifische Slugs** – `/blog/my-post` und `/fr/blog/mon-article` funktionieren natürlich
+- **Lokalisierungsspezifische Veröffentlichung** – Veröffentlichen Sie die englische Version, während die französische im Entwurf bleibt
+- **Lokalisierungsspezifische Revisionen** – jede Übersetzung hat ihre eigene Revisionshistorie
+- **Keine komplexen abfrageübergreifenden Lokalisierungen** – Listenabfragen geben Einträge nur für eine Lokalisierung zurück
+
+## Abfragen übersetzter Inhalte
+
+### Einzelner Eintrag
+
+Übergeben Sie `locale` an `getEmDashEntry`, um eine bestimmte Übersetzung abzurufen. Wenn es weggelassen wird, wird standardmäßig die aktuelle Lokalisierung der Anfrage (gesetzt durch Astros i18n-Middleware) verwendet.
+
+```
+astro title="src/pages/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug, {
+  locale: Astro.currentLocale,
+});
+
+if (!post) return Astro.redirect("/404");
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+</article>
+```
+
+### Fallback-Kette
+
+Wenn kein Inhalt für die angeforderte Lokalisierung existiert, folgt EmDash der in Ihrer Astro-Konfiguration definierten Fallback-Kette. Bei `fallback: { fr: "en" }`:
+
+1. Versuche die angeforderte Lokalisierung (`fr`)
+2. Versuche die Fallback-Lokalisierung (`en`)
+3. Versuche die Standardlokalisierung
+
+Fallback gilt nur für Einzeleintragsabfragen. Listenabfragen geben Einträge nur für die angeforderte Lokalisierung zurück – keine abfrageübergreifende Vermischung.
+
+<Aside>
+  Wenn ein Fallback verwendet wird, enthält die Antwortmetadaten `fallbackLocale`, damit Ihre Vorlage einen Hinweis wie "Dieser Inhalt ist noch nicht übersetzt" anzeigen kann.
+</Aside>
+
+### Auflistung einer Sammlung
+
+Filtern Sie eine Sammlung nach Lokalisierung:
+
+```
+astro title="src/pages/posts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  locale: Astro.currentLocale,
+  status: "published",
+});
+---
+
+<ul>
+  {posts.map((post) => (
+    <li><a href={`/${post.data.slug}`}>{post.data.title}</a>
+</li>
+  ))}
+</ul>
+```
+
+## Sprachumschalter
+
+Verwenden Sie `getTranslations`, um einen Sprachumschalter zu erstellen, der zu vorhandenen Übersetzungen des aktuellen Eintrags verlinkt:
+
+```
+astro title="src/components/LanguageSwitcher.astro"
+---
+import { getTranslations } from "emdash";
+import { getRelativeLocaleUrl } from "astro:i18n";
+
+interface Props {
+  collection: string;
+  entryId: string;
+}
+
+const { collection, entryId } = Astro.props;
+const { translations } = await getTranslations(collection, entryId);
+---
+
+<nav aria-label="Language">
+  <ul>
+    {translations.map((t) => (
+      <li>
+        <a
+          href={getRelativeLocaleUrl(t.locale, `/blog/${t.slug}`)}
+          aria-current={t.locale === Astro.currentLocale ? "page" : undefined}
+        >
+          {t.locale.toUpperCase()}
+        </a>
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+
+Die Funktion `getTranslations` gibt alle Lokalisierungsvarianten in derselben Übersetzungsgruppe zurück:
+
+```ts
+const { translationGroup, translations } = await getTranslations("posts", post.entry.id);
+// translations: [
+//   { locale: "en", id: "01ABC...", slug: "my-post", status: "published" },
+//   { locale: "fr", id: "01DEF...", slug: "mon-article", status: "draft" },
+// ]
+```
+
+<Aside type="tip">
+  Verwenden Sie `getRelativeLocaleUrl` aus `astro:i18n`, um lokalisierungspräfixierte URLs zu erstellen. Dies respektiert Ihre Astro-Routing-Strategie (`prefix-other-locales` oder `prefix-always`).
+</Aside>
+
+## Übersetzungen im Admin verwalten
+
+### Inhaltsliste
+
+Wenn i18n aktiviert ist, zeigt die Inhaltsliste:
+
+- Eine **Lokalisierungsspalte**, die die Lokalisierung jedes Eintrags anzeigt
+- Einen **Lokalisierungsfilter** in der Werkzeugleiste, um zwischen Lokalisierungen zu wechseln
+
+### Übersetzungen erstellen
+
+Öffnen Sie einen beliebigen Inhalteintrag im Editor. Die Seitenleiste zeigt ein **Übersetzungen**-Panel an, das alle konfigurierten Lokalisierungen auflistet. Für jede Lokalisierung:
+
+- **"Übersetzen"** erscheint für Lokalisierungen ohne Übersetzung – klicken Sie, um eine zu erstellen
+- **"Bearbeiten"** erscheint für Lokalisierungen mit einer vorhandenen Übersetzung – klicken Sie, um zu dieser zu navigieren
+- Die aktuelle Lokalisierung ist mit einem Häkchen markiert
+
+Beim Erstellen einer Übersetzung wird der neue Eintrag mit Daten aus der Quelllokalisierung vorausgefüllt und erhält einen Standardslug von `{source-slug}-{locale}`. Passen Sie den Slug und den Inhalt nach Bedarf an und speichern Sie dann.
+
+### Lokalisierungsspezifische Veröffentlichung
+
+Jede Übersetzung hat ihren eigenen Status. Veröffentlichen Sie, machen Sie unveröffentlicht oder planen Sie Übersetzungen unabhängig voneinander. Die französische Version kann sich im Entwurf befinden, während die englische Version live ist.
+
+## Inhalts-API
+
+### Lokalisierungsparameter
+
+Alle Inhalts-API-Routen akzeptieren einen optionalen `locale`-Abfrageparameter:
+
+```http
+GET /_emdash/api/content/posts?locale=fr
+GET /_emdash/api/content/posts/my-post?locale=fr
+```
+
+Wenn er weggelassen wird, wird standardmäßig die konfigurierte Standardlokalisierung verwendet.
+
+### Übersetzungen über die API erstellen
+
+Erstellen Sie eine Übersetzung, indem Sie `locale` und `translationOf` an den Inhaltserstellungs-Endpunkt übergeben:
+
+```http
+POST /_emdash/api/content/posts
+Content-Type: application/json
+
+{
+  "locale": "fr",
+  "translationOf": "01ABC...",
+  "data": {
+    "title": "Mon Article",
+    "slug": "mon-article"
+  }
+}
+```
+
+Der neue Eintrag teilt sich die `translation_group` des Quelleintrags und startet als Entwurf.
+
+### Übersetzungen auflisten
+
+Rufen Sie alle Übersetzungen für einen bestimmten Eintrag ab:
+
+```http
+GET /_emdash/api/content/posts/01ABC.../translations
+```
+
+Gibt die Übersetzungsgruppen-ID und ein Array von Lokalisierungsvarianten mit ihren IDs, Slugs und Status zurück.
+
+## CLI
+
+Die CLI unterstützt `--locale`-Flags bei Inhaltsbefehlen:
+
+```bash
+# List French posts
+emdash content list posts --locale fr
+
+# Einen bestimmten Eintrag auf Französisch abrufen
+emdash content get posts my-post --locale fr
+
+# Eine französische Übersetzung eines vorhandenen Eintrags erstellen
+emdash content create posts --locale fr --translation-of 01ABC...
+```
+
+## Mehrsprachige Inhalte vorab füllen (Seeding)
+
+Seed-Dateien drücken Übersetzungen mit `locale` und `translationOf` aus:
+
+```
+json title=".emdash/seed.json"
+{
+  "content": {
+    "posts": [
+      {
+        "id": "welcome",
+        "slug": "welcome",
+        "locale": "en",
+        "status": "published",
+        "data": { "title": "Welcome" }
+      },
+      {
+        "id": "welcome-fr",
+        "slug": "bienvenue",
+        "locale": "fr",
+        "translationOf": "welcome",
+        "status": "draft",
+        "data": { "title": "Bienvenue" }
+      }
+    ]
+  }
+}
+```
+
+Der Quelllokalisierungseintrag muss vor seinen Übersetzungen in der Seed-Datei erscheinen, damit `translationOf`-Referenzen korrekt aufgelöst werden.
+
+## Übersetzbarkeit von Feldern
+
+Jedes Feld hat eine `translatable`-Einstellung (Standard: `true`). Beim Erstellen einer Übersetzung:
+
+- **Übersetzbare Felder** werden aus der Quelllokalisierung zur Bearbeitung vorausgefüllt
+- **Nicht übersetzbare Felder** werden kopiert und über alle Übersetzungen in der Gruppe synchron gehalten
+
+Systemfelder wie `status`, `published_at` und `author_id` sind immer lokalisierungsspezifisch und werden nie synchronisiert.
+
+<Aside>
+  Nicht übersetzbare Felder sind nützlich für Werte, die über alle Lokalisierungen hinweg konsistent bleiben sollten, wie z.B. eine Produkt-SKU oder eine Sortierreihenfolgennummer.
+</Aside>
+
+## URL-Strategie
+
+EmDash verwaltet keine Locale-URLs — Astro übernimmt das Routing. Gängige Muster:
+
+```
+# prefix-other-locales (Astro default)
+/blog/my-post          → en (default locale, no prefix)
+/fr/blog/mon-article   → fr
+
+# prefix-always
+/en/blog/my-post       → en
+/fr/blog/mon-article   → fr
+```
+
+Verwenden Sie `getRelativeLocaleUrl` aus `astro:i18n`, um korrekte URLs unabhängig vom Routing-Modus zu erstellen.
+
+## Mehrsprachige Inhalte importieren
+
+### WordPress mit WPML oder Polylang
+
+Die WordPress-Plugin-Importquelle erkennt WPML und Polylang automatisch. Bei Erkennung enthalten importierte Inhalte Locale- und Übersetzungsgruppen-Metadaten, wodurch die mehrsprachige Struktur erhalten bleibt.
+
+### WXR-Dateien
+
+WXR-Exporte enthalten keine WPML-/Polylang-Metadaten. Importieren Sie als einzelne Locale und erstellen Sie Übersetzungen manuell, oder verwenden Sie das Flag `--locale`, um allen importierten Elementen eine Locale zuzuweisen:
+
+```bash
+# Import a French WXR export
+emdash import wordpress export-fr.xml --execute --locale fr
+
+# An vorhandene englische Inhalte per Slug anpassen
+emdash import wordpress export-fr.xml --execute --locale fr --translation-of-locale en
+```
+
+## Nächste Schritte
+
+- [Inhalte abfragen](/de/guides/querying-content/) — Vollständige Query-API-Referenz
+- [Mit Inhalten arbeiten](/de/guides/working-with-content/) — Inhaltsverwaltung im Admin
+- [Astro i18n Routing](https://docs.astro.build/en/guides/internationalization/) — Astros Routing-Konfiguration

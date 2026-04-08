@@ -1,0 +1,244 @@
+---
+title: ストレージオプション
+description: R2、S3、またはローカルファイルシステムでメディアストレージを設定します。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDashはアップロードされたメディア（画像、ドキュメント、動画）を設定可能なストレージバックエンドに保存します。デプロイメントプラットフォームと要件に基づいて選択してください。
+
+## 概要
+
+| ストレージ        | 最適な用途           | 特徴                    |
+| -------------- | ------------------ | --------------------------- |
+| **R2 Binding** | Cloudflare Workers | 設定不要、高速           |
+| **S3**         | 任意のプラットフォーム       | 署名付きアップロード、CDNサポート |
+| **Local**      | 開発環境        | シンプルなファイルシステムストレージ   |
+
+## Cloudflare R2 (Binding)
+
+Cloudflare Workersにデプロイする場合は、R2バインディングを使用して最速の統合を実現します。
+
+```js title="astro.config.mjs"
+import emdash from "emdash/astro";
+import { r2 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			storage: r2({ binding: "MEDIA" }),
+		}),
+	],
+});
+```
+
+### 設定
+
+| オプション      | タイプ     | 説明                           |
+| ----------- | -------- | ------------------------------------- |
+| `binding`   | `string` | `wrangler.jsonc`からのR2バインディング名 |
+| `publicUrl` | `string` | バケットのオプションの公開URL    |
+
+### セットアップ
+
+Wrangler設定にR2バインディングを追加します：
+
+<Tabs>
+  <TabItem label="wrangler.jsonc">
+    ```jsonc
+    {
+      "r2_buckets": [
+        {
+          "binding": "MEDIA",
+          "bucket_name": "emdash-media"
+        }
+      ]
+    }
+    ```
+  </TabItem>
+  <TabItem label="wrangler.toml">
+    ```toml
+    [[r2_buckets]]
+    binding = "MEDIA"
+    bucket_name = "emdash-media"
+    ```
+  </TabItem>
+</Tabs>
+
+### 公開アクセス
+
+公開メディアURLの場合は、R2バケットで公開アクセスを有効にします：
+
+1. Cloudflareダッシュボード > R2 > 対象のバケットに移動
+2. 設定で公開アクセスを有効化
+3. 設定に公開URLを追加：
+
+```js
+storage: r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev",
+});
+```
+
+<Aside type="tip">
+	カスタムドメインをR2に接続して、`https://media.example.com`.`のようなブランド化されたURLを取得できます。
+</Aside>
+
+<Aside type="note">
+	R2バインディングは署名付きアップロードURLをサポートしていません。クライアントからの直接アップロードが必要な場合は、代わりにR2認証情報を使用したS3アダプターを使用してください。
+</Aside>
+
+## S3互換ストレージ
+
+S3アダプターは、Cloudflare R2（S3 API経由）、MinIO、およびその他のS3互換サービスで動作します。
+
+```
+js title="astro.config.mjs"
+import emdash, { s3 } from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			storage: s3({
+				endpoint: process.env.S3_ENDPOINT,
+				bucket: process.env.S3_BUCKET,
+				accessKeyId: process.env.S3_ACCESS_KEY_ID,
+				secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+				region: "auto", // Optional, defaults to "auto"
+				publicUrl: process.env.S3_PUBLIC_URL, // Optional CDN URL
+			}),
+		}),
+	],
+});
+```
+
+### 設定
+
+| オプション            | タイプ     | 説明                    |
+| ----------------- | -------- | ------------------------------ |
+| `endpoint`        | `string` | S3エンドポイントURL                |
+| `bucket`          | `string` | バケット名                    |
+| `accessKeyId`     | `string` | アクセスキー                     |
+| `secretAccessKey` | `string` | シークレットキー                     |
+| `region`          | `string` | リージョン（デフォルト: `"auto"`）     |
+| `publicUrl`       | `string` | オプションのCDNまたは公開URL     |
+
+### S3 API経由のR2
+
+署名付きアップロードURLなどの機能のために、R2でS3認証情報を使用します：
+
+```js
+storage: s3({
+	endpoint: "https://<account-id>.r2.cloudflarestorage.com",
+	bucket: "emdash-media",
+	accessKeyId: process.env.R2_ACCESS_KEY_ID,
+	secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+	publicUrl: "https://pub-xxxx.r2.dev",
+});
+```
+
+CloudflareダッシュボードのR2 > R2 APIトークンの管理で、R2 API認証情報を生成します。
+
+### MinIO
+
+```js
+storage: s3({
+	endpoint: "https://minio.example.com",
+	bucket: "emdash-media",
+	accessKeyId: process.env.MINIO_ACCESS_KEY,
+	secretAccessKey: process.env.MINIO_SECRET_KEY,
+	publicUrl: "https://minio.example.com/emdash-media",
+});
+```
+
+## ローカルファイルシステム
+
+開発環境にはローカルストレージを使用します。ファイルはディスク上のディレクトリに保存されます。
+
+```
+js title="astro.config.mjs"
+import emdash, { local } from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+### 設定
+
+| オプション      | タイプ     | 説明                     |
+| ----------- | -------- | ------------------------------- |
+| `directory` | `string` | ファイル保存用のディレクトリパス |
+| `baseUrl`   | `string` | ファイル配信のベースURL      |
+
+`baseUrl`は、カスタム静的ファイルサーバーを設定しない限り、EmDashのメディアファイルエンドポイント（`/_emdash/api/media/file`）と一致させる必要があります。
+
+<Aside type="caution">
+	ローカルストレージは署名付きアップロードURLをサポートしていません。ファイルはサーバー経由でアップロードされるため、大きなファイルでは遅くなる可能性があります。
+</Aside>
+
+## 環境に基づく設定
+
+環境に応じてストレージバックエンドを切り替えます：
+
+```
+js title="astro.config.mjs"
+import emdash, { s3, local } from "emdash/astro";
+import { r2 } from "@emdash-cms/cloudflare";
+
+const storage = import.meta.env.PROD
+	? r2({ binding: "MEDIA" })
+	: local({
+			directory: "./uploads",
+			baseUrl: "/_emdash/api/media/file",
+		});
+
+export default defineConfig({
+	integrations: [emdash({ storage })],
+});
+```
+
+## 署名付きアップロード
+
+S3アダプターは署名付きアップロードURLをサポートしており、クライアントがサーバーを経由せずに直接ストレージにアップロードできるようにします。これにより、大きなファイルのパフォーマンスが向上します。
+
+署名付きアップロードは、S3アダプターを使用すると自動的に有効になります。管理インターフェースは、利用可能な場合にこれらを使用します。
+
+署名付きアップロードをサポートするアダプター：
+
+- **S3**（S3 API経由のR2を含む）
+
+署名付きアップロードをサポートしないアダプター：
+
+- **R2 binding**（代わりにR2認証情報を使用したS3アダプターを使用してください）
+- **Local**
+
+## ストレージインターフェース
+
+すべてのストレージアダプターは同じインターフェースを実装しています：
+
+```typescript
+interface Storage {
+	upload(options: {
+		key: string;
+		body: Buffer | Uint8Array | ReadableStream;
+		contentType: string;
+	}): Promise<UploadResult>;
+
+	download(key: string): Promise<DownloadResult>;
+	delete(key: string): Promise<void>;
+	exists(key: string): Promise<boolean>;
+	list(options?: ListOptions): Promise<ListResult>;
+	getSignedUploadUrl(options: SignedUploadOptions): Promise<SignedUploadUrl>;
+	getPublicUrl(key: string): string;
+}
+```
+
+この一貫性により、アプリケーションコードを変更せずにストレージバックエンドを切り替えることができます。

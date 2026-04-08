@@ -1,0 +1,88 @@
+---
+title: 자주 묻는 질문
+description: EmDash를 평가하거나 도입하는 데 필요한 실용적인 답변과 현재 주의사항입니다.
+lastUpdated: 2026-04-07
+---
+
+import FaqJsonLd from "../../../components/FaqJsonLd.astro";
+
+<FaqJsonLd />
+
+이 FAQ는 공식 문서, 저장소 README, 그리고 공개된 GitHub 이슈에서 가져온 답변으로 공식 가이드를 보완합니다. "현재 주의사항" 섹션은 2026년 4월 7일 기준으로 공개적으로 확인 가능한 프로젝트 상태를 반영합니다.
+
+## 일반
+
+### EmDash란 무엇인가요?
+
+EmDash는 타입 안전 콘텐츠, 비개발자를 위한 관리자 패널, 그리고 샌드박스 처리된 Cloudflare Worker 격리 환경에서 실행될 수 있는 플러그인 아키텍처에 중점을 둔 Astro 네이티브 CMS입니다. WordPress를 알고 계신다면, 가장 짧은 설명은 "Astro, TypeScript, 그리고 이식 가능한 배포를 중심으로 재구성된 WordPress 아이디어"입니다.
+
+[소개](/ko/introduction/), [EmDash를 선택하는 이유](/ko/why-emdash/), 그리고 프로젝트 [README](https://github.com/emdash-cms/emdash)를 참조하세요.
+
+### EmDash는 Cloudflare가 필요한가요?
+
+아니요. EmDash는 Cloudflare에서 실행되지만, Node.js와 SQLite, 그리고 로컬 또는 S3 호환 스토리지에서도 실행할 수 있습니다. 주요 예외는 **샌드박스 처리된 플러그인**입니다: README에는 Dynamic Workers가 현재 유료 Cloudflare 계정에서만 사용 가능하다고 명시되어 있어, 해당 특정 플러그인 격리 모델은 Cloudflare 플랫폼에 종속됩니다.
+
+[Node.js에 배포하기](/ko/deployment/nodejs/), [Cloudflare에 배포하기](/ko/deployment/cloudflare/), 그리고 [README](https://github.com/emdash-cms/emdash/blob/main/README.md)를 참조하세요.
+
+### Cloudflare 없이 EmDash를 로컬에서 실행할 수 있나요?
+
+네. 로컬 시작하기 과정은 표준 Astro 프로젝트를 사용하며 Cloudflare 계정 없이 작동합니다. 로컬 개발이나 더 간단한 배포를 위해서는 Node.js + SQLite가 가장 직접적인 설정입니다.
+
+[시작하기](/ko/getting-started/)와 [Node.js에 배포하기](/ko/deployment/nodejs/)를 참조하세요.
+
+### 콘텐츠 변경 시 사이트를 다시 빌드해야 하나요?
+
+아니요. EmDash는 Astro Live Content Collections을 중심으로 문서화되어 있어, 콘텐츠 변경 사항은 사이트를 다시 빌드하지 않고도 런타임에 반영될 수 있습니다.
+
+[시작하기](/ko/getting-started/), [콘텐츠 쿼리하기](/ko/guides/querying-content/), 그리고 [아키텍처](/ko/concepts/architecture/)를 참조하세요.
+
+### 인증은 어떻게 작동하나요?
+
+EmDash는 패스키 우선 방식입니다. 기본 흐름은 WebAuthn 패스키를 사용하며, 구성 시 선택적으로 매직 링크와 OAuth 폴백을 사용할 수 있습니다.
+
+[인증](/ko/guides/authentication/)을 참조하세요.
+
+### EmDash는 프로덕션 준비가 되었나요?
+
+저장소 README는 현재 EmDash를 **베타 프리뷰**로 설명하고 있습니다. 이는 실제 평가와 개발에 사용 가능하지만, 여전히 활발한 API 및 기능 변경이 있을 수 있음을 의미합니다.
+
+[README 상태 섹션](https://github.com/emdash-cms/emdash/blob/main/README.md#status)을 참조하세요.
+
+먼저 더 넓은 개요를 원하신다면, [EmDash란 무엇인가요?](/ko/what-is-emdash/)와 [EmDash vs WordPress](/ko/emdash-vs-wordpress/)를 읽어보세요.
+
+## 현재 주의사항
+
+### `admin.settingsSchema`가 이미 플러그인 설정 UI를 자동 생성하나요?
+
+아직 안정적으로는 아닙니다. 플러그인 설정 가이드는 스키마 기반 관리자 UI 생성을 설명하지만, [이슈 #341](https://github.com/emdash-cms/emdash/issues/341)에서는 스키마가 유효성 검사 및 타입 지정은 되지만 관리자 패널에서 예상되는 설정 폼을 생성하지 않는다고 보고합니다. 이 문제가 해결될 때까지는 진행 중인 기능으로 간주하세요.
+
+관련 문서: [플러그인 설정](/ko/plugins/settings/).
+
+### 메뉴 편집기가 `/about`과 같은 상대 URL을 허용하나요?
+
+현재 폼이 `type="url"`을 사용하고 브라우저 유효성 검사가 스키마를 포함한 전체 URL을 기대하기 때문에 상대 URL을 거부한다는 오픈 버그 리포트가 있습니다.
+
+내부 상대 경로가 메뉴 워크플로우에 중요한 경우 [이슈 #342](https://github.com/emdash-cms/emdash/issues/342)를 추적하세요.
+
+### 플러그인이 위젯 영역에 대한 사용자 정의 위젯 컴포넌트를 등록할 수 있나요?
+
+아직은 아닙니다, 적어도 완성된 공개 기능으로는요. [이슈 #343](https://github.com/emdash-cms/emdash/issues/343)은 플러그인 제공 위젯 컴포넌트에 필요한 등록 API와 런타임 렌더링 지원을 요청합니다.
+
+플러그인 전략이 재사용 가능한 위젯 블록에 의존한다면, 추가적인 프레임워크 작업이 여전히 필요하다고 가정하세요.
+
+### 프로덕션 사이트에 EmDash를 도입하기 전에 무엇을 확인해야 하나요?
+
+먼저 네 가지를 확인하세요:
+
+- 목표 배포 모델: Cloudflare vs. Node.js
+- 샌드박스 처리된 플러그인이 필요한지, 그리고 유료 Cloudflare 기능이 허용 가능한지
+- 현재 플러그인 API가 열린 이슈에 의존하지 않고 사용 사례를 충족하는지
+- 팀이 베타 프리뷰 CMS를 도입하는 데 편안한지
+
+대부분의 팀에게는 전체 마이그레이션 전에 소규모 파일럿 프로젝트가 올바른 시작점입니다.
+
+## 관련 자료
+
+- [EmDash란 무엇인가요?](/ko/what-is-emdash/)
+- [최고의 Astro CMS](/ko/best-astro-cms/)
+- [WordPress에서 Astro로, EmDash와 함께](/ko/wordpress-to-astro-with-emdash/)

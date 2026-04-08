@@ -1,0 +1,763 @@
+---
+title: 테마 만들기
+description: 나만의 EmDash 테마를 구축하고 배포하세요.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 테마는 콘텐츠 모델을 부트스트랩하기 위한 시드 파일도 포함하는 완전한 Astro 사이트(페이지, 레이아웃, 컴포넌트, 스타일)입니다. 다른 사람들과 디자인을 공유하거나, 에이전시의 사이트 생성을 표준화하기 위해 하나를 빌드하세요.
+
+## 주요 개념
+
+- **테마는 작동하는 Astro 프로젝트입니다.** 테마 API나 추상화 계층이 없습니다. 사이트를 빌드하고 템플릿으로 배포합니다. 시드 파일은 첫 실행 시 EmDash가 생성할 컬렉션, 필드, 메뉴, 리디렉션 및 분류 체계를 알려줄 뿐입니다.
+- **EmDash는 WordPress보다 콘텐츠 모델에 대한 더 많은 제어권을 제공합니다.** 테마는 이를 활용합니다 — 시드 파일은 각 컬렉션이 필요로 하는 필드를 정확히 선언합니다. 완전히 새로운 콘텐츠 유형을 발명하기보다는 표준 **posts** 및 **pages** 컬렉션을 기반으로 하고 디자인 요구사항에 따라 필드와 분류 체계를 추가하세요.
+- **테마 콘텐츠 페이지는 서버 렌더링되어야 합니다.** 테마에서 콘텐츠는 관리자 UI를 통해 런타임에 변경되므로, EmDash 콘텐츠를 표시하는 페이지는 사전 렌더링되어서는 안 됩니다. 테마 콘텐츠 경로에서 `getStaticPaths()`를 사용하지 마세요. (EmDash를 빌드 타임 데이터 소스로 사용하는 정적 사이트 빌드는 `getStaticPaths`를 사용할 수 있지만, 테마는 항상 SSR입니다.)
+- **하드 코딩된 콘텐츠 없음.** 사이트 제목, 태그라인, 네비게이션 및 기타 동적 콘텐츠는 템플릿 문자열이 아닌 API 호출을 통해 CMS에서 제공됩니다.
+
+## 프로젝트 구조
+
+다음 구조로 테마를 생성하세요:
+
+```
+my-emdash-theme/
+├── package.json              # Theme metadata
+├── astro.config.mjs          # Astro + EmDash configuration
+├── src/
+│   ├── live.config.ts        # Live Collections setup
+│   ├── pages/
+│   │   ├── index.astro       # Homepage
+│   │   ├── [...slug].astro   # Pages (catch-all)
+│   │   ├── posts/
+│   │   │   ├── index.astro   # Post archive
+│   │   │   └── [slug].astro  # Single post
+│   │   ├── categories/
+│   │   │   └── [slug].astro  # Category archive
+│   │   ├── tags/
+│   │   │   └── [slug].astro  # Tag archive
+│   │   ├── search.astro      # Search page
+│   │   └── 404.astro         # Not found
+│   ├── layouts/
+│   │   └── Base.astro        # Base layout
+│   └── components/           # Your components
+├── .emdash/
+│   ├── seed.json             # Schema and sample content
+│   └── uploads/              # Optional local media files
+└── public/                   # Static assets
+```
+
+페이지는 루트에 캐치올 경로(`[...slug].astro`)로 존재하므로, 슬러그가 `about`인 페이지는 `/about`에서 렌더링됩니다. 게시물, 카테고리 및 태그는 각각의 디렉토리를 가집니다. `.emdash/` 디렉토리에는 시드 파일과 샘플 콘텐츠에 사용된 로컬 미디어 파일이 포함됩니다.
+
+## package.json 구성
+
+`package.json`에 `emdash` 필드를 추가하세요:
+
+```
+json title="package.json"
+{
+	"name": "@your-org/emdash-theme-blog",
+	"version": "1.0.0",
+	"description": "A minimal blog theme for EmDash",
+	"keywords": ["astro-template", "emdash", "blog"],
+	"emdash": {
+		"label": "Minimal Blog",
+		"description": "A clean, minimal blog with posts, pages, and categories",
+		"seed": ".emdash/seed.json",
+		"preview": "https://your-theme-demo.pages.dev"
+	}
+}
+```
+
+| 필드                  | 설명                         |
+| ---------------------- | ----------------------------------- |
+| `emdash.label`       | 테마 선택기에 표시되는 표시 이름 |
+| `emdash.description` | 테마에 대한 간단한 설명      |
+| `emdash.seed`        | 시드 파일 경로               |
+| `emdash.preview`     | 라이브 데모 URL (선택 사항)       |
+
+## 기본 콘텐츠 모델
+
+대부분의 테마는 두 가지 컬렉션 유형이 필요합니다: **posts**와 **pages**. 게시물은 피드 및 아카이브에 나타나는 발췌문 및 대표 이미지가 있는 타임스탬프가 찍힌 항목입니다. 페이지는 최상위 URL에 있는 독립형 콘텐츠입니다.
+
+이것이 권장 시작점입니다. 테마에 필요에 따라 더 많은 컬렉션, 분류 체계 또는 필드를 추가하되, 여기서 시작하세요.
+
+### 시드 파일
+
+시드 파일은 EmDash에게 첫 실행 시 생성할 내용을 알려줍니다. `.emdash/seed.json`을 생성하세요:
+
+```
+json title=".emdash/seed.json"
+{
+	"$schema": "https://emdashcms.com/seed.schema.json",
+	"version": "1",
+	"meta": {
+			"name": "미니멀 블로그",
+			"description": "게시물과 페이지를 갖춘 깔끔한 블로그",
+			"author": "작성자 이름"
+	},
+	"settings": {
+			"title": "내 블로그",
+			"tagline": "생각과 아이디어",
+		"postsPerPage": 10
+	},
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Posts",
+			"labelSingular": "Post",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{ "slug": "title", "label": "Title", "type": "string", "required": true },
+				{ "slug": "content", "label": "Content", "type": "portableText" },
+				{ "slug": "excerpt", "label": "Excerpt", "type": "text" },
+				{ "slug": "featured_image", "label": "Featured Image", "type": "image" }
+			]
+		},
+		{
+			"slug": "pages",
+			"label": "Pages",
+			"labelSingular": "Page",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{ "slug": "title", "label": "Title", "type": "string", "required": true },
+				{ "slug": "content", "label": "Content", "type": "portableText" }
+			]
+		}
+	],
+	"taxonomies": [
+		{
+			"name": "category",
+				"label": "카테고리",
+				"labelSingular": "카테고리",
+			"hierarchical": true,
+			"collections": ["posts"],
+			"terms": [
+					{ "slug": "news", "label": "뉴스" },
+					{ "slug": "tutorials", "label": "튜토리얼" }
+			]
+		}
+	],
+	"menus": [
+		{
+			"name": "primary",
+				"label": "기본 내비게이션",
+				"items": [
+					{ "type": "custom", "label": "홈", "url": "/" },
+					{ "type": "custom", "label": "Blog", "url": "/posts" }
+			]
+		}
+	],
+	"redirects": [
+		{ "source": "/category/news", "destination": "/categories/news" },
+		{ "source": "/old-about", "destination": "/about" }
+	]
+}
+```
+
+게시물은 목록과 피드에 나타나므로 `excerpt`와 `featured_image`를 가집니다. 페이지는 독립형 콘텐츠이므로 필요하지 않습니다. 테마 요구사항에 따라 어느 컬렉션에나 필드를 추가하세요.
+
+섹션, 위젯 영역 및 미디어 참조를 포함한 전체 사양은 [시드 파일 형식](/ko/themes/seed-files/)을 참조하세요.
+
+## 페이지 빌드
+
+EmDash 콘텐츠를 표시하는 모든 페이지는 서버 렌더링됩니다. `Astro.params`를 사용하여 URL에서 슬러그를 가져오고 요청 시 콘텐츠를 쿼리하세요.
+
+<Aside type="caution">
+	테마에서는 EmDash 콘텐츠를 표시하는 페이지에 대해 `getStaticPaths()` 또는 `export const prerender = true`를 절대 사용하지 마세요. 테마는 관리자 UI를 통해 런타임에 콘텐츠를 제공하므로, 이러한 페이지는 서버 렌더링되어야 합니다.
+</Aside>
+
+### 홈페이지
+
+```
+astro title="src/pages/index.astro"
+---
+import { getEmDashCollection, getSiteSettings } from "emdash";
+import Base from "../../layouts/Base.astro";
+
+const settings = await getSiteSettings();
+const { entries: posts } = await getEmDashCollection("posts", {
+  where: { status: "published" },
+  orderBy: { publishedAt: "desc" },
+  limit: settings.postsPerPage ?? 10,
+});
+---
+
+<Base title="홈">
+  <h1>최신 게시물</h1>
+  {posts.map((post) => (
+    <article>
+      <h2><a href={`/posts/${post.slug}`}>{post.data.title}</a>
+</h2>
+      <p>{post.data.excerpt}</p>
+    </article>
+  ))}
+</Base>
+```
+
+### 단일 게시물
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry, getEntryTerms } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../../layouts/Base.astro";
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug!);
+
+if (!post) {
+  return Astro.redirect("/404");
+}
+
+const categories = await getEntryTerms("posts", post.id, "categories");
+---
+
+<Base title={post.data.title}>
+  <article>
+    <h1>{post.data.title}</h1>
+    <PortableText value={post.data.content} />
+    <div class="post-meta">
+      {categories.map((cat) => (
+        <a href={`/categories/${cat.slug}`}>{cat.label}</a>
+      ))}
+    </div>
+  </article>
+</Base>
+```
+
+### 페이지
+
+페이지는 루트에 캐치올 경로를 사용하므로 슬러그가 최상위 URL에 직접 매핑됩니다 — 슬러그가 `about`인 페이지는 `/about`에서 렌더링됩니다:
+
+```
+astro title="src/pages/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../layouts/Base.astro";
+
+const { slug } = Astro.params;
+const { entry: page } = await getEmDashEntry("pages", slug!);
+
+if (!page) {
+  return Astro.redirect("/404");
+}
+---
+
+<Base title={page.data.title}>
+  <article>
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+```
+
+이것은 캐치올 경로이므로, 더 구체적인 경로가 없는 URL만 일치합니다. `/posts/hello-world`는 이 파일이 아닌 `posts/[slug].astro`를 여전히 호출합니다.
+
+### 카테고리 아카이브
+
+```
+astro title="src/pages/categories/[slug].astro"
+---
+import { getTerm, getEntriesByTerm } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+const { slug } = Astro.params;
+const category = await getTerm("categories", slug!);
+const posts = await getEntriesByTerm("posts", "categories", slug!);
+
+if (!category) {
+  return Astro.redirect("/404");
+}
+---
+
+<Base title={category.label}>
+  <h1>{category.label}</h1>
+  {posts.map((post) => (
+    <article>
+      <h2><a href={`/posts/${post.slug}`}>{post.data.title}</a>
+</h2>
+    </article>
+  ))}
+</Base>
+```
+
+## 이미지 사용
+
+이미지 필드는 문자열이 아닌 `src` 및 `alt` 속성을 가진 객체입니다. 최적화된 이미지 렌더링을 위해 `emdash/ui`의 `Image` 컴포넌트를 사용하세요:
+
+```
+astro title="src/components/PostCard.astro"
+---
+import { Image } from "emdash/ui";
+
+const { post } = Astro.props;
+---
+
+<article>
+  {post.data.featured_image?.src && (
+    <Image
+      image={post.data.featured_image}
+      alt={post.data.featured_image.alt || post.data.title}
+      width={800}
+      height={450}
+    />
+  )}
+  <h2><a href={`/posts/${post.slug}`}>{post.data.title}</a>
+</h2>
+  <p>{post.data.excerpt}</p>
+</article>
+```
+
+<Aside type="caution">
+	흔한 실수는 이미지 필드를 문자열로 취급하는 것입니다. `post.data.featured_image`는 `src`와 `alt`를 가진 객체입니다 — `<img src={post.data.featured_image} />`를 작성하면 `[object Object]`가 렌더링됩니다.
+</Aside>
+
+## 메뉴 사용
+
+레이아웃에서 관리자 정의 메뉴를 쿼리하세요. 네비게이션 링크를 절대 하드코딩하지 마세요:
+
+```
+astro title="src/layouts/Base.astro"
+---
+import { getMenu, getSiteSettings } from "emdash";
+
+const settings = await getSiteSettings();
+const primaryMenu = await getMenu("primary");
+---
+
+<html>
+  <head>
+    <title>{Astro.props.title} | {settings.title}</title>
+  </head>
+  <body>
+    <header>
+      {settings.logo ? (
+        <img src={settings.logo.url} alt={settings.title} />
+      ) : (
+        <span>{settings.title}</span>
+      )}
+      <nav>
+        {primaryMenu?.items.map((item) => (
+          <a href={item.url}>{item.label}</a>
+        ))}
+      </nav>
+    </header>
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>
+```
+
+## 페이지 템플릿
+
+테마는 종종 여러 페이지 레이아웃(기본 레이아웃, 전체 너비 레이아웃, 랜딩 페이지 레이아웃)이 필요합니다. EmDash에서는 페이지 컬렉션에 `template` 선택 필드를 추가하고 캐치올 라우트에서 레이아웃 컴포넌트에 매핑하세요.
+
+시드 파일의 페이지 컬렉션에 필드를 추가하세요:
+
+```json
+{
+	"slug": "template",
+	"label": "Page Template",
+	"type": "string",
+	"widget": "select",
+	"options": {
+		"choices": [
+			{ "value": "default", "label": "Default" },
+			{ "value": "full-width", "label": "Full Width" },
+			{ "value": "landing", "label": "Landing Page" }
+		]
+	},
+	"defaultValue": "default"
+}
+```
+
+그런 다음 캐치올 라우트에서 값을 레이아웃 컴포넌트에 매핑하세요:
+
+```
+astro title="src/pages/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import PageDefault from "../../layouts/PageDefault.astro";
+import PageFullWidth from "../../layouts/PageFullWidth.astro";
+import PageLanding from "../../layouts/PageLanding.astro";
+
+const { slug } = Astro.params;
+const { entry: page } = await getEmDashEntry("pages", slug!);
+
+if (!page) {
+  return Astro.redirect("/404");
+}
+
+const layouts = {
+  "default": PageDefault,
+  "full-width": PageFullWidth,
+  "landing": PageLanding,
+};
+const Layout = layouts[page.data.template as keyof typeof layouts] ?? PageDefault;
+---
+
+<Layout page={page} />
+```
+
+편집자는 페이지 편집 시 관리자 UI의 드롭다운에서 템플릿을 선택합니다.
+
+## 섹션 추가하기
+
+섹션은 편집자가 `/section` 슬래시 명령을 사용하여 Portable Text 필드에 삽입할 수 있는 재사용 가능한 콘텐츠 블록입니다. 테마에 일반적인 콘텐츠 패턴(히어로 배너, CTA, 기능 그리드)이 있는 경우 시드 파일에서 섹션으로 정의하세요:
+
+```
+json title=".emdash/seed.json"
+{
+	"sections": [
+		{
+			"slug": "hero-centered",
+			"title": "Centered Hero",
+			"description": "Full-width hero with centered heading and CTA",
+			"keywords": ["hero", "banner", "header", "landing"],
+			"content": [
+				{
+					"_type": "block",
+					"style": "h1",
+						"children": [{ "_type": "span", "text": "우리 사이트에 오신 것을 환영합니다" }]
+				},
+				{
+					"_type": "block",
+					"children": [
+							{ "_type": "span", "text": "여기에 강력한 태그라인을 넣으세요." }
+					]
+				}
+			]
+		},
+		{
+			"slug": "newsletter-cta",
+			"title": "Newsletter Signup",
+			"keywords": ["newsletter", "subscribe", "email"],
+			"content": [
+				{
+					"_type": "block",
+					"style": "h3",
+					"children": [{ "_type": "span", "text": "Subscribe to our newsletter" }]
+				},
+				{
+					"_type": "block",
+					"children": [
+						{
+							"_type": "span",
+							"text": "Get the latest updates delivered to your inbox."
+						}
+					]
+				}
+			]
+		}
+	]
+}
+```
+
+시드 파일에서 생성된 섹션은 `source: "theme"`으로 표시됩니다. 편집자는 자신만의 섹션(`source: "user"`으로 표시)을 생성할 수도 있지만, 테마에서 제공하는 섹션은 관리자 UI에서 삭제할 수 없습니다.
+
+## 샘플 콘텐츠 추가하기
+
+테마의 디자인을 보여주기 위해 시드 파일에 샘플 콘텐츠를 포함하세요:
+
+```
+json title=".emdash/seed.json"
+{
+	"content": {
+		"posts": [
+			{
+				"id": "hello-world",
+				"slug": "hello-world",
+				"status": "published",
+				"data": {
+						"title": "안녕하세요",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+						"children": [{ "_type": "span", "text": "새 블로그에 오신 것을 환영합니다!" }]
+						}
+					],
+						"excerpt": "EmDash에서 작성한 첫 게시물입니다."
+				},
+				"taxonomies": {
+					"category": ["news"]
+				}
+			}
+		]
+	}
+}
+```
+
+<Aside type="tip">
+	설정 중 샘플 콘텐츠는 선택 사항입니다. 사용자는 깨끗한 시작을 원할 경우 설정 마법사에서 "샘플 콘텐츠 포함"을 선택 해제할 수 있습니다.
+</Aside>
+
+## 미디어 포함하기
+
+`$media` 구문을 사용하여 샘플 콘텐츠에서 이미지를 참조하세요.
+
+원격 이미지의 경우:
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"url": "https://images.unsplash.com/photo-xxx",
+				"alt": "A descriptive alt text",
+				"filename": "hero.jpg"
+			}
+		}
+	}
+}
+```
+
+로컬 이미지의 경우 파일을 `.emdash/uploads/`에 배치하고 참조하세요:
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"file": "hero.jpg",
+				"alt": "A descriptive alt text"
+			}
+		}
+	}
+}
+```
+
+시딩 중에 미디어 파일이 다운로드(또는 로컬에서 읽혀져) 저장소에 업로드됩니다.
+
+## 검색
+
+테마에 검색 페이지가 포함된 경우, 즉시 결과를 위해 `LiveSearch` 컴포넌트를 사용하세요:
+
+```
+astro title="src/pages/search.astro"
+---
+import LiveSearch from "emdash/ui/search";
+import Base from "../../layouts/Base.astro";
+---
+
+<Base title="Search">
+  <h1>검색</h1>
+  <LiveSearch
+    placeholder="게시물과 페이지 검색..."
+    collections={["posts", "pages"]}
+  />
+</Base>
+```
+
+`LiveSearch`는 디바운스된 즉시 검색을 접두사 매칭, Porter 형태소 분석, 강조된 결과 스니펫과 함께 제공합니다. 검색은 관리자 UI(콘텐츠 유형 > 편집 > 기능 > 검색)에서 컬렉션별로 활성화해야 합니다.
+
+## 테마 테스트하기
+
+1. 테마에서 테스트 프로젝트를 생성하세요:
+
+   ```bash
+   npm create astro@latest -- --template ./path/to/my-theme
+   ```
+
+2. 의존성을 설치하고 개발 서버를 시작하세요:
+
+   ```bash
+   cd test-site
+   npm install
+   npm run dev
+   ```
+
+3. `http://localhost:4321/_emdash/admin``에서 설정 마법사를 완료하세요
+
+4. 컬렉션, 메뉴, 리디렉션 및 콘텐츠가 올바르게 생성되었는지 확인하세요
+
+5. 모든 페이지 템플릿이 올바르게 렌더링되는지 테스트하세요
+
+6. 관리자를 통해 새 콘텐츠를 생성하여 모든 필드가 작동하는지 확인하세요
+
+## 테마 게시하기
+
+배포를 위해 npm에 게시하세요:
+
+```bash
+npm publish --access public
+```
+
+사용자는 다음과 같이 테마를 설치할 수 있습니다:
+
+```bash
+npm create astro@latest -- --template @your-org/emdash-theme-blog
+```
+
+GitHub 호스팅 테마의 경우:
+
+```bash
+npm create astro@latest -- --template github:your-org/emdash-theme-blog
+```
+
+## 사용자 정의 Portable Text 블록
+
+테마는 특수화된 콘텐츠를 위한 사용자 정의 Portable Text 블록 유형을 정의할 수 있습니다. 이는 마케팅 페이지, 랜딩 페이지 또는 표준 리치 텍스트 이상의 구조화된 컴포넌트가 필요한 콘텐츠에 유용합니다.
+
+### 시드 콘텐츠에서 사용자 정의 블록 정의하기
+
+시드 파일의 Portable Text 콘텐츠에서 네임스페이스가 지정된 `_type`을 사용하세요:
+
+```
+json title=".emdash/seed.json"
+{
+	"content": {
+		"pages": [
+			{
+				"id": "home",
+				"slug": "home",
+				"status": "published",
+				"data": {
+						"title": "홈",
+					"content": [
+						{
+							"_type": "marketing.hero",
+							"headline": "Build something amazing",
+							"subheadline": "The all-in-one platform for modern teams.",
+							"primaryCta": { "label": "Get Started", "url": "/signup" }
+						},
+						{
+							"_type": "marketing.features",
+							"_key": "features",
+							"headline": "Everything you need",
+							"features": [
+								{
+									"icon": "zap",
+									"title": "Lightning fast",
+									"description": "Built for speed."
+								}
+							]
+						}
+					]
+				}
+			}
+		]
+	}
+}
+```
+
+### 블록 컴포넌트 생성하기
+
+각 사용자 정의 블록 유형에 대한 Astro 컴포넌트를 생성하세요:
+
+```
+astro title="src/components/blocks/Hero.astro"
+---
+interface Props {
+  value: {
+    headline: string;
+    subheadline?: string;
+    primaryCta?: { label: string; url: string };
+  };
+}
+
+const { value } = Astro.props;
+---
+
+<section class="hero">
+  <h1>{value.headline}</h1>
+  {value.subheadline && <p>{value.subheadline}</p>
+}
+  {value.primaryCta && (
+    <a href={value.primaryCta.url} class="btn">
+      {value.primaryCta.label}
+    </a>
+  )}
+</section>
+```
+
+### 사용자 정의 블록 렌더링하기
+
+사용자 정의 블록 컴포넌트를 `PortableText` 컴포넌트에 전달하세요:
+
+```
+astro title="src/components/MarketingBlocks.astro"
+---
+import { PortableText } from "emdash/ui";
+import Hero from "../../themes/blocks/Hero.astro";
+import Features from "../../themes/blocks/Features.astro";
+
+interface Props {
+  value: unknown[];
+}
+
+const { value } = Astro.props;
+
+const marketingTypes = {
+  "marketing.hero": Hero,
+  "marketing.features": Features,
+};
+---
+
+<PortableText value={value} components={{ types: marketingTypes }} />
+```
+
+그런 다음 페이지에서 사용하세요:
+
+```
+astro title="src/pages/index.astro"
+---
+import { getEmDashEntry } from "emdash";
+import MarketingBlocks from "../../components/MarketingBlocks.astro";
+
+const { entry: page } = await getEmDashEntry("pages", "home");
+---
+
+<MarketingBlocks value={page.data.content} />
+```
+
+<Aside>
+  사용자 정의 블록 유형은 기본적으로 관리자 UI 편집기를 갖지 않습니다. 사용자는 표준 Portable Text 편집기를 통해 시드된 콘텐츠를 편집하거나 JSON을 직접 수정할 수 있습니다. 완전한 관리자 편집 경험을 위해서는 사용자 정의 편집기 컴포넌트가 있는 플러그인 생성도 고려해보세요.
+</Aside>
+
+### 네비게이션을 위한 앵커 ID
+
+링크 가능해야 하는 블록에 `_key`를 추가하세요:
+
+```json
+{
+	"_type": "marketing.features",
+	"_key": "features",
+	"headline": "Features"
+}
+```
+
+그런 다음 컴포넌트에서 앵커로 사용하세요:
+
+```astro
+<section id={value._key}>
+  <!-- content -->
+</section>
+```
+
+이렇게 하면 `/#features`와 같은 네비게이션 링크가 가능해집니다.
+
+## 테마 체크리스트
+
+게시하기 전에 테마에 다음이 포함되어 있는지 확인하세요:
+
+- [ ] `emdash` 필드(레이블, 설명, 시드 경로)가 있는 `package.json`
+- [ ] 유효한 스키마가 있는 `.emdash/seed.json`
+- [ ] 페이지에서 참조된 모든 컬렉션이 시드에 존재함
+- [ ] 레이아웃에서 사용된 메뉴가 시드에 정의됨
+- [ ] 샘플 콘텐츠가 테마의 디자인을 보여줌
+- [ ] 데이터베이스 및 저장소 구성이 있는 `astro.config.mjs`
+- [ ] EmDash 로더가 있는 `src/live.config.ts`
+- [ ] 콘텐츠 페이지에 `getStaticPaths()` 없음
+- [ ] 사이트 제목, 태그라인 또는 네비게이션이 하드코딩되지 않음
+- [ ] 이미지 필드가 문자열이 아닌 객체(`image.src`)로 접근됨
+- [ ] 설정 지침이 있는 README
+- [ ] 비표준 Portable Text 유형에 대한 사용자 정의 블록 컴포넌트
+
+## 다음 단계
+
+- **[시드 파일 형식](/ko/themes/seed-files/)** -- 시드 파일에 대한 완전한 참조
+- **[테마 개요](/ko/themes/overview/)** -- EmDash에서 테마 작동 방식
+- **[WordPress 테마 포팅](/ko/themes/porting-wp-themes/)** -- 기존 WordPress 테마 변환

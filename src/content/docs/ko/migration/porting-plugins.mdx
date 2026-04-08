@@ -1,0 +1,435 @@
+---
+title: WordPress 플러그인 이식
+description: Plugin API를 사용하여 WordPress 플러그인을 EmDash 플러그인으로 변환
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+많은 WordPress 플러그인을 EmDash로 이식할 수 있습니다. 플러그인 모델은 다릅니다—PHP 대신 TypeScript, 액션/필터 대신 훅, wp_options 대신 구조화된 저장소—하지만 대부분의 기능은 깔끔하게 매핑됩니다.
+
+## 이식성 평가
+
+모든 플러그인이 이식하기에 적합한 것은 아닙니다. 시작하기 전에 후보를 평가하세요.
+
+<CardGrid>
+	<Card title="적합한 후보" icon="approve-check">
+		사용자 정의 필드, SEO 플러그인, 콘텐츠 프로세서, 관리자 UI 확장, 분석, 소셜 공유, 양식
+	</Card>
+	<Card title="부적합한 후보" icon="close">
+		멀티사이트 기능, WooCommerce/Gutenberg 통합, WordPress 코어 내부를 패치하는 플러그인
+	</Card>
+</CardGrid>
+
+## 플러그인 구조 비교
+
+<Tabs>
+<TabItem label="WordPress">
+```
+wp-content/plugins/my-plugin/
+├── my-plugin.php       # Main file with plugin header
+├── includes/
+│   ├── class-admin.php
+│   └── class-api.php
+└── admin/
+    └── js/
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+my-plugin/
+├── src/
+│   ├── index.ts    # Plugin definition (definePlugin)
+│   └── admin.tsx   # Admin UI exports (React)
+├── package.json
+└── tsconfig.json
+```
+</TabItem>
+</Tabs>
+
+## 훅 매핑
+
+WordPress는 문자열 훅 이름과 함께 `add_action()` 및 `add_filter()`을 사용합니다. EmDash는 플러그인 정의에서 선언된 타입화된 훅을 사용합니다.
+
+### 라이프사이클 훅
+
+| WordPress                    | EmDash            | 참고                                     |
+| ---------------------------- | ------------------- | ---------------------------------------- |
+| `register_activation_hook()` | `plugin:install`    | 첫 설치 시 한 번 실행                    |
+| Plugin enabled               | `plugin:activate`   | 활성화 시 실행                           |
+| Plugin disabled              | `plugin:deactivate` | 비활성화 시 실행                         |
+| `register_uninstall_hook()`  | `plugin:uninstall`  | `event.deleteData`는 사용자 선택을 나타냄 |
+
+### 콘텐츠 훅
+
+| WordPress             | EmDash               | 참고                                       |
+| --------------------- | ---------------------- | ------------------------------------------ |
+| `wp_insert_post_data` | `content:beforeSave`   | 수정된 콘텐츠를 반환하거나 취소하려면 예외 발생 |
+| `save_post`           | `content:afterSave`    | 저장 후 부작용                             |
+| `before_delete_post`  | `content:beforeDelete` | 취소하려면 `false` 반환                    |
+| `deleted_post`        | `content:afterDelete`  | 삭제 후 정리                               |
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+add_action('save_post', function($post_id, $post, $update) {
+    if ($post->post_type !== 'product') return;
+
+    $price = get_post_meta($post_id, 'price', true);
+    if ($price > 1000) {
+        update_post_meta($post_id, 'is_premium', true);
+    }
+
+}, 10, 3);
+
+````
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+hooks: {
+    "content:afterSave": async (event, ctx) => {
+        if (event.collection !== "products") return;
+
+        const price = event.content.price as number;
+        if (price > 1000) {
+            await ctx.kv.set(`premium:${event.content.id}`, true);
+        }
+    },
+}
+````
+
+</TabItem>
+</Tabs>
+
+### 미디어 훅
+
+| WordPress                    | EmDash             | 참고                 |
+| ---------------------------- | -------------------- | --------------------- |
+| `wp_handle_upload_prefilter` | `media:beforeUpload` | 검증 또는 변환        |
+| `add_attachment`             | `media:afterUpload`  | 업로드 후 반응        |
+
+## 저장소 매핑
+
+### Options API → KV 저장소
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+$api_key = get_option('my_plugin_api_key', '');
+update_option('my_plugin_api_key', 'abc123');
+delete_option('my_plugin_api_key');
+```
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+const apiKey = await ctx.kv.get<string>("settings:apiKey") ?? "";
+await ctx.kv.set("settings:apiKey", "abc123");
+await ctx.kv.delete("settings:apiKey");
+```
+</TabItem>
+</Tabs>
+
+<Aside>
+	사용자 구성 가능한 값에는 `settings:` 접두사를, 내부 플러그인 상태에는 `state:` 접두사를 사용하세요.
+</Aside>
+
+### 사용자 정의 테이블 → 저장소 컬렉션
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+global $wpdb;
+$table = $wpdb->prefix . 'my_plugin_items';
+
+// 삽입
+$wpdb->insert($table, ['name' => 'Item 1', 'status' => 'active']);
+
+// 쿼리
+$items = $wpdb->get_results(
+"SELECT \* FROM $table WHERE status = 'active' LIMIT 10"
+);
+
+````
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+// Declare in plugin definition
+storage: {
+    items: {
+        indexes: ["status", "createdAt"],
+    },
+},
+
+// 훅 또는 라우트에서:
+await ctx.storage.items.put("item-1", {
+    name: "Item 1",
+    status: "active",
+    createdAt: new Date().toISOString(),
+});
+
+const result = await ctx.storage.items.query({
+    where: { status: "active" },
+    limit: 10,
+});
+````
+
+</TabItem>
+</Tabs>
+
+## 설정 스키마
+
+WordPress는 관리자 양식에 Settings API를 사용합니다. EmDash는 UI를 자동 생성하는 선언적 스키마를 사용합니다.
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+add_action('admin_init', function() {
+    register_setting('my_plugin', 'my_plugin_api_key');
+    add_settings_section('main', 'Settings', null, 'my-plugin');
+    add_settings_field('api_key', 'API Key', function() {
+        $value = get_option('my_plugin_api_key');
+        echo '<input type="text" name="my_plugin_api_key"
+              value="' . esc_attr($value) . '">';
+    }, 'my-plugin', 'main');
+});
+```
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+admin: {
+    settingsSchema: {
+        apiKey: {
+            type: "secret",
+            label: "API Key",
+            description: "Your API key from the dashboard",
+        },
+        enabled: {
+            type: "boolean",
+            label: "Enabled",
+            default: true,
+        },
+        limit: {
+            type: "number",
+            label: "Item Limit",
+            default: 100,
+            min: 1,
+            max: 1000,
+        },
+    },
+}
+```
+</TabItem>
+</Tabs>
+
+## 관리자 UI
+
+WordPress 관리자 페이지는 PHP입니다. EmDash는 React 컴포넌트를 사용합니다.
+
+```
+tsx title="src/admin.tsx"
+import { useState, useEffect } from "react";
+
+export const widgets = {
+	summary: function SummaryWidget() {
+		const [count, setCount] = useState(0);
+
+		useEffect(() => {
+			fetch("/_emdash/api/plugins/my-plugin/status")
+				.then((r) => r.json())
+				.then((data) => setCount(data.count));
+		}, []);
+
+		return <div>총 항목 수: {count}</div>
+;
+	},
+};
+
+export const pages = {
+	settings: function SettingsPage() {
+		// React component for settings page
+		return <div>Settings content</div>
+;
+	},
+};
+```
+
+플러그인 정의에 등록:
+
+```
+typescript title="src/index.ts"
+admin: {
+    entry: "@my-org/my-plugin/admin",
+    pages: [{ path: "/settings", label: "Dashboard" }],
+    widgets: [{ id: "summary", title: "Summary", size: "half" }],
+},
+```
+
+## REST API → 플러그인 라우트
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+register_rest_route('my-plugin/v1', '/items', [
+    'methods' => 'GET',
+    'callback' => function($request) {
+        global $wpdb;
+        $items = $wpdb->get_results("SELECT * FROM items LIMIT 50");
+        return new WP_REST_Response($items);
+    },
+]);
+```
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+routes: {
+    items: {
+        handler: async (ctx) => {
+            const result = await ctx.storage.items.query({ limit: 50 });
+            return { items: result.items };
+        },
+    },
+},
+```
+</TabItem>
+</Tabs>
+
+라우트는 `/_emdash/api/plugins/{plugin-id}/{route-name}`에서 사용 가능합니다.
+
+## 이식 과정
+
+<Steps>
+
+1. **WordPress 플러그인 분석**
+
+   기능 문서화: 훅, 데이터베이스 작업, 관리자 페이지, REST 엔드포인트.
+
+2. **EmDash 개념에 매핑**
+
+   WordPress 훅 → EmDash 훅. `wp_options` → `ctx.kv`. 사용자 정의 테이블 → 저장소 컬렉션. 관리자 페이지 → React 컴포넌트. REST 엔드포인트 → 플러그인 라우트.
+
+3. **플러그인 스켈레톤 생성**
+
+   ```typescript title="src/index.ts"
+   import { definePlugin } from "emdash";
+
+   export function createPlugin() {
+   	return definePlugin({
+   		id: "my-ported-plugin",
+   		version: "1.0.0",
+   		capabilities: [],
+   		storage: {},
+   		hooks: {},
+   		routes: {},
+   		admin: {},
+   	});
+   }
+   ```
+
+4. **순서대로 구현**
+
+   저장소 → 훅 → 관리자 UI → 라우트
+
+5. **철저히 테스트**
+
+   훅이 올바르게 실행되고, 저장소가 작동하며, 관리자 UI가 렌더링되는지 확인.
+
+</Steps>
+
+## 예시: 읽기 시간 플러그인
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+add_filter('wp_insert_post_data', function($data, $postarr) {
+    if ($data['post_type'] !== 'post') return $data;
+
+    $content = strip_tags($data['post_content']);
+    $word_count = str_word_count($content);
+    $read_time = ceil($word_count / 200);
+
+    if (!empty($postarr['ID'])) {
+        update_post_meta($postarr['ID'], '_read_time', $read_time);
+    }
+    return $data;
+
+}, 10, 2);
+
+````
+</TabItem>
+<TabItem label="EmDash">
+```
+typescript title="src/index.ts"
+export function createPlugin() {
+    return definePlugin({
+        id: "read-time",
+        version: "1.0.0",
+
+        admin: {
+            settingsSchema: {
+                wordsPerMinute: {
+                    type: "number",
+                    label: "Words per minute",
+                    default: 200,
+                    min: 100,
+                    max: 400,
+                },
+            },
+        },
+
+        hooks: {
+            "content:beforeSave": async (event, ctx) => {
+                if (event.collection !== "posts") return;
+
+                const wpm = await ctx.kv.get<number>("settings:wordsPerMinute") ?? 200;
+                const text = JSON.stringify(event.content.body || "");
+                const readTime = Math.ceil(text.split(/\s+/).length / wpm);
+
+                return { ...event.content, readTime };
+            },
+        },
+    });
+}
+````
+
+</TabItem>
+</Tabs>
+
+<Aside type="tip" title="AI 지원 포팅">
+	플러그인 포팅은 테마 포팅보다 더 세부적인 차이가 있지만, AI 에이전트는 여전히 상당한 도움을 줍니다.
+	WordPress 플러그인 코드와 EmDash의 Plugin API 문서를 제공하면, 에이전트가 합리적인 초안을 생성할 수 있습니다.
+	복잡한 플러그인은 여러 번의 반복 작업이 필요할 수 있습니다.
+</Aside>
+
+## 기능
+
+플러그인은 보안 샌드박싱을 위해 필요한 기능을 선언해야 합니다:
+
+| 기능             | 제공                          | 사용 사례               |
+| --------------- | ----------------------------- | ------------------- |
+| `network:fetch` | `ctx.http.fetch()`            | 외부 API 호출       |
+| `read:content`  | `ctx.content.get()`, `list()` | CMS 콘텐츠 읽기     |
+| `write:content` | `ctx.content.create()` 등     | 콘텐츠 수정         |
+| `read:media`    | `ctx.media.get()`, `list()`   | 미디어 읽기         |
+| `write:media`   | `ctx.media.getUploadUrl()`    | 미디어 업로드       |
+
+## 일반적인 함정
+
+**전역 상태 없음** — 전역 변수 대신 저장소를 사용하세요.
+
+**모든 것이 비동기** — 저장소 및 API 호출은 항상 `await`하세요.
+
+**직접 SQL 없음** — 구조화된 저장소 컬렉션을 사용하세요.
+
+**파일 시스템 없음** — 파일은 미디어 API를 사용하세요.
+
+## 다음 단계
+
+- [훅 참조](/ko/plugins/hooks/) — 모든 훅과 시그니처
+- [저장소 API](/ko/plugins/storage/) — 컬렉션과 쿼리
+- [설정](/ko/plugins/settings/) — 설정 스키마와 KV 저장소
+- [관리자 UI](/ko/plugins/admin-ui/) — 관리자 페이지 구축

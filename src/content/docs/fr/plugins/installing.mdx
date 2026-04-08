@@ -1,0 +1,139 @@
+---
+title: Installation des Extensions
+description: Installez des extensions depuis le EmDash Marketplace ou ajoutez-les depuis du code.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Les plugins EmDash peuvent être installés de deux manières : depuis la marketplace via le tableau de bord d'administration, ou ajoutés directement dans votre configuration Astro. Les plugins de la marketplace s'exécutent dans un bac à sable isolé ; les plugins basés sur la configuration s'exécutent dans le processus.
+
+## Depuis la Marketplace
+
+Le tableau de bord d'administration inclut un navigateur de marketplace où vous pouvez rechercher, installer et gérer des plugins.
+
+### Prérequis
+
+Pour installer des plugins de la marketplace, votre site a besoin :
+
+1. **Exécuteur de bac à sable configuré** — Les plugins de la marketplace s'exécutent dans des workers V8 isolés, ce qui nécessite le runtime de bac à sable :
+
+   ```typescript title="astro.config.mjs"
+   import { emdash } from "emdash/astro";
+
+   export default defineConfig({
+     integrations: [
+       emdash({
+         marketplace: "https://marketplace.emdashcms.com",
+         sandboxRunner: true,
+       }),
+     ],
+   });
+   ```
+
+2. **Accès administrateur** — Seuls les administrateurs peuvent installer ou supprimer des plugins.
+
+### Parcourir et Installer
+
+<Steps>
+1. Ouvrez le panneau d'administration et naviguez vers **Plugins > Marketplace**
+2. Parcourez ou recherchez un plugin
+3. Cliquez sur la carte du plugin pour voir sa page de détails — README, captures d'écran, capacités et résultats de l'audit de sécurité
+4. Cliquez sur **Installer**
+5. Examinez la boîte de dialogue de consentement des capacités — cela montre ce à quoi le plugin aura accès
+6. Confirmez l'installation
+</Steps>
+
+Le plugin sera téléchargé, stocké dans votre bucket R2 du site et chargé dans l'exécuteur de bac à sable. Il est actif immédiatement.
+
+### Consentement des Capacités
+
+Avant l'installation, vous verrez une boîte de dialogue listant ce à quoi le plugin a besoin d'accéder :
+
+| Capacité | Ce que cela signifie |
+| ---------- | ------------- |
+| `read:content` | Lire votre contenu |
+| `write:content` | Créer, mettre à jour et supprimer du contenu |
+| `read:media` | Accéder à votre médiathèque |
+| `write:media` | Télécharger et gérer des médias |
+| `network:fetch` | Effectuer des requêtes réseau vers des hôtes spécifiques |
+
+<Aside type="caution">
+  N'installez que des plugins d'auteurs en qui vous avez confiance. Le système de capacités limite ce à quoi un plugin en bac à sable peut accéder, mais un plugin avec `write:content` peut modifier n'importe quel contenu sur votre site.
+</Aside>
+
+### Audit de Sécurité
+
+Chaque version de plugin dans la marketplace a subi un audit de sécurité automatisé. Le verdict de l'audit apparaît sur la carte du plugin :
+
+- **Réussi** — Aucun problème trouvé
+- **Avertissement** — Préoccupations mineures signalées (examinez les résultats)
+- **Échec** — Problèmes de sécurité significatifs détectés
+
+Vous pouvez consulter le rapport d'audit complet sur la page de détails du plugin, y compris les résultats individuels et leur gravité.
+
+### Mises à Jour
+
+Lorsqu'une version plus récente d'un plugin installé est disponible :
+
+1. Allez dans **Plugins** dans le panneau d'administration
+2. Les plugins de la marketplace affichent un badge **Mise à jour disponible**
+3. Cliquez sur **Mettre à jour** pour voir le journal des modifications et tout changement de capacités
+4. Si la nouvelle version nécessite des capacités supplémentaires, vous verrez un diff et devrez approuver
+5. Confirmez pour mettre à jour
+
+<Aside type="note">
+  Les mises à jour qui ajoutent de nouvelles capacités nécessitent une approbation explicite. Si un plugin qui ne lisait auparavant que du contenu souhaite maintenant effectuer des requêtes réseau, vous verrez la nouvelle capacité mise en évidence avant de confirmer.
+</Aside>
+
+### Désinstallation
+
+1. Allez dans **Plugins** dans le panneau d'administration
+2. Cliquez sur le plugin de la marketplace que vous souhaitez supprimer
+3. Cliquez sur **Désinstaller**
+4. Choisissez de conserver ou de supprimer les données stockées du plugin
+5. Confirmez
+
+Le code du plugin en bac à sable est supprimé de votre bucket R2 et il cesse de s'exécuter immédiatement.
+
+## Depuis la Configuration
+
+Pour les plugins de confiance (votre propre code, ou des packages que vous installez via npm), ajoutez-les directement à votre configuration Astro :
+
+```
+typescript title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import { emdash } from "emdash/astro";
+import seoPlugin from "@emdash-cms/plugin-seo";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      plugins: [
+        seoPlugin({ generateSitemap: true }),
+      ],
+    }),
+  ],
+});
+```
+
+Plugins basés sur la configuration :
+
+- S'exécutent dans le processus (pas en bac à sable)
+- Ont un accès complet aux APIs Node.js
+- Sont chargés au moment de la construction et à chaque démarrage du serveur
+- Ne peuvent pas être installés ou supprimés depuis l'interface d'administration
+
+<Aside type="tip">
+  Utilisez les plugins basés sur la configuration pour le code interne et les plugins que vous maintenez vous-même. Utilisez les plugins de la marketplace pour les extensions tierces où l'isolation en bac à sable offre des avantages de sécurité.
+</Aside>
+
+## Marketplace vs. Configuration : Quand Utiliser Chacun
+
+| | Marketplace | Configuration |
+| --- | --- | --- |
+| **Exécution** | Isolat V8 en bac à sable | Dans le processus |
+| **Méthode d'installation** | Interface d'administration | Changement de code + déploiement |
+| **Capacités** | Appliquées à l'exécution | Documentation uniquement |
+| **APIs Node.js** | Non disponibles | Accès complet |
+| **Idéal pour** | Plugins tiers | Code interne |
+| **Mises à jour** | En un clic dans l'admin | Mise à jour de version + déploiement |

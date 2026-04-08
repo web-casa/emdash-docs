@@ -1,0 +1,382 @@
+---
+title: 콜렉션 & 필드
+description: 콜렉션과 필드로 콘텐츠 유형을 정의합니다—지원되는 필드 유형, 유효성 검사 및 관계.
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+import contentTypesImg from "../../../../assets/screenshots/admin-content-types.png";
+
+컬렉션은 EmDash 콘텐츠 모델의 기초입니다. 각 컬렉션은 콘텐츠 유형(게시물, 페이지, 제품)을 나타내며 데이터의 구조를 결정하는 필드 정의를 포함합니다.
+
+## 컬렉션 생성
+
+**콘텐츠 유형** 아래의 관리자 패널을 통해 컬렉션을 생성하세요. 각 컬렉션에는 다음이 포함됩니다:
+
+<img src={contentTypesImg.src} alt="EmDash content types showing Pages, Posts, and custom collections with their features" />
+
+| 속성            | 설명                                          |
+| --------------- | ---------------------------------------------------- |
+| `slug`          | URL에 안전한 식별자 (예: `posts`, `products`)      |
+| `label`         | 표시 이름 (예: "블로그 게시물")                    |
+| `labelSingular` | 단수형 (예: "게시물")                         |
+| `description`   | 편집자를 위한 선택적 설명                     |
+| `icon`          | 관리자 사이드바용 Lucide 아이콘 이름               |
+| `supports`      | 초안, 개정판, 미리보기, 예약, 검색, SEO와 같은 기능 |
+
+<Aside type="note">
+	일부 컬렉션 슬러그는 예약되어 있습니다: `content`, `media`, `users`, `revisions`, `taxonomies`,
+	`options`, `audit_logs`.
+</Aside>
+
+## 컬렉션 기능
+
+컬렉션 생성 시 필요한 기능을 활성화하세요:
+
+| 기능      | 설명                                    |
+| ------------ | ---------------------------------------------- |
+| `drafts`     | 초안/게시된 워크플로우 활성화                |
+| `revisions`  | 버전 스냅샷으로 콘텐츠 기록 추적   |
+| `preview`    | 초안 콘텐츠에 대한 서명된 미리보기 URL 생성 |
+| `scheduling` | 미래 날짜에 콘텐츠 게시 예약   |
+
+```ts
+// Example collection with all features enabled
+{
+  slug: "posts",
+  label: "Blog Posts",
+  labelSingular: "Post",
+  supports: ["drafts", "revisions", "preview", "scheduling"]
+}
+```
+
+## 필드 유형
+
+EmDash는 SQLite 열 유형에 매핑되는 15가지 필드 유형을 지원합니다:
+
+### 텍스트 필드
+
+<Tabs>
+  <TabItem label="string">
+    짧은 텍스트 입력. `TEXT` 열에 매핑됩니다.
+    
+    ```ts
+    { slug: "title", type: "string", label: "Title" }
+    ```
+  </TabItem>
+  <TabItem label="text">
+    여러 줄 텍스트 영역. `TEXT` 열에 매핑됩니다.
+    
+    ```ts
+    { slug: "excerpt", type: "text", label: "Excerpt" }
+    ```
+  </TabItem>
+  <TabItem label="slug">
+    URL에 안전한 슬러그 필드. `TEXT` 열에 매핑됩니다.
+    
+    ```ts
+    { slug: "handle", type: "slug", label: "URL Handle" }
+    ```
+  </TabItem>
+</Tabs>
+
+### 리치 콘텐츠
+
+<Tabs>
+  <TabItem label="portableText">
+    리치 텍스트 편집기 (TipTap/ProseMirror). JSON으로 저장됩니다.
+    
+    ```ts
+    { slug: "content", type: "portableText", label: "Content" }
+    ```
+    
+    Portable Text는 HTML을 포함하지 않고 구조를 보존하는 블록 기반 형식입니다.
+  </TabItem>
+  <TabItem label="json">
+    임의의 JSON 데이터. JSON으로 저장됩니다.
+    
+    ```ts
+    { slug: "metadata", type: "json", label: "Custom Metadata" }
+    ```
+  </TabItem>
+</Tabs>
+
+### 숫자
+
+<Tabs>
+  <TabItem label="number">
+    소수점 숫자. `REAL` 열에 매핑됩니다.
+    
+    ```ts
+    { slug: "price", type: "number", label: "Price" }
+    ```
+  </TabItem>
+  <TabItem label="integer">
+    정수. `INTEGER` 열에 매핑됩니다.
+    
+    ```ts
+    { slug: "quantity", type: "integer", label: "Stock Quantity" }
+    ```
+  </TabItem>
+</Tabs>
+
+### 불리언 및 날짜
+
+<Tabs>
+  <TabItem label="boolean">
+    참/거짓 토글. `INTEGER` (0/1)에 매핑됩니다.
+    
+    ```ts
+    { slug: "featured", type: "boolean", label: "Featured Post" }
+    ```
+  </TabItem>
+  <TabItem label="datetime">
+    날짜 및 시간 선택기. ISO 8601 문자열로 저장됩니다.
+    
+    ```ts
+    { slug: "eventDate", type: "datetime", label: "Event Date" }
+    ```
+  </TabItem>
+</Tabs>
+
+### 선택
+
+<Tabs>
+  <TabItem label="select">
+    목록에서 단일 옵션 선택. `TEXT` 열에 매핑됩니다.
+    
+    ```ts
+    {
+      slug: "status",
+      type: "select",
+      label: "제품 상태",
+      validation: {
+        options: ["active", "discontinued", "coming_soon"]
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="multiSelect">
+    목록에서 여러 옵션 선택. JSON 배열로 저장됩니다.
+    
+    ```ts
+    {
+      slug: "features",
+      type: "multiSelect",
+      label: "제품 기능",
+      validation: {
+        options: ["wireless", "waterproof", "eco-friendly"]
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+### 미디어 및 참조
+
+<Tabs>
+  <TabItem label="image">
+    미디어 라이브러리에서 이미지 선택기. 미디어 ID를 `TEXT`로 저장합니다.
+    
+    ```ts
+    { slug: "featuredImage", type: "image", label: "Featured Image" }
+    ```
+  </TabItem>
+  <TabItem label="file">
+    미디어 라이브러리에서 파일 선택기. 미디어 ID를 `TEXT`로 저장합니다.
+    
+    ```ts
+    { slug: "attachment", type: "file", label: "PDF Attachment" }
+    ```
+  </TabItem>
+  <TabItem label="reference">
+    다른 컬렉션 항목에 대한 참조. 항목 ID를 `TEXT`로 저장합니다.
+    
+    ```ts
+    {
+      slug: "author",
+      type: "reference",
+      label: "작성자",
+      options: {
+        collection: "authors"
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+## 필드 속성
+
+모든 필드는 다음 속성을 지원합니다:
+
+| 속성       | 유형        | 설명                                  |
+| -------------- | ----------- | -------------------------------------------- |
+| `slug`         | `string`    | 데이터베이스의 열 이름                  |
+| `label`        | `string`    | 관리자 UI의 표시 레이블                    |
+| `type`         | `FieldType` | 15가지 필드 유형 중 하나                    |
+| `required`     | `boolean`   | 필드에 값이 반드시 있어야 하는지 여부          |
+| `unique`       | `boolean`   | 항목 간 값이 고유해야 하는지 여부 |
+| `defaultValue` | `unknown`   | 새 항목의 기본 값                |
+| `validation`   | `object`    | 유형별 유효성 검사 규칙               |
+| `widget`       | `string`    | 사용자 정의 위젯 식별자                     |
+| `options`      | `object`    | 위젯별 구성                |
+| `sortOrder`    | `number`    | 편집기의 표시 순서                  |
+
+<Aside type="caution">
+	일부 필드 슬러그는 예약되어 사용할 수 없습니다: `id`, `slug`, `status`, `author_id`,
+	`primary_byline_id`, `created_at`, `updated_at`, `published_at`, `scheduled_at`, `deleted_at`,
+	`version`, `live_revision_id`, `draft_revision_id`.
+</Aside>
+
+## 유효성 검사 규칙
+
+`validation` 객체는 필드 유형에 따라 다릅니다:
+
+```ts
+interface FieldValidation {
+	required?: boolean; // All types
+	min?: number; // number, integer
+	max?: number; // number, integer
+	minLength?: number; // string, text
+	maxLength?: number; // string, text
+	pattern?: string; // string (regex)
+	options?: string[]; // select, multiSelect
+}
+```
+
+유효성 검사 예시:
+
+```ts
+{
+  slug: "email",
+  type: "string",
+  label: "Email Address",
+  required: true,
+  unique: true,
+  validation: {
+    pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+  }
+}
+```
+
+## 위젯 옵션
+
+`options` 객체는 필드별 UI 동작을 구성합니다:
+
+```ts
+interface FieldWidgetOptions {
+	rows?: number; // text (textarea rows)
+	showPreview?: boolean; // image, file
+	collection?: string; // reference (target collection)
+	allowMultiple?: boolean; // reference (multiple refs)
+	[key: string]: unknown; // Custom widget options
+}
+```
+
+참조 필드 예시:
+
+```ts
+{
+  slug: "relatedProducts",
+  type: "reference",
+  label: "Related Products",
+  options: {
+    collection: "products",
+    allowMultiple: true
+  }
+}
+```
+
+## 컬렉션 쿼리
+
+제공된 쿼리 함수를 사용하여 콘텐츠를 가져오세요. 이는 Astro의 라이브 컬렉션 패턴을 따르며 구조화된 결과를 반환합니다:
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+// 모든 항목 가져오기 - { entries, error } 반환
+const { entries: posts } = await getEmDashCollection("posts");
+
+// 상태별 필터링
+const { entries: drafts } = await getEmDashCollection("posts", {
+	status: "draft",
+});
+
+// 결과 제한
+const { entries: recent } = await getEmDashCollection("posts", {
+	limit: 5,
+});
+
+// 분류 기준으로 필터링
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	where: { category: "news" },
+});
+
+// 슬러그로 단일 항목 가져오기 - { entry, error, isPreview } 반환
+const { entry: post } = await getEmDashEntry("posts", "my-post-slug");
+
+// 오류 처리
+const { entries, error } = await getEmDashCollection("posts");
+if (error) {
+	console.error("Failed to load posts:", error);
+}
+```
+
+## 타입 생성
+
+스키마에서 TypeScript 타입을 생성하려면 `npx emdash types`를 실행하세요:
+
+```ts
+// .emdash/types.ts (generated)
+export interface Post {
+	title: string;
+	content: PortableTextBlock[];
+	excerpt?: string;
+	featuredImage?: string;
+	author: string; // reference ID
+}
+
+export interface Product {
+	title: string;
+	price: number;
+	description: PortableTextBlock[];
+}
+```
+
+<Aside type="tip">
+	관리자 패널에서 컬렉션을 수정한 후 타입을 동기화하려면 `emdash types`를 다시 실행하세요.
+</Aside>
+
+## 데이터베이스 매핑
+
+필드 타입은 SQLite 열 타입에 매핑됩니다:
+
+| 필드 타입      | SQLite 타입 | 참고 사항             |
+| -------------- | ----------- | --------------------- |
+| `string`       | `TEXT`      |                       |
+| `text`         | `TEXT`      |                       |
+| `slug`         | `TEXT`      |                       |
+| `number`       | `REAL`      | 64비트 부동 소수점    |
+| `integer`      | `INTEGER`   | 64비트 부호 있는 정수 |
+| `boolean`      | `INTEGER`   | 0 또는 1              |
+| `datetime`     | `TEXT`      | ISO 8601 형식         |
+| `select`       | `TEXT`      |                       |
+| `multiSelect`  | `JSON`      | 문자열 배열           |
+| `portableText` | `JSON`      | 블록 배열             |
+| `image`        | `TEXT`      | 미디어 ID             |
+| `file`         | `TEXT`      | 미디어 ID             |
+| `reference`    | `TEXT`      | 항목 ID               |
+| `json`         | `JSON`      | 임의의 JSON           |
+
+## 다음 단계
+
+<CardGrid>
+	<Card title="콘텐츠 모델" icon="open-book">
+		[데이터베이스 우선 접근 방식](/ko/concepts/content-model/)을 이해하세요.
+	</Card>
+	<Card title="분류 체계" icon="list-format">
+		[카테고리와 태그](/ko/guides/taxonomies/)로 콘텐츠를 구성하세요.
+	</Card>
+	<Card title="미디어 라이브러리" icon="seti:image">
+		[이미지와 파일](/ko/guides/media-library/)을 관리하세요.
+	</Card>
+</CardGrid>

@@ -1,0 +1,435 @@
+---
+title: Portage des extensions WordPress
+description: Convertir des extensions WordPress en extensions EmDash à l'aide de l'API d'extension
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+De nombreux plugins WordPress peuvent être adaptés pour EmDash. Le modèle de plugin est différent—TypeScript au lieu de PHP, hooks au lieu d'actions/filtres, stockage structuré au lieu de wp_options—mais la plupart des fonctionnalités se transposent clairement.
+
+## Évaluation de la portabilité
+
+Tous les plugins ne sont pas pertinents à porter. Évaluez les candidats avant de commencer.
+
+<CardGrid>
+	<Card title="Bons candidats" icon="approve-check">
+		Champs personnalisés, plugins SEO, processeurs de contenu, extensions d'interface d'administration, analytiques, partage social, formulaires
+	</Card>
+	<Card title="Mauvais candidats" icon="close">
+		Fonctionnalités multisite, intégrations WooCommerce/Gutenberg, plugins qui corrigent les internes du cœur de WordPress
+	</Card>
+</CardGrid>
+
+## Comparaison de la structure des plugins
+
+<Tabs>
+<TabItem label="WordPress">
+```
+wp-content/plugins/my-plugin/
+├── my-plugin.php       # Main file with plugin header
+├── includes/
+│   ├── class-admin.php
+│   └── class-api.php
+└── admin/
+    └── js/
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+my-plugin/
+├── src/
+│   ├── index.ts    # Plugin definition (definePlugin)
+│   └── admin.tsx   # Admin UI exports (React)
+├── package.json
+└── tsconfig.json
+```
+</TabItem>
+</Tabs>
+
+## Correspondance des hooks
+
+WordPress utilise `add_action()` et `add_filter()` avec des noms de hooks sous forme de chaînes. EmDash utilise des hooks typés déclarés dans la définition du plugin.
+
+### Hooks de cycle de vie
+
+| WordPress                    | EmDash            | Notes                                    |
+| ---------------------------- | ------------------- | ---------------------------------------- |
+| `register_activation_hook()` | `plugin:install`    | S'exécute une fois lors de la première installation               |
+| Plugin activé               | `plugin:activate`   | S'exécute lors de l'activation                        |
+| Plugin désactivé              | `plugin:deactivate` | S'exécute lors de la désactivation                       |
+| `register_uninstall_hook()`  | `plugin:uninstall`  | `event.deleteData` indique le choix de l'utilisateur |
+
+### Hooks de contenu
+
+| WordPress             | EmDash               | Notes                                      |
+| --------------------- | ---------------------- | ------------------------------------------ |
+| `wp_insert_post_data` | `content:beforeSave`   | Retourner le contenu modifié ou lancer une erreur pour annuler |
+| `save_post`           | `content:afterSave`    | Effets secondaires après la sauvegarde                    |
+| `before_delete_post`  | `content:beforeDelete` | Retourner `false` pour annuler                   |
+| `deleted_post`        | `content:afterDelete`  | Nettoyage après suppression                     |
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+add_action('save_post', function($post_id, $post, $update) {
+    if ($post->post_type !== 'product') return;
+
+    $price = get_post_meta($post_id, 'price', true);
+    if ($price > 1000) {
+        update_post_meta($post_id, 'is_premium', true);
+    }
+
+}, 10, 3);
+
+````
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+hooks: {
+    "content:afterSave": async (event, ctx) => {
+        if (event.collection !== "products") return;
+
+        const price = event.content.price as number;
+        if (price > 1000) {
+            await ctx.kv.set(`premium:${event.content.id}`, true);
+        }
+    },
+}
+````
+
+</TabItem>
+</Tabs>
+
+### Hooks de médias
+
+| WordPress                    | EmDash             | Notes                 |
+| ---------------------------- | -------------------- | --------------------- |
+| `wp_handle_upload_prefilter` | `media:beforeUpload` | Valider ou transformer |
+| `add_attachment`             | `media:afterUpload`  | Réagir après le téléchargement    |
+
+## Correspondance du stockage
+
+### API Options → Magasin KV
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+$api_key = get_option('my_plugin_api_key', '');
+update_option('my_plugin_api_key', 'abc123');
+delete_option('my_plugin_api_key');
+```
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+const apiKey = await ctx.kv.get<string>("settings:apiKey") ?? "";
+await ctx.kv.set("settings:apiKey", "abc123");
+await ctx.kv.delete("settings:apiKey");
+```
+</TabItem>
+</Tabs>
+
+<Aside>
+	Utilisez le préfixe `settings:` pour les valeurs configurables par l'utilisateur et le préfixe `state:` pour l'état interne du plugin.
+</Aside>
+
+### Tables personnalisées → Collections de stockage
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+global $wpdb;
+$table = $wpdb->prefix . 'my_plugin_items';
+
+// Insertion
+$wpdb->insert($table, ['name' => 'Item 1', 'status' => 'active']);
+
+// Requête
+$items = $wpdb->get_results(
+"SELECT \* FROM $table WHERE status = 'active' LIMIT 10"
+);
+
+````
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+// Declare in plugin definition
+storage: {
+    items: {
+        indexes: ["status", "createdAt"],
+    },
+},
+
+// Dans les hooks ou routes :
+await ctx.storage.items.put("item-1", {
+    name: "Item 1",
+    status: "active",
+    createdAt: new Date().toISOString(),
+});
+
+const result = await ctx.storage.items.query({
+    where: { status: "active" },
+    limit: 10,
+});
+````
+
+</TabItem>
+</Tabs>
+
+## Schéma des paramètres
+
+WordPress utilise l'API Settings pour les formulaires d'administration. EmDash utilise un schéma déclaratif qui génère automatiquement l'interface utilisateur.
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+add_action('admin_init', function() {
+    register_setting('my_plugin', 'my_plugin_api_key');
+    add_settings_section('main', 'Settings', null, 'my-plugin');
+    add_settings_field('api_key', 'API Key', function() {
+        $value = get_option('my_plugin_api_key');
+        echo '<input type="text" name="my_plugin_api_key"
+              value="' . esc_attr($value) . '">';
+    }, 'my-plugin', 'main');
+});
+```
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+admin: {
+    settingsSchema: {
+        apiKey: {
+            type: "secret",
+            label: "API Key",
+            description: "Your API key from the dashboard",
+        },
+        enabled: {
+            type: "boolean",
+            label: "Enabled",
+            default: true,
+        },
+        limit: {
+            type: "number",
+            label: "Item Limit",
+            default: 100,
+            min: 1,
+            max: 1000,
+        },
+    },
+}
+```
+</TabItem>
+</Tabs>
+
+## Interface d'administration
+
+Les pages d'administration de WordPress sont en PHP. EmDash utilise des composants React.
+
+```
+tsx title="src/admin.tsx"
+import { useState, useEffect } from "react";
+
+export const widgets = {
+	summary: function SummaryWidget() {
+		const [count, setCount] = useState(0);
+
+		useEffect(() => {
+			fetch("/_emdash/api/plugins/my-plugin/status")
+				.then((r) => r.json())
+				.then((data) => setCount(data.count));
+		}, []);
+
+		return <div>Total des éléments : {count}</div>
+;
+	},
+};
+
+export const pages = {
+	settings: function SettingsPage() {
+		// React component for settings page
+		return <div>Settings content</div>
+;
+	},
+};
+```
+
+Enregistrez dans la définition du plugin :
+
+```
+typescript title="src/index.ts"
+admin: {
+    entry: "@my-org/my-plugin/admin",
+    pages: [{ path: "/settings", label: "Dashboard" }],
+    widgets: [{ id: "summary", title: "Summary", size: "half" }],
+},
+```
+
+## REST API → Routes de plugin
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+register_rest_route('my-plugin/v1', '/items', [
+    'methods' => 'GET',
+    'callback' => function($request) {
+        global $wpdb;
+        $items = $wpdb->get_results("SELECT * FROM items LIMIT 50");
+        return new WP_REST_Response($items);
+    },
+]);
+```
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+routes: {
+    items: {
+        handler: async (ctx) => {
+            const result = await ctx.storage.items.query({ limit: 50 });
+            return { items: result.items };
+        },
+    },
+},
+```
+</TabItem>
+</Tabs>
+
+Les routes sont disponibles à l'adresse `/_emdash/api/plugins/{plugin-id}/{route-name}`.
+
+## Processus de portage
+
+<Steps>
+
+1. **Analysez le plugin WordPress**
+
+   Documentez ce qu'il fait : hooks, opérations de base de données, pages d'administration, points de terminaison REST.
+
+2. **Mappez vers les concepts d'EmDash**
+
+   Hooks WordPress → Hooks EmDash. `wp_options` → `ctx.kv`. Tables personnalisées → Collections de stockage. Pages d'administration → Composants React. Points de terminaison REST → Routes de plugin.
+
+3. **Créez le squelette du plugin**
+
+   ```typescript title="src/index.ts"
+   import { definePlugin } from "emdash";
+
+   export function createPlugin() {
+   	return definePlugin({
+   		id: "my-ported-plugin",
+   		version: "1.0.0",
+   		capabilities: [],
+   		storage: {},
+   		hooks: {},
+   		routes: {},
+   		admin: {},
+   	});
+   }
+   ```
+
+4. **Implémentez dans l'ordre**
+
+   Stockage → Hooks → Interface d'administration → Routes
+
+5. **Testez minutieusement**
+
+   Vérifiez que les hooks se déclenchent correctement, que le stockage fonctionne et que l'interface d'administration s'affiche.
+
+</Steps>
+
+## Exemple : Plugin de temps de lecture
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+add_filter('wp_insert_post_data', function($data, $postarr) {
+    if ($data['post_type'] !== 'post') return $data;
+
+    $content = strip_tags($data['post_content']);
+    $word_count = str_word_count($content);
+    $read_time = ceil($word_count / 200);
+
+    if (!empty($postarr['ID'])) {
+        update_post_meta($postarr['ID'], '_read_time', $read_time);
+    }
+    return $data;
+
+}, 10, 2);
+
+````
+</TabItem>
+<TabItem label="EmDash">
+```
+typescript title="src/index.ts"
+export function createPlugin() {
+    return definePlugin({
+        id: "read-time",
+        version: "1.0.0",
+
+        admin: {
+            settingsSchema: {
+                wordsPerMinute: {
+                    type: "number",
+                    label: "Words per minute",
+                    default: 200,
+                    min: 100,
+                    max: 400,
+                },
+            },
+        },
+
+        hooks: {
+            "content:beforeSave": async (event, ctx) => {
+                if (event.collection !== "posts") return;
+
+                const wpm = await ctx.kv.get<number>("settings:wordsPerMinute") ?? 200;
+                const text = JSON.stringify(event.content.body || "");
+                const readTime = Math.ceil(text.split(/\s+/).length / wpm);
+
+                return { ...event.content, readTime };
+            },
+        },
+    });
+}
+````
+
+</TabItem>
+</Tabs>
+
+<Aside type="tip" title="Portage Assisté par IA">
+	Le portage de plugins est plus nuancé que celui des thèmes, mais les agents IA aident toujours de manière significative. Fournissez
+	le code du plugin WordPress ainsi que la documentation de l'API Plugin d'EmDash, et l'agent peut
+	générer une première ébauche raisonnable. Les plugins complexes peuvent nécessiter plusieurs itérations.
+</Aside>
+
+## Capacités
+
+Les plugins doivent déclarer les capacités requises pour le sandboxing de sécurité :
+
+| Capacité        | Fournit                       | Cas d'utilisation       |
+| --------------- | ----------------------------- | ------------------- |
+| `network:fetch` | `ctx.http.fetch()`            | Appels API externes |
+| `read:content`  | `ctx.content.get()`, `list()` | Lecture du contenu CMS |
+| `write:content` | `ctx.content.create()`, etc.  | Modification du contenu |
+| `read:media`    | `ctx.media.get()`, `list()`   | Lecture des médias |
+| `write:media`   | `ctx.media.getUploadUrl()`    | Téléversement de médias |
+
+## Pièges Courants
+
+**Pas d'état global** — Utilisez le stockage au lieu des variables globales.
+
+**Tout est asynchrone** — Toujours `await` les appels de stockage et d'API.
+
+**Pas de SQL direct** — Utilisez les collections de stockage structuré.
+
+**Pas de système de fichiers** — Utilisez l'API média pour les fichiers.
+
+## Prochaines Étapes
+
+- [Référence des Hooks](/fr/plugins/hooks/) — Tous les hooks avec leurs signatures
+- [API de Stockage](/fr/plugins/storage/) — Collections et requêtes
+- [Paramètres](/fr/plugins/settings/) — Schéma de paramètres et stockage clé-valeur
+- [Interface d'Administration](/fr/plugins/admin-ui/) — Construction de pages d'administration

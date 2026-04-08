@@ -1,0 +1,100 @@
+---
+title: Einführung in EmDash
+description: Erfahren Sie, was EmDash ist, wie es funktioniert und ob es für Ihr Projekt geeignet ist.
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+EmDash ist ein **Astro-natives Content-Management-System**. Es bringt vertraute CMS-Muster – Sammlungen, Taxonomien, Menüs, Widgets und eine ausgefeilte Admin-Oberfläche – direkt in Ihre Astro-Website mit voller TypeScript-Unterstützung und portabler Bereitstellung.
+
+## Was EmDash ist
+
+EmDash ist ein CMS, das speziell für [Astro](https://astro.build) entwickelt wurde. Es nutzt die Live Content Collections von Astro 6, um Inhalte zur Laufzeit ohne Neubuilds bereitzustellen. Inhalte werden in SQLite-kompatiblen Datenbanken (D1, libSQL, lokales SQLite) und Medien in S3-kompatiblem Speicher (R2, lokales Dateisystem) gespeichert.
+
+**Wesentliche Merkmale:**
+
+- **Datenbank-zuerst Schema** — Sammlungen und Felder werden in der Datenbank definiert, nicht im Code. Erstellen und ändern Sie Inhaltstypen über die Admin-Oberfläche.
+- **dynamische Sammlungen** — Inhaltsänderungen sind sofort verfügbar. Keine statischen Neubuilds erforderlich.
+- **Plugin-System** — WordPress-inspirierte Hooks, Speicher, Einstellungen und Admin-UI-Erweiterungen.
+- **Cloud-portabel** — Läuft auf Cloudflare (Workers + D1 + R2), Node.js, lokalem SQLite und jedem S3-kompatiblen Speicher.
+
+## Was EmDash nicht ist
+
+- **Kein Headless-CMS** — EmDash ist eng mit Astro integriert. Es ist kein separater Dienst, den Sie über eine API aufrufen.
+- **Nicht WordPress-kompatibel** — Kein PHP, keine WordPress-Plugins, die direkt laufen. Aber WordPress-Inhalte und -Konzepte migrieren sauber.
+- **Kein Page-Builder** — EmDash konzentriert sich auf strukturierte Inhalte. Verwenden Sie für visuelles Page-Building Astro-Komponenten.
+
+## Für wen EmDash ist
+
+<CardGrid>
+	<Card title="Agentur-Entwickler" icon="laptop">
+		Erstellen Sie Kundenseiten schnell mit wiederverwendbaren Plugins und Themes. Keine PHP-Sicherheitsupdates, keine
+		Plugin-Konflikte.
+	</Card>
+	<Card title="Einzelentwickler" icon="seti:todo">
+		Full-Stack-Framework mit integriertem CMS. Kein separates Headless-CMS zu verwalten.
+	</Card>
+	<Card title="Content-Redakteure" icon="pencil">
+		Intuitive Admin-Oberfläche. Erstellen und bearbeiten Sie Inhalte, ohne Code anzufassen.
+	</Card>
+	<Card title="WordPress-Nutzer" icon="right-arrow">
+		Migrationspfad für Inhalte und Plugins. Moderne Tools, vertraute Konzepte.
+	</Card>
+</CardGrid>
+
+## Architektur im Überblick
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Your Astro Site                        │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                 EmDash Integration                  │  │
+│  │                                                       │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐   │  │
+│  │  │  Content    │  │   Admin     │  │   Plugins    │   │  │
+│  │  │  Engine     │  │   Panel     │  │              │   │  │
+│  │  └─────────────┘  └─────────────┘  └──────────────┘   │  │
+│  │                                                       │  │
+│  │  ┌───────────────────────────────────────────────────┐│  │
+│  │  │                  Data Layer                       ││  │
+│  │  │    SQLite/D1      ←→  Kysely  ←→  R2/S3/Local    ││  │
+│  │  └───────────────────────────────────────────────────┘│  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                   Astro Framework                     │  │
+│  │        Live Collections • Sessions • Middleware       │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+<Aside type="tip">
+	EmDash ist Astro-nativ und cloud-portabel. Es läuft auf Cloudflare (D1 + R2 + Workers), Node.js,
+	lokalem SQLite und jedem S3-kompatiblen Speicher.
+</Aside>
+
+## Kernkonzepte
+
+Bevor Sie einsteigen, machen Sie sich mit diesen Schlüsselkonzepten vertraut:
+
+- **Sammlungen** — In der Datenbank definierte Inhaltstypen (Beiträge, Seiten, Produkte usw.)
+- **Felder** — Die Eigenschaften einer Sammlung (Titel, Inhalt, Preis usw.)
+- **Taxonomien** — Klassifizierungssysteme (Kategorien, Tags, benutzerdefinierte Taxonomien)
+- **Menüs** — Admin-editierbare Navigationsstrukturen
+- **Widget-Bereiche** — Konfigurierbare Inhaltsregionen für Sidebars und Fußzeilen
+- **Plugins** — Erweiterungen, die über Hooks, Speicher und UI Funktionalität hinzufügen
+
+## Nächste Schritte
+
+<CardGrid>
+	<Card title="Erste Schritte" icon="rocket">
+		[Erstellen Sie Ihre erste EmDash-Website](/de/getting-started/) in weniger als 5 Minuten.
+	</Card>
+	<Card title="Konzepte erkunden" icon="open-book">
+		Erfahren Sie mehr über [Architektur](/de/concepts/architecture/) und das [Inhaltsmodell](/de/concepts/content-model/).
+	</Card>
+	<Card title="Von WordPress migrieren" icon="right-arrow">
+		[Importieren Sie Ihre WordPress-Inhalte](/de/migration/from-wordpress/) und verstehen Sie die Konzeptzuordnung.
+	</Card>
+</CardGrid>

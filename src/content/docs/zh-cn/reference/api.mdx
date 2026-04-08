@@ -1,0 +1,493 @@
+---
+title: JavaScript API 参考
+description: 用于查询和管理 EmDash 内容的编程式 API。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash 导出了用于查询内容、管理媒体和处理数据库的函数。
+
+## 内容查询
+
+EmDash 的查询函数遵循 Astro 的 [实时内容集合](https://docs.astro.build/en/reference/experimental-flags/live-content-collections/) 模式，返回 `{ entries, error }` 或 `{ entry, error }` 以实现优雅的错误处理。
+
+### `getEmDashCollection()`
+
+获取集合中的所有条目。
+
+```ts
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts, error } = await getEmDashCollection("posts");
+
+if (error) {
+	console.error("Failed to load posts:", error);
+}
+```
+
+#### 参数
+
+| 参数名       | 类型               | 描述               |
+| ------------ | ------------------ | ------------------ |
+| `collection` | `string`           | 集合标识符         |
+| `options`    | `CollectionFilter` | 可选的筛选选项     |
+
+#### 选项
+
+```ts
+interface CollectionFilter {
+	status?: "draft" | "published" | "archived";
+	limit?: number;
+	where?: Record<string, string | string[]>; // Filter by field or taxonomy
+}
+```
+
+#### 返回值
+
+```ts
+interface CollectionResult<T> {
+	entries: ContentEntry<T>[]; // Empty array if error or none found
+	error?: Error; // Set if query failed
+}
+```
+
+#### 示例
+
+```ts
+// Get all published posts
+const { entries: posts } = await getEmDashCollection("posts", {
+	status: "published",
+});
+
+// Get latest 5 posts
+const { entries: latest } = await getEmDashCollection("posts", {
+	limit: 5,
+	status: "published",
+});
+
+// Filter by taxonomy
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: "news" },
+});
+
+// Handle errors
+const { entries, error } = await getEmDashCollection("posts");
+if (error) {
+	return new Response("Server error", { status: 500 });
+}
+```
+
+### `getEmDashEntry()`
+
+通过 slug 或 ID 获取单个条目。
+
+```ts
+import { getEmDashEntry } from "emdash";
+
+const { entry: post, error } = await getEmDashEntry("posts", "my-post-slug");
+
+if (!post) {
+	return Astro.redirect("/404");
+}
+```
+
+#### 参数
+
+| 参数名       | 类型     | 描述               |
+| ------------ | -------- | ------------------ |
+| `collection` | `string` | 集合标识符         |
+| `slugOrId`   | `string` | 条目的 slug 或 ID  |
+
+预览模式会自动处理 —— 中间件会检测 `_preview` 令牌并通过 `AsyncLocalStorage` 提供草稿内容。不需要 options 参数。
+
+#### 返回值
+
+```ts
+interface EntryResult<T> {
+	entry: ContentEntry<T> | null; // null if not found
+	error?: Error; // Set only for actual errors, not "not found"
+	isPreview: boolean; // true if draft content is being served
+}
+```
+
+#### 示例
+
+```ts
+// Get by slug
+const { entry: post } = await getEmDashEntry("posts", "hello-world");
+
+// Get by ID
+const { entry: post } = await getEmDashEntry("posts", "01HXK5MZSN0FVXT2Q3KPRT9M7D");
+
+// Preview is automatic — isPreview is true when a valid _preview token is present
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+// Handle errors vs not-found
+if (error) {
+	return new Response("Server error", { status: 500 });
+}
+if (!entry) {
+	return Astro.redirect("/404");
+}
+```
+
+## 内容类型
+
+### `ContentEntry`
+
+查询函数返回的条目：
+
+```ts
+interface ContentEntry<T = Record<string, unknown>> {
+	id: string;
+	data: T;
+	edit: EditProxy; // Visual editing annotations
+}
+```
+
+`edit` 代理提供可视化编辑注解。将其展开到元素上以启用内联编辑：`{...entry.edit.title}`。在生产环境中，这不会产生任何输出。
+
+`data` 对象包含所有内容字段以及系统字段：
+
+- `id` - 唯一标识符
+- `slug` - URL 友好的标识符
+- `status` - "draft" | "published" | "archived"
+- `createdAt` - ISO 时间戳
+- `updatedAt` - ISO 时间戳
+- `publishedAt` - ISO 时间戳或 null
+- 加上您在集合模式中定义的所有自定义字段
+
+## 数据库函数
+
+### `createDatabase()`
+
+创建数据库连接。
+
+```ts
+import { createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+```
+
+<Aside type="caution">
+	直接数据库访问适用于高级用例。对于内容访问，建议优先使用查询函数。
+</Aside>
+
+### `runMigrations()`
+
+运行待处理的数据库迁移。
+
+```ts
+import { createDatabase, runMigrations } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const { applied } = await runMigrations(db);
+console.log(`Applied ${applied.length} migrations`);
+```
+
+### `getMigrationStatus()`
+
+检查迁移状态。
+
+```ts
+import { createDatabase, getMigrationStatus } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const status = await getMigrationStatus(db);
+// { applied: ["0001_core", ...], pending: [] }
+```
+
+## 存储库
+
+通过存储库进行底层数据访问。
+
+### `ContentRepository`
+
+```ts
+import { ContentRepository, createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const repo = new ContentRepository(db);
+
+// Find many
+const { items, nextCursor } = await repo.findMany("posts", {
+	limit: 10,
+	where: { status: "published" },
+});
+
+// Find by ID
+const post = await repo.findById("posts", "01HXK5MZSN...");
+
+// Create
+const newPost = await repo.create({
+	type: "posts",
+	slug: "new-post",
+	data: { title: "New Post", content: [] },
+	status: "draft",
+});
+
+// Update
+const updated = await repo.update("posts", "01HXK5MZSN...", {
+	data: { title: "Updated Title" },
+});
+
+// Delete
+await repo.delete("posts", "01HXK5MZSN...");
+```
+
+### `MediaRepository`
+
+```ts
+import { MediaRepository, createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const repo = new MediaRepository(db);
+
+// List media
+const { items } = await repo.findMany({ limit: 20 });
+
+// Get by ID
+const media = await repo.findById("01HXK5MZSN...");
+
+// Create (after upload)
+const newMedia = await repo.create({
+	filename: "photo.jpg",
+	mimeType: "image/jpeg",
+	size: 12345,
+	storageKey: "uploads/photo.jpg",
+});
+```
+
+## 模式注册表
+
+编程式模式管理。
+
+```ts
+import { SchemaRegistry, createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const registry = new SchemaRegistry(db);
+
+// List collections
+const collections = await registry.listCollections();
+
+// Get collection with fields
+const postsSchema = await registry.getCollectionWithFields("posts");
+
+// Create collection
+await registry.createCollection({
+	slug: "products",
+	label: "Products",
+	labelSingular: "Product",
+	supports: ["drafts", "revisions"],
+});
+
+// Add field
+await registry.createField("products", {
+	slug: "price",
+	label: "Price",
+	type: "number",
+	required: true,
+});
+```
+
+## 预览系统
+
+### `generatePreviewToken()`
+
+为草稿内容生成预览令牌。
+
+```ts
+import { generatePreviewToken } from "emdash";
+
+const token = await generatePreviewToken({
+	contentId: "posts:01HXK5MZSN...",
+	secret: process.env.EMDASH_ADMIN_SECRET,
+	expiresIn: 3600, // 1 hour
+});
+```
+
+### `verifyPreviewToken()`
+
+验证预览令牌。
+
+```ts
+import { verifyPreviewToken } from "emdash";
+
+const result = await verifyPreviewToken({
+	token,
+	secret: process.env.EMDASH_ADMIN_SECRET,
+});
+
+if (result.valid) {
+	const { cid, exp, iat } = result.payload;
+	// cid is "collection:id" format, e.g. "posts:my-draft-post"
+}
+```
+
+### `isPreviewRequest()`
+
+检查请求是否包含预览令牌。
+
+```ts
+import { isPreviewRequest, getPreviewToken } from "emdash";
+
+if (isPreviewRequest(Astro.request)) {
+	const token = getPreviewToken(Astro.request);
+	// Verify and show preview content
+}
+```
+
+## 内容转换器
+
+在 Portable Text 和 ProseMirror 格式之间进行转换。
+
+```ts
+import { prosemirrorToPortableText, portableTextToProsemirror } from "emdash";
+
+// From ProseMirror (editor) to Portable Text (storage)
+const portableText = prosemirrorToPortableText(prosemirrorDoc);
+
+// From Portable Text to ProseMirror
+const prosemirrorDoc = portableTextToProsemirror(portableText);
+```
+
+## 站点设置
+
+```ts
+import { getSiteSettings, getSiteSetting } from "emdash";
+
+// Get all settings
+const settings = await getSiteSettings();
+
+// Get single setting
+const title = await getSiteSetting("siteTitle");
+```
+
+设置从运行时 API 是只读的。请使用管理 API 来更新它们。
+
+## 菜单
+
+```ts
+import { getMenu, getMenus } from "emdash";
+
+// Get all menus
+const menus = await getMenus();
+
+// Get specific menu with items
+const primaryMenu = await getMenu("primary");
+
+if (primaryMenu) {
+	primaryMenu.items.forEach(item => {
+		console.log(item.label, item.url);
+		// Nested items for dropdowns
+		item.children.forEach(child => console.log("  -", child.label));
+	});
+}
+```
+
+## 分类法
+
+```ts
+import { getTaxonomyTerms, getTerm, getEntryTerms, getEntriesByTerm } from "emdash";
+
+// Get all terms for a taxonomy (tree structure for hierarchical)
+const categories = await getTaxonomyTerms("category");
+
+// Get single term
+const news = await getTerm("category", "news");
+
+// Get terms assigned to a content entry
+const postCategories = await getEntryTerms("posts", "post-123", "category");
+
+// Get entries with a specific term
+const newsPosts = await getEntriesByTerm("posts", "category", "news");
+```
+
+## 小部件区域
+
+```ts
+import { getWidgetArea, getWidgetAreas } from "emdash";
+
+// Get all widget areas
+const areas = await getWidgetAreas();
+
+// Get specific widget area with widgets
+const sidebar = await getWidgetArea("sidebar");
+
+if (sidebar) {
+	sidebar.widgets.forEach(widget => {
+		console.log(widget.type, widget.title);
+	});
+}
+```
+
+## 区块
+
+```ts
+import { getSection, getSections, getSectionCategories } from "emdash";
+
+// Get all sections
+const sections = await getSections();
+
+// Filter sections
+const heroes = await getSections({ category: "hero" });
+const themeSections = await getSections({ source: "theme" });
+const results = await getSections({ search: "newsletter" });
+
+// Get single section
+const cta = await getSection("newsletter-cta");
+
+// Get categories
+const categories = await getSectionCategories();
+```
+
+## 搜索
+
+```ts
+import { search, searchCollection } from "emdash";
+
+// Global search across collections
+const results = await search("hello world", {
+	collections: ["posts", "pages"],
+	status: "published",
+	limit: 20,
+});
+
+// Results include snippets with highlights
+results.forEach(result => {
+	console.log(result.title);
+	console.log(result.snippet); // Contains <mark> tags
+	console.log(result.score);
+});
+
+// Collection-specific search
+const posts = await searchCollection("posts", "typescript", {
+	limit: 10,
+});
+```
+
+## 错误处理
+
+EmDash 导出了用于处理特定故障的错误类：
+
+```ts
+import {
+  EmDashDatabaseError,
+  EmDashValidationError,
+  EmDashStorageError,
+  SchemaError,
+} from "emdash";
+
+try {
+  await repo.create({ ... });
+} catch (error) {
+  if (error instanceof EmDashValidationError) {
+    console.error("Validation failed:", error.message);
+  }
+  if (error instanceof SchemaError) {
+    console.error("Schema error:", error.code, error.details);
+  }
+}
+```

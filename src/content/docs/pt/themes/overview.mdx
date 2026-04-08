@@ -1,0 +1,160 @@
+---
+title: Visão Geral dos Temas
+description: Entenda como os temas do EmDash funcionam e como eles inicializam novos sites.
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+Um tema EmDash é um site Astro completo — páginas, layouts, componentes, estilos — distribuído via `create-astro`. Ele também inclui um **arquivo de seed** que inicializa o banco de dados com coleções, campos, menus, redirecionamentos e conteúdo de exemplo na primeira execução.
+
+## O que um Tema Fornece
+
+Um tema é um projeto Astro funcional com:
+
+- **Páginas** — Rotas Astro para renderizar conteúdo (página inicial, posts de blog, arquivos, etc.)
+- **Layouts** — Estrutura HTML compartilhada
+- **Componentes** — Elementos de UI reutilizáveis (navegação, cards, rodapés)
+- **Estilos** — Configuração CSS ou Tailwind
+- **Um arquivo de seed** — JSON que informa ao CMS quais tipos de conteúdo e campos criar
+
+<Aside>
+	O EmDash oferece muito mais controle sobre o modelo de conteúdo do que o WordPress. Os temas tiram
+	vantagem disso declarando exatamente quais coleções e campos eles precisam via o arquivo de seed.
+	A maioria dos temas deve se basear nas coleções padrão **posts** e **pages**, adicionando campos e
+	taxonomias conforme necessário, em vez de inventar tipos de conteúdo totalmente novos.
+</Aside>
+
+## Estrutura do Tema
+
+```
+my-theme/
+├── package.json           # Theme metadata + EmDash config
+├── astro.config.mjs       # Astro integration setup
+├── src/
+│   ├── live.config.ts     # Live Collections configuration
+│   ├── pages/             # Astro routes
+│   ├── layouts/           # Layout components
+│   └── components/        # UI components
+└── .emdash/
+    ├── seed.json          # Schema + sample content
+    └── uploads/           # Optional local media files
+```
+
+## Como os Temas Inicializam Sites
+
+Quando você cria um site a partir de um tema, isso acontece:
+
+1. `create-astro` gera a estrutura do projeto a partir do template
+2. Você executa `npm install` e `npm run dev`
+3. Na primeira visita ao admin, o **Assistente de Configuração** é executado automaticamente
+4. O assistente aplica o arquivo de seed, criando coleções, menus, redirecionamentos e conteúdo
+5. O site está pronto para uso
+
+<CardGrid>
+	<Card title="Para Usuários" icon="laptop">
+		Escolha um tema, execute o assistente, comece a editar. Nenhum conhecimento de banco de dados é necessário.
+	</Card>
+	<Card title="Para Desenvolvedores" icon="seti:config">
+		Os temas são projetos Astro padrão. Personalize livremente após a geração da estrutura.
+	</Card>
+</CardGrid>
+
+## Instalando um Tema
+
+Use `create-astro` com um template:
+
+```bash
+npm create astro@latest -- --template @emdash-cms/template-blog
+```
+
+Temas da comunidade funcionam via GitHub:
+
+```bash
+npm create astro@latest -- --template github:user/emdash-portfolio
+```
+
+Após a instalação:
+
+```bash
+cd my-site
+npm install
+npm run dev
+```
+
+Visite `http://localhost:4321/_emdash/admin` para completar o Assistente de Configuração.
+
+## O Assistente de Configuração
+
+O Assistente de Configuração é executado automaticamente na primeira visita ao admin. Ele:
+
+1. Solicita título do site, slogan e credenciais de admin
+2. Oferece uma opção para incluir conteúdo de exemplo
+3. Aplica o arquivo de seed ao banco de dados
+4. Redireciona para o painel de administração
+
+```
+┌────────────────────────────────────────────────────────┐
+│                                                        │
+│                    ◆ EmDash                          │
+│                                                        │
+│         Bem-vindo ao seu novo site                    │
+│                                                        │
+│  Título do site: [Meu blog incrível                  ] │
+│  Slogan:         [Ideias e reflexões                 ] │
+│                                                        │
+│  E-mail admin:   [admin@example.com                  ] │
+│  Senha admin:    [••••••••••••                       ] │
+│                                                        │
+│  ☑ Include sample content                              │
+│                                                        │
+│                   [Create Site →]                      │
+│                                                        │
+│  Template: Blog Starter                                │
+│  Creates: 2 collections, 3 pages, 1 post              │
+└────────────────────────────────────────────────────────┘
+```
+
+<Aside type="tip">
+	Marque "Incluir conteúdo de exemplo" ao explorar um tema pela primeira vez. O conteúdo de exemplo
+	demonstra como o tema espera que o conteúdo seja estruturado.
+</Aside>
+
+## Temas Oficiais
+
+O EmDash fornece temas iniciais oficiais, cada um disponível em variantes local (SQLite + sistema de arquivos) e Cloudflare (D1 + R2):
+
+| Tema | Descrição | Caso de Uso |
+| ----- | ----------- | -------- |
+| `@emdash-cms/template-blog` | Blog minimalista com posts, páginas, categorias e modo escuro | Blogs pessoais, sites simples |
+| `@emdash-cms/template-portfolio` | Portfólio estilo editorial com projetos, tipografia serifada (Playfair Display) e layouts focados em imagem | Freelancers, agências, criativos |
+| `@emdash-cms/template-marketing` | Site de marketing ousado com blocos de Texto Portátil personalizados (hero, recursos, depoimentos, preços, FAQ) | Páginas de destino, sites SaaS, marketing de produto |
+
+### Variantes Cloudflare
+
+Para implantação no Cloudflare Pages com D1 e R2, adicione `-cloudflare` ao nome do template:
+
+```bash
+npm create astro@latest -- --template @emdash-cms/template-blog-cloudflare
+npm create astro@latest -- --template @emdash-cms/template-portfolio-cloudflare
+npm create astro@latest -- --template @emdash-cms/template-marketing-cloudflare
+```
+
+Essas variantes incluem `wrangler.jsonc` para configuração de implantação.
+
+## Personalizando Após a Instalação
+
+Após a conclusão do Assistente de Configuração, seu site é um projeto Astro padrão. Personalize-o como qualquer site Astro:
+
+- Edite páginas em `src/pages/`
+- Modifique layouts em `src/layouts/`
+- Adicione coleções via a interface de administração
+- Instale integrações Astro
+- Implante em qualquer lugar onde o Astro funcione
+
+O arquivo de seed é usado apenas durante a configuração inicial. Uma vez aplicado, seu esquema reside no banco de dados.
+
+## Próximos Passos
+
+- **[Criando Temas](/pt/themes/creating-themes/)** — Crie seu próprio tema EmDash
+- **[Formato do Arquivo de Seed](/pt/themes/seed-files/)** — Referência para a estrutura do arquivo de seed
+- **[Começando](/pt/getting-started/)** — Crie seu primeiro site EmDash

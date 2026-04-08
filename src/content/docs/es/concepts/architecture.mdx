@@ -1,0 +1,296 @@
+---
+title: Arquitectura
+description: "Cómo funciona EmDash internamente: esquema primero de base de datos, Colecciones en Vivo, sistema de plugins y panel de administración."
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDash se integra profundamente con Astro para ofrecer una experiencia completa de CMS. Esta página explica las decisiones arquitectónicas clave y cómo encajan las piezas.
+
+## Visión General de Alto Nivel
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         Tu sitio Astro                           │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                 Integración de EmDash                   │  │
+│  │                                                            │  │
+│  │  ┌──────────────┐   ┌──────────────┐   ┌───────────────┐   │  │
+│  │  │     APIs     │   │    Panel     │   │ Complementos  │   │  │
+│  │  │ de contenido │   │    admin     │   │               │   │  │
+│  │  └──────────────┘   └──────────────┘   └───────────────┘   │  │
+│  │                                                            │  │
+│  │  ┌──────────────────────────────────────────────────────┐  │  │
+│  │  │                  Capa de datos                       │  │  │
+│  │  │   Base de datos (D1/SQLite) + Almacenamiento (R2/S3) │  │  │
+│  │  └──────────────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                    Framework Astro                         │  │
+│  │    Live Collections · Middleware · Sesiones               │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+EmDash se ejecuta como una integración de Astro. Inyecta rutas para el panel de administración y las API REST, proporciona un cargador de contenido para Colecciones en Vivo, y gestiona migraciones de base de datos y conexiones de almacenamiento.
+
+## Esquema con Base de Datos Primero
+
+A diferencia de los CMS tradicionales que definen el esquema en código, EmDash almacena las definiciones del esquema en la propia base de datos. Dos tablas del sistema rastrean la estructura de tu contenido:
+
+- `_emdash_collections` — Metadatos de la colección (slug, etiqueta, características)
+- `_emdash_fields` — Definiciones de campos para cada colección
+
+Cuando creas una colección "products" con campos de título y precio a través de la interfaz de administración, EmDash:
+
+1. Inserta registros en `_emdash_collections` y `_emdash_fields`
+2. Ejecuta `ALTER TABLE` para crear `ec_products` con las columnas apropiadas
+
+Este diseño permite:
+
+- **Modificación del esquema en tiempo de ejecución** — Crear y editar tipos de contenido sin cambios de código o reconstrucciones
+- **Configuración amigable para no desarrolladores** — Los editores de contenido pueden diseñar su modelo de contenido a través de la interfaz de usuario
+- **Columnas SQL reales** — Indexación adecuada, claves foráneas y optimización de consultas
+
+<Aside type="tip">
+	Ejecuta `npx emdash types` para generar tipos de TypeScript desde el esquema en vivo. Esto te da seguridad de tipos para colecciones definidas dinámicamente.
+</Aside>
+
+## Tablas por Colección
+
+Cada colección obtiene su propia tabla SQLite con el prefijo `ec_`:
+
+```sql
+-- Creada cuando se agrega la colección "posts"
+CREATE TABLE ec_posts (
+  -- Columnas del sistema (siempre presentes)
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
+  status TEXT DEFAULT 'draft',  -- draft, published, scheduled
+  author_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  published_at TEXT,
+  deleted_at TEXT,              -- Eliminación lógica
+  version INTEGER DEFAULT 1,    -- Bloqueo optimista
+
+  -- Columnas de contenido (de tus definiciones de campo)
+  title TEXT NOT NULL,
+  content JSON,                 -- Portable Text
+  excerpt TEXT
+);
+```
+
+**¿Por qué tablas por colección en lugar de una única tabla de contenido con JSON?**
+
+- Las columnas SQL reales permiten indexación y consultas adecuadas
+- Las claves foráneas funcionan correctamente
+- El esquema se documenta a sí mismo en la base de datos
+- Sin sobrecarga de análisis JSON para el acceso a campos
+- Las herramientas de base de datos pueden inspeccionar el esquema directamente
+
+## Integración de Colecciones en Vivo
+
+EmDash utiliza las Colecciones en Vivo de Astro 6 para servir contenido en tiempo de ejecución. Los cambios en el contenido están disponibles inmediatamente sin reconstrucciones estáticas.
+
+El `emdashLoader()` implementa la interfaz `LiveLoader` de Astro:
+
+```ts
+// src/live.config.ts
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({ loader: emdashLoader() }),
+};
+```
+
+<Aside type="note">
+	Una única colección Astro `_emdash` engloba todos tus tipos de contenido. El cargador filtra por tipo internamente cuando llamas a `getEmDashCollection("posts")`.
+</Aside>
+
+Consulta contenido usando las funciones envoltorio proporcionadas:
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+// Obtener todas las publicaciones publicadas
+const { entries: posts } = await getEmDashCollection("posts");
+
+// Obtener borradores
+const { entries: drafts } = await getEmDashCollection("posts", {
+	status: "draft",
+});
+
+// Obtener una sola entrada por slug
+const { entry: post } = await getEmDashEntry("posts", "my-post-slug");
+```
+
+## Inyección de Rutas
+
+La integración de EmDash utiliza la API `injectRoute` de Astro para agregar rutas de administración y API:
+
+| Patrón de Ruta                          | Propósito                               |
+| ------------------------------------- | ------------------------------------- |
+| `/_emdash/admin/[...path]`          | Panel de administración SPA                       |
+| `/_emdash/api/manifest`             | Manifiesto de administración (colecciones, complementos) |
+| `/_emdash/api/content/[collection]` | CRUD para entradas de contenido              |
+| `/_emdash/api/media/*`              | Operaciones de biblioteca multimedia              |
+| `/_emdash/api/schema/*`             | Gestión de esquemas                     |
+| `/_emdash/api/settings`             | Configuraciones del sitio                         |
+| `/_emdash/api/menus/*`              | Menús de navegación                      |
+| `/_emdash/api/taxonomies/*`         | Categorías, etiquetas, taxonomías personalizadas   |
+
+Las rutas se inyectan desde el paquete `emdash`—nada se copia en tu proyecto.
+
+## Capa de Datos
+
+EmDash utiliza [Kysely](https://kysely.dev) para consultas SQL con seguridad de tipos en todas las bases de datos soportadas:
+
+<CardGrid>
+  <Card title="SQLite" icon="laptop">
+    Desarrollo local con `sqlite({ url: "file:./data.db" })`
+  </Card>
+  <Card title="D1" icon="cloudflare">
+    SQL sin servidor de Cloudflare con `d1({ binding: "DB" })`
+  </Card>
+  <Card title="libSQL" icon="external">
+    SQLite remoto con `libsql({ url: "...", authToken: "..." })`
+  </Card>
+</CardGrid>
+
+La configuración de la base de datos se pasa a la integración en `astro.config.mjs`:
+
+```ts
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { sqlite } from "emdash/db";
+import { local } from "emdash/storage";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+## Abstracción de Almacenamiento
+
+Los archivos multimedia se almacenan por separado de la base de datos. EmDash soporta:
+
+- **Sistema de archivos local** — Desarrollo y despliegues simples
+- **Cloudflare R2** — Almacenamiento de objetos compatible con S3 en el edge
+- **Compatible con S3** — Cualquier almacenamiento de objetos compatible con S3
+
+Las subidas utilizan URLs firmadas para cargas directas de cliente a almacenamiento, evitando los límites de tamaño del cuerpo de los Workers.
+
+## Arquitectura de Complementos
+
+Los complementos extienden EmDash a través de un sistema de ganchos inspirado en WordPress:
+
+- **Ganchos de contenido** — `content:beforeSave`, `content:afterSave`, `content:beforeDelete`, `content:afterDelete`
+- **Ganchos de medios** — `media:beforeUpload`, `media:afterUpload`
+- **Almacenamiento aislado** — Cada complemento obtiene acceso KV con espacio de nombres
+- **Extensiones de la interfaz de administración** — Widgets del panel, páginas de configuración, editores de campos personalizados
+
+Los complementos pueden ejecutarse en dos modos:
+
+1. **De confianza** — Acceso completo al entorno del host (para complementos oficiales)
+2. **En sandbox** — Se ejecutan en aislados V8 con permisos basados en capacidades (para complementos de terceros en Cloudflare)
+
+```ts
+// astro.config.mjs
+import { seoPlugin } from "@emdash-cms/plugin-seo";
+
+emdash({
+	plugins: [seoPlugin({ maxTitleLength: 60 })],
+});
+```
+
+## Flujo de Solicitud
+
+Una solicitud de contenido típica sigue esta ruta:
+
+<Steps>
+
+1. **Astro recibe la solicitud**
+
+   Se ejecuta tu componente de página.
+
+2. **Consulta de contenido**
+
+   `getEmDashCollection()` llama a `getLiveCollection()` de Astro.
+
+3. **Se ejecuta el cargador**
+
+   `emdashLoader` consulta la tabla `ec_*` correspondiente a través de Kysely.
+
+4. **Se devuelven los datos**
+
+   Las entradas se mapean al formato de Astro con `id`, `slug` y `data`.
+
+5. **La página se renderiza**
+
+   Tu componente recibe el contenido y genera el HTML.
+
+</Steps>
+
+Para solicitudes de administración:
+
+<Steps>
+
+1. **El middleware autentica**
+
+   Valida el token de sesión.
+
+2. **La ruta API procesa la solicitud**
+
+   Ejecuta operaciones CRUD a través de repositorios.
+
+3. **Se disparan los ganchos**
+
+   Se ejecutan `beforeCreate`, `afterUpdate` y los demás hooks correspondientes.
+
+4. **Se actualiza la base de datos**
+
+   Kysely ejecuta el SQL necesario.
+
+5. **Se devuelve la respuesta**
+
+   La SPA de administración recibe una respuesta JSON.
+
+</Steps>
+
+## Módulos Virtuales
+
+EmDash genera módulos virtuales en tiempo de compilación para configurar el entorno de ejecución:
+
+| Módulo                           | Propósito                             |
+| -------------------------------- | ----------------------------------- |
+| `virtual:emdash/config`        | Configuración de base de datos y almacenamiento  |
+| `virtual:emdash/dialect`       | Fábrica de dialectos de base de datos            |
+| `virtual:emdash/plugin-admins` | Importaciones estáticas para las interfaces de administración de complementos |
+
+Este enfoque garantiza que los empaquetadores puedan resolver y eliminar el código no utilizado de los complementos correctamente.
+
+## Próximos Pasos
+
+<CardGrid>
+	<Card title="Colecciones" icon="document">
+		Aprende sobre [colecciones de contenido y tipos de campos](/es/concepts/collections/).
+	</Card>
+	<Card title="Modelo de Contenido" icon="open-book">
+		Comprende el [modelo de contenido basado en base de datos](/es/concepts/content-model/).
+	</Card>
+	<Card title="Panel de Administración" icon="setting">
+		Explora la [arquitectura del panel de administración](/es/concepts/admin-panel/).
+	</Card>
+</CardGrid>

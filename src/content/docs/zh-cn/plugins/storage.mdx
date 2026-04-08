@@ -1,0 +1,357 @@
+---
+title: 插件存储
+description: 在文档集合中持久化插件数据，支持索引查询。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+插件可以在文档集合中存储自己的数据，而无需编写数据库迁移。在插件定义中声明集合和索引，EmDash 会自动处理模式。
+
+## 声明存储
+
+在 `definePlugin()` 中定义存储集合：
+
+```typescript
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "forms",
+	version: "1.0.0",
+
+	storage: {
+		submissions: {
+			indexes: [
+				"formId", // Single-field index
+				"status",
+				"createdAt",
+				["formId", "createdAt"], // Composite index
+				["status", "createdAt"],
+			],
+		},
+		forms: {
+			indexes: ["slug"],
+		},
+	},
+
+	// ...
+});
+```
+
+`storage` 中的每个键都是一个集合名称。`indexes` 数组列出了可以高效查询的字段。
+
+<Aside type="note">
+	存储的作用域限定于插件。`forms` 插件中的 `submissions` 集合与另一个插件中的 `submissions` 集合是完全独立的。
+</Aside>
+
+## 存储集合 API
+
+在钩子和路由中通过 `ctx.storage` 访问集合：
+
+```typescript
+"content:afterSave": async (event, ctx) => {
+  const { submissions } = ctx.storage;
+
+  // CRUD operations
+  await submissions.put("sub_123", { formId: "contact", email: "user@example.com" });
+  const item = await submissions.get("sub_123");
+  const exists = await submissions.exists("sub_123");
+  await submissions.delete("sub_123");
+}
+```
+
+### 完整 API 参考
+
+```typescript
+interface StorageCollection<T = unknown> {
+	// Basic CRUD
+	get(id: string): Promise<T | null>;
+	put(id: string, data: T): Promise<void>;
+	delete(id: string): Promise<boolean>;
+	exists(id: string): Promise<boolean>;
+
+	// Batch operations
+	getMany(ids: string[]): Promise<Map<string, T>>;
+	putMany(items: Array<{ id: string; data: T }>): Promise<void>;
+	deleteMany(ids: string[]): Promise<number>;
+
+	// Query (indexed fields only)
+	query(options?: QueryOptions): Promise<PaginatedResult<{ id: string; data: T }>>;
+	count(where?: WhereClause): Promise<number>;
+}
+```
+
+## 查询数据
+
+使用 `query()` 检索符合条件的文档。查询返回分页结果。
+
+```typescript
+const result = await ctx.storage.submissions.query({
+	where: {
+		formId: "contact",
+		status: "pending",
+	},
+	orderBy: { createdAt: "desc" },
+	limit: 20,
+});
+
+// result.items - Array of { id, data }
+// result.cursor - Pagination cursor (if more results)
+// result.hasMore - Boolean indicating more pages
+```
+
+### 查询选项
+
+```typescript
+interface QueryOptions {
+	where?: WhereClause;
+	orderBy?: Record<string, "asc" | "desc">;
+	limit?: number; // Default 50, max 1000
+	cursor?: string; // For pagination
+}
+```
+
+### Where 子句运算符
+
+使用以下运算符按索引字段进行过滤：
+
+<Tabs>
+  <TabItem label="精确匹配">
+```typescript
+where: {
+  status: "pending",        // Exact string match
+  count: 5,                 // Exact number match
+  archived: false           // Exact boolean match
+}
+```
+  </TabItem>
+  <TabItem label="范围">
+```typescript
+where: {
+  createdAt: { gte: "2024-01-01" },     // Greater than or equal
+  score: { gt: 50, lte: 100 }           // Between (exclusive/inclusive)
+}
+
+// Available: gt, gte, lt, lte
+
+````
+  </TabItem>
+  <TabItem label="包含于">
+```typescript
+where: {
+  status: { in: ["pending", "approved"] }
+}
+````
+
+  </TabItem>
+  <TabItem label="开头匹配">
+```typescript
+where: {
+  slug: { startsWith: "blog-" }
+}
+```
+  </TabItem>
+</Tabs>
+
+### 排序
+
+按索引字段对结果排序：
+
+```typescript
+orderBy: {
+	createdAt: "desc";
+} // Newest first
+orderBy: {
+	score: "asc";
+} // Lowest first
+```
+
+<Aside type="caution">
+	只能按索引字段进行查询和排序。对非索引字段的查询会抛出错误。这可以防止意外的全表扫描。
+</Aside>
+
+## 分页
+
+结果是分页的。使用 `cursor` 获取更多页面：
+
+```typescript
+async function getAllSubmissions(ctx: PluginContext) {
+	const allItems = [];
+	let cursor: string | undefined;
+
+	do {
+		const result = await ctx.storage.submissions!.query({
+			orderBy: { createdAt: "desc" },
+			limit: 100,
+			cursor,
+		});
+
+		allItems.push(...result.items);
+		cursor = result.cursor;
+	} while (cursor);
+
+	return allItems;
+}
+```
+
+### PaginatedResult
+
+```typescript
+interface PaginatedResult<T> {
+	items: T[];
+	cursor?: string; // Pass to next query for more results
+	hasMore: boolean; // True if more pages exist
+}
+```
+
+## 统计文档数量
+
+统计符合条件的文档数量：
+
+```typescript
+// Count all
+const total = await ctx.storage.submissions!.count();
+
+// Count with filter
+const pending = await ctx.storage.submissions!.count({
+	status: "pending",
+});
+```
+
+## 批量操作
+
+对于批量操作，请使用批量方法：
+
+```typescript
+// Get multiple by ID
+const items = await ctx.storage.submissions!.getMany(["sub_1", "sub_2", "sub_3"]);
+// Returns Map<string, T>
+
+// Put multiple
+await ctx.storage.submissions!.putMany([
+	{ id: "sub_1", data: { formId: "contact", status: "new" } },
+	{ id: "sub_2", data: { formId: "contact", status: "new" } },
+]);
+
+// Delete multiple
+const deletedCount = await ctx.storage.submissions!.deleteMany(["sub_1", "sub_2"]);
+```
+
+## 索引设计
+
+根据查询模式选择索引：
+
+| 查询模式                            | 所需索引                         |
+| ---------------------------------------- | ------------------------------------ |
+| 按 `formId` 过滤                       | `"formId"`                           |
+| 按 `formId` 过滤，按 `createdAt` 排序 | `["formId", "createdAt"]`            |
+| 仅按 `createdAt` 排序                | `"createdAt"`                        |
+| 按 `status` 和 `formId` 过滤          | `"status"` 和 `"formId"` (单独的) |
+
+复合索引支持对第一个字段进行过滤并可选择按第二个字段排序的查询：
+
+```typescript
+// With index ["formId", "createdAt"]:
+
+// This works:
+query({ where: { formId: "contact" }, orderBy: { createdAt: "desc" } });
+
+// This also works (filter only):
+query({ where: { formId: "contact" } });
+
+// This does NOT use the composite index (wrong field order):
+query({ where: { createdAt: { gte: "2024-01-01" } } });
+```
+
+## 类型安全
+
+为存储集合添加类型以获得更好的 IntelliSense 支持：
+
+```typescript
+interface Submission {
+	formId: string;
+	email: string;
+	data: Record<string, unknown>;
+	status: "pending" | "approved" | "spam";
+	createdAt: string;
+}
+
+definePlugin({
+	id: "forms",
+	version: "1.0.0",
+
+	storage: {
+		submissions: {
+			indexes: ["formId", "status", "createdAt"],
+		},
+	},
+
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			// Cast to typed collection
+			const submissions = ctx.storage.submissions as StorageCollection<Submission>;
+
+			const submission: Submission = {
+				formId: "contact",
+				email: "user@example.com",
+				data: { message: "Hello" },
+				status: "pending",
+				createdAt: new Date().toISOString(),
+			};
+
+			await submissions.put(`sub_${Date.now()}`, submission);
+		},
+	},
+});
+```
+
+## 存储 vs 内容 vs KV
+
+根据您的用例选择合适的存储机制：
+
+| 用例                                           | 存储                               |
+| -------------------------------------------------- | ------------------------------------- |
+| 插件操作数据（日志、提交、缓存） | `ctx.storage`                         |
+| 用户可配置的设置                         | `ctx.kv` 并加上 `settings:` 前缀      |
+| 插件内部状态                              | `ctx.kv` 并加上 `state:` 前缀         |
+| 可在管理界面编辑的内容                       | 站点集合 (非插件存储) |
+
+<Aside type="tip">
+	插件存储用于插件拥有并在内部管理的数据。如果内容编辑者需要在管理界面中查看或编辑数据，请创建一个站点集合。
+</Aside>
+
+## 实现细节
+
+在底层，插件存储使用单个数据库表：
+
+```sql
+CREATE TABLE _plugin_storage (
+  plugin_id TEXT NOT NULL,
+  collection TEXT NOT NULL,
+  id TEXT NOT NULL,
+  data JSON NOT NULL,
+  created_at TEXT,
+  updated_at TEXT,
+  PRIMARY KEY (plugin_id, collection, id)
+);
+```
+
+EmDash 为声明的字段创建表达式索引：
+
+```sql
+CREATE INDEX idx_forms_submissions_formId
+  ON _plugin_storage(json_extract(data, '$.formId'))
+  WHERE plugin_id = 'forms' AND collection = 'submissions';
+```
+
+这种设计提供了：
+
+- **无需迁移** — 模式存在于插件代码中
+- **可移植性** — 适用于 D1、libSQL、SQLite
+- **隔离性** — 插件只能访问自己的数据
+- **安全性** — 无 SQL 注入，经过验证的查询
+
+## 添加索引
+
+当您在插件更新中添加索引时，EmDash 会在下次启动时自动创建它们。这是安全的——添加索引无需数据迁移。
+
+当您移除索引时，EmDash 会删除它们。对非索引字段的查询将失败并返回验证错误。

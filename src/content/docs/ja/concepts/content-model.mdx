@@ -1,0 +1,331 @@
+---
+title: コンテンツモデル
+description: EmDashのデータベースファーストなコンテンツモデル—スキーマの保存方法、実行時の変更方法、クエリ方法について。
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDashは、スキーマ定義がコードではなくデータベース内に存在する**データベースファーストのコンテンツモデル**を採用しています。これは、ランタイムでのスキーマ変更と非開発者にも扱いやすいセットアップを可能にする根本的な設計上の選択です。
+
+## データとしてのスキーマ
+
+StrapiやKeystaticのような従来のCMSでは、スキーマをコードで定義する必要があります：
+
+```ts
+// Traditional approach - schema in code
+const posts = collection({
+	fields: {
+		title: text({ required: true }),
+		content: richText(),
+	},
+});
+```
+
+EmDashは同じ情報をデータベーステーブルに保存します：
+
+```sql
+-- _emdash_collections table
+INSERT INTO _emdash_collections (slug, label)
+VALUES ('posts', 'Blog Posts');
+
+-- _emdash_fields テーブル
+INSERT INTO _emdash_fields (collection_id, slug, type, required)
+VALUES
+  ('coll_abc', 'title', 'string', true),
+  ('coll_abc', 'content', 'portableText', false);
+```
+
+どちらのアプローチも同じコンテンツ構造を定義します。違いは、その構造がどこに存在し、どのように変更できるかです。
+
+## なぜデータベースファーストなのか？
+
+<CardGrid>
+	<Card title="ランタイム変更" icon="pencil">
+		コード変更やリビルドなしでコンテンツタイプを作成・編集できます。非開発者は管理UIを通じてコンテンツモデルを設計できます。
+	</Card>
+	<Card title="実際のSQLカラム" icon="seti:db">
+		WordPressのEAV（Entity-Attribute-Value）モデルとは異なり、各フィールドは実際のカラムを取得します。適切なインデックス作成、外部キー、クエリ最適化が可能です。
+	</Card>
+	<Card title="自己文書化" icon="document">
+		データベースツールでスキーマを直接検査できます。コンテンツモデルを理解するためにコードを解析する必要はありません。
+	</Card>
+	<Card title="移行パス" icon="right-arrow">
+		スキーマをJSONとしてエクスポートしてバージョン管理できます。新しい環境でスキーマをインポートできます。
+	</Card>
+</CardGrid>
+
+## スキーマテーブル
+
+2つのシステムテーブルがコンテンツ構造を定義します：
+
+### コレクションテーブル
+
+```sql
+CREATE TABLE _emdash_collections (
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE NOT NULL,        -- "posts", "products"
+  label TEXT NOT NULL,              -- "Blog Posts"
+  label_singular TEXT,              -- "Post"
+  description TEXT,
+  icon TEXT,                        -- Lucide icon name
+  supports JSON,                    -- ["drafts", "revisions", "preview"]
+  source TEXT,                      -- How it was created
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+```
+
+`source` フィールドは、コレクションがどのように作成されたかを追跡します：
+
+| Source             | Description                        |
+| ------------------ | ---------------------------------- |
+| `manual`           | 管理UI経由で作成                   |
+| `template:blog`    | テンプレートのシードファイルで作成 |
+| `import:wordpress` | WordPressからインポート            |
+| `discovered`       | 既存データから自動検出             |
+
+### フィールドテーブル
+
+```sql
+CREATE TABLE _emdash_fields (
+  id TEXT PRIMARY KEY,
+  collection_id TEXT REFERENCES _emdash_collections(id),
+  slug TEXT NOT NULL,               -- Column name: "title", "price"
+  label TEXT NOT NULL,              -- Display label
+  type TEXT NOT NULL,               -- Field type
+  column_type TEXT NOT NULL,        -- SQLite type: TEXT, REAL, INTEGER, JSON
+  required INTEGER DEFAULT 0,
+  unique_field INTEGER DEFAULT 0,
+  default_value TEXT,               -- JSON-encoded default
+  validation JSON,                  -- Validation rules
+  widget TEXT,                      -- Custom widget identifier
+  options JSON,                     -- Widget options
+  sort_order INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(collection_id, slug)
+);
+```
+
+## コンテンツテーブル
+
+各コレクションは `ec_` プレフィックスを持つ独自のテーブルを取得します。タイトルと価格フィールドを持つ「products」コレクションを作成すると：
+
+```sql
+CREATE TABLE ec_products (
+  -- System columns (always present)
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
+  status TEXT DEFAULT 'draft',
+  author_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  published_at TEXT,
+  deleted_at TEXT,                  -- Soft delete
+  version INTEGER DEFAULT 1,        -- Optimistic locking
+
+  -- コンテンツカラム（フィールド定義から）
+  title TEXT NOT NULL,
+  price REAL
+);
+```
+
+<Aside type="tip">
+	システムカラムはすべてのコンテンツテーブルに自動的に追加されます。これらをフィールドとして定義する必要はありません—常に存在します。
+</Aside>
+
+## ランタイムスキーマ変更
+
+管理UI経由でフィールドを追加すると、EmDashは：
+
+<Steps>
+	1. `_emdash_fields` にレコードを挿入 2. `ALTER TABLE ec_collection ADD COLUMN
+	column_name TYPE` を実行 3. 検証用のZodスキーマを再生成
+</Steps>
+
+SQLiteはこれらの `ALTER TABLE` 操作をランタイムでサポートします：
+
+| Operation          | Supported                   |
+| ------------------ | --------------------------- |
+| Add column         | Yes                         |
+| Rename column      | Yes                         |
+| Drop column        | Yes (SQLite 3.35+)          |
+| Change column type | No (requires table rebuild) |
+
+型変更の場合、EmDashはテーブルの再構築を透過的に処理します：新しいテーブル作成 → データコピー → 古いテーブル削除 → 新しいテーブル名変更。
+
+## スキーマとコンテンツの分離
+
+EmDashは明確な分離を維持します：
+
+| Concern      | Location                 | Tables                                      |
+| ------------ | ------------------------ | ------------------------------------------- |
+| **Schema**   | System tables            | `_emdash_collections`, `_emdash_fields` |
+| **Content**  | Per-collection tables    | `ec_posts`, `ec_products`, etc.             |
+| **Media**    | Separate table + storage | `media` table + R2/S3                       |
+| **Settings** | Options table            | `options` with `site:` prefix               |
+
+この分離は以下を意味します：
+
+- コンテンツなしでスキーマをエクスポート可能
+- コンテンツをスキーマ間で移行可能
+- システムテーブルがユーザーデータで散らかされることはない
+
+## ランタイムでの検証
+
+EmDashは起動時にデータベースのフィールド定義からZodスキーマを構築します：
+
+```ts
+// Simplified example
+function buildSchema(fields: Field[]): ZodSchema {
+	const shape: Record<string, ZodType> = {};
+
+	for (const field of fields) {
+		let zodType = fieldTypeToZod(field.type);
+
+		if (field.required) {
+			zodType = zodType.required();
+		}
+
+		if (field.validation?.min !== undefined) {
+			zodType = zodType.min(field.validation.min);
+		}
+
+		shape[field.slug] = zodType;
+	}
+
+	return z.object(shape);
+}
+```
+
+コンテンツは、すべての作成および更新操作において、これらのランタイムスキーマに対して検証されます。
+
+## TypeScript統合
+
+データベーススキーマからTypeScript型を生成します：
+
+```bash
+# Fetch schema from database, generate types
+npx emdash types
+```
+
+これにより `.emdash/types.ts` が生成されます：
+
+```ts
+// .emdash/types.ts (generated)
+export interface Post {
+	title: string;
+	content: PortableTextBlock[];
+	excerpt?: string;
+	featuredImage?: string;
+}
+
+export interface Product {
+	title: string;
+	price: number;
+	quantity: number;
+}
+
+// クエリ関数の型付きオーバーロード
+declare module "emdash" {
+	export function getEmDashCollection(
+		type: "posts",
+	): Promise<{ entries: ContentEntry<Post>[]; error?: Error }>;
+
+	export function getEmDashEntry(
+		type: "products",
+		id: string,
+	): Promise<{ entry: ContentEntry<Product> | null; error?: Error; isPreview: boolean }>;
+}
+```
+
+<Aside type="note">
+	型生成はオプションですが推奨されます。動的に定義されたコレクションに対してオートコンプリートと型チェックを提供します。
+</Aside>
+
+## 開発者と非開発者のワークフロー
+
+**開発者** はCLIを使用できます：
+
+```bash
+# Fetch schema, generate types
+npx emdash types
+
+# スキーマをJSONとしてエクスポート
+npx emdash export-seed > seed.json
+```
+
+**非開発者** は管理UIのみを使用します：
+
+1. 管理パネルで **コンテンツタイプ** を開く
+2. **コレクションを追加** をクリック
+3. ビジュアルビルダーでフィールドを定義
+4. すぐにコンテンツ作成を開始
+
+どちらのアプローチも同じ基盤となるデータベーステーブルを変更します。
+
+## シードファイル
+
+テンプレートとエクスポートは、ポータブルなスキーマ定義のためにJSONシードファイルを使用します：
+
+```json
+{
+	"version": "1",
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Blog Posts",
+			"labelSingular": "Post",
+			"supports": ["drafts", "revisions", "preview"],
+			"fields": [
+				{ "slug": "title", "type": "string", "required": true },
+				{ "slug": "content", "type": "portableText" },
+				{ "slug": "featuredImage", "type": "image" }
+			]
+		}
+	],
+		"taxonomies": [{ "name": "category", "label": "カテゴリー", "hierarchical": true }],
+		"menus": [{ "name": "primary", "label": "メインナビゲーション" }]
+}
+```
+
+シードファイルをプログラムで適用します：
+
+```ts
+import { applySeed, validateSeed } from "emdash/seed";
+import seedData from "../../concepts/.emdash/seed.json";
+
+// 最初に検証
+const { valid, errors } = validateSeed(seedData);
+
+// 適用（冪等性あり - 再実行しても安全）
+await applySeed(db, seedData, {
+	includeContent: true,
+	onConflict: "skip", // 'skip' | 'update' | 'error'
+});
+```
+
+## 他のアプローチとの比較
+
+| Approach      | Schema Location | Runtime Modification    | Type Safety        |
+| ------------- | --------------- | ----------------------- | ------------------ |
+| **EmDash**  | Database        | Yes (full)              | Generated from DB  |
+| **WordPress** | PHP code + EAV  | Limited (meta fields)   | None               |
+| **Strapi**    | Code files      | No (rebuild required)   | Generated at build |
+| **Sanity**    | Code files      | No (schema must deploy) | Built-in           |
+| **Directus**  | Database        | Yes (full)              | Generated from DB  |
+
+EmDashはDirectusモデルに従います：データベースファーストで、オプションの型生成を備えています。これにより、最大限の柔軟性を保ちつつ、必要に応じて型安全な開発をサポートします。
+
+## 次のステップ
+
+<CardGrid>
+	<Card title="コレクション" icon="document">
+		[フィールドタイプとバリデーション](/ja/concepts/collections/)について学びます。
+	</Card>
+	<Card title="管理パネル" icon="setting">
+		[管理アーキテクチャ](/ja/concepts/admin-panel/)を探索します。
+	</Card>
+	<Card title="シーディング" icon="open-book">
+		[シードファイル](/ja/themes/seed-files/)でサイトをセットアップします。
+	</Card>
+</CardGrid>

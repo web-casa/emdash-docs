@@ -1,0 +1,200 @@
+---
+title: 发布插件
+description: 将您的 EmDash 插件打包并发布到市场。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+构建好插件后，您可以将其发布到 EmDash 市场，以便其他站点可以从管理仪表板安装它。
+
+## 前提条件
+
+发布前，请确保您的插件：
+
+- 拥有一个有效的 `package.json`，其中 `"."` 导出指向您的插件入口
+- 使用 `definePlugin()` 并指定唯一的 `id` 和有效的语义化版本 `version`
+- 声明其 `capabilities`（它需要访问哪些 API）
+
+## 打包格式
+
+已发布的插件以 `.tar.gz` 压缩包形式分发，包含：
+
+| 文件             | 必需 | 描述                            |
+| ---------------- | -------- | -------------------------------------- |
+| `manifest.json`  | 是      | 从 `definePlugin()` 提取的插件元数据 |
+| `backend.js`     | 否       | 打包的沙箱代码（自包含的 ES 模块） |
+| `admin.js`       | 否       | 打包的管理界面 UI 代码                  |
+| `README.md`      | 否       | 插件文档                   |
+| `icon.png`       | 否       | 插件图标（256x256 PNG）              |
+| `screenshots/`   | 否       | 最多 5 张截图（PNG/JPEG，最大 1920x1080） |
+
+`manifest.json` 是从您的 `definePlugin()` 调用自动生成的。它包含插件 ID、版本、能力、钩子名称、路由名称和管理配置——但不包含可执行代码。
+
+## 构建打包文件
+
+`emdash plugin bundle` 命令会根据您的插件源代码生成一个压缩包：
+
+```bash
+cd packages/plugins/my-plugin
+emdash plugin bundle
+```
+
+这将：
+
+<Steps>
+1. 读取您的 `package.json` 以查找入口点
+2. 使用 tsdown 构建主入口以提取清单
+3. 打包 `backend.js`（压缩、摇树优化、自包含）
+4. 如果存在 `"./admin"` 导出，则打包 `admin.js`
+5. 收集资源（README、图标、截图）
+6. 验证打包文件（大小限制、后端代码中不能有 Node.js 内置模块）
+7. 将 `{id}-{version}.tar.gz` 写入 `dist/` 目录
+</Steps>
+
+### 入口点解析
+
+打包命令通过 `package.json` 的 exports 字段查找您的代码：
+
+```json title="package.json"
+{
+  "exports": {
+    ".": { "import": "./dist/index.mjs" },
+    "./sandbox": { "import": "./dist/sandbox-entry.mjs" },
+    "./admin": { "import": "./dist/admin.mjs" }
+  }
+}
+```
+
+| 导出       | 用途 | 构建方式 |
+| ------------ | ------- | -------- |
+| `"."`        | 主入口——用于提取清单 | 外部依赖：`emdash`, `@emdash-cms/*` |
+| `"./sandbox"` | 在沙箱中运行的后端代码 | 完全自包含（无外部依赖） |
+| `"./admin"`  | 管理界面 UI 组件 | 完全自包含 |
+
+如果缺少 `"./sandbox"`，命令会回退查找 `src/sandbox-entry.ts`。
+
+<Aside type="note">
+  打包命令会自动将 dist 路径映射回源代码。如果您的 `"."` 导出指向 `./dist/index.mjs`，它将找到并构建 `src/index.ts`。
+</Aside>
+
+### 选项
+
+```bash
+emdash plugin bundle [--dir <path>] [--outDir <path>]
+```
+
+| 标志 | 默认值 | 描述 |
+| ---- | ------- | ----------- |
+| `--dir` | 当前目录 | 插件源代码目录 |
+| `--outDir`, `-o` | `dist` | 压缩包的输出目录 |
+
+### 验证
+
+打包命令会检查：
+
+- **大小限制** — 总打包文件必须小于 5MB
+- **无 Node.js 内置模块** — `backend.js` 不能导入 `fs`、`path`、`child_process` 等（沙箱代码在 V8 隔离环境中运行，而非 Node.js）
+- **图标尺寸** — `icon.png` 应为 256x256（如果尺寸不对会发出警告，但仍会包含）
+- **截图限制** — 最多 5 张截图，最大 1920x1080
+
+<Aside type="tip">
+  如果您的后端代码导入了 Node.js 内置模块，打包将无法通过验证。请将 Node.js API 替换为 Web API，或将逻辑移至受信任的插件中。
+</Aside>
+
+## 发布
+
+`emdash plugin publish` 命令将您的压缩包上传到市场：
+
+```bash
+emdash plugin publish
+```
+
+这将查找您 `dist/` 目录中最新的 `.tar.gz` 文件并上传它。您也可以显式指定压缩包路径，或在发布前先构建：
+
+```bash
+# Explicit tarball path
+emdash plugin publish --tarball dist/my-plugin-1.0.0.tar.gz
+
+# Build first, then publish
+emdash plugin publish --build
+```
+
+### 身份验证
+
+首次发布时，CLI 会通过 GitHub 对您进行身份验证：
+
+<Steps>
+1. CLI 在浏览器中打开 GitHub 的设备授权页面
+2. 您在终端中输入显示的代码
+3. GitHub 颁发访问令牌
+4. CLI 将其交换为市场的 JWT（存储在 `~/.config/emdash/auth.json` 中）
+</Steps>
+
+令牌有效期为 30 天。过期后，下次发布时会提示您重新进行身份验证。
+
+您也可以单独管理身份验证：
+
+```bash
+# Log in without publishing
+emdash plugin login
+
+# Log out (clear stored token)
+emdash plugin logout
+```
+
+### 首次注册
+
+如果您的插件 ID 在市场尚不存在，`emdash plugin publish` 会在上传第一个版本之前自动注册它。
+
+### 版本要求
+
+每个发布的版本必须具有比上一个版本更高的语义化版本号。您不能覆盖或重新发布现有版本。
+
+### 安全审计
+
+每个发布的版本都会经过自动化的安全审计。市场会扫描您的 `backend.js` 和 `admin.js`，检查是否存在：
+
+- 数据外泄模式
+- 通过设置进行的凭据收集
+- 混淆代码
+- 资源滥用（加密挖矿等）
+- 可疑的网络活动
+
+审计会产生 **通过**、**警告** 或 **失败** 的判定结果，并显示在插件的市场列表中。根据市场的执行级别，**失败** 的判定结果可能会完全阻止发布。
+
+### 选项
+
+```bash
+emdash plugin publish [--tarball <path>] [--build] [--dir <path>] [--registry <url>]
+```
+
+| 标志 | 默认值 | 描述 |
+| ---- | ------- | ----------- |
+| `--tarball` | `dist/` 中最新的 `.tar.gz` | 显式的压缩包路径 |
+| `--build` | `false` | 发布前运行 `emdash plugin bundle` |
+| `--dir` | 当前目录 | 插件目录（与 `--build` 一起使用） |
+| `--registry` | `https://marketplace.emdashcms.com` | 市场 URL |
+
+## 完整工作流程
+
+以下是典型的发布周期：
+
+```bash
+# 1. Make your changes
+# 2. Bump the version in definePlugin() and package.json
+# 3. Bundle and publish in one step
+emdash plugin publish --build
+```
+
+或者，如果您希望先检查打包文件：
+
+```bash
+# Build the tarball
+emdash plugin bundle
+
+# Check the output
+tar tzf dist/my-plugin-1.1.0.tar.gz
+
+# Publish
+emdash plugin publish
+```

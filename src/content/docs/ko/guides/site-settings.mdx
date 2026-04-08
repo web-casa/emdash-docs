@@ -1,0 +1,330 @@
+---
+title: 사이트 설정
+description: 사이트 제목, 로고, 소셜 링크와 같은 전역 설정을 구성합니다.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+사이트 설정은 사이트의 제목, 태그라인, 로고, 소셜 링크, 표시 기본 설정과 같은 전역 구성 값입니다. 관리자는 관리자 인터페이스를 통해 이를 관리하며, 템플릿에서 접근할 수 있습니다.
+
+## 설정 조회하기
+
+`getSiteSettings()`를 사용하여 모든 사이트 설정을 가져옵니다:
+
+```astro title="src/layouts/Base.astro"
+---
+import { getSiteSettings } from "emdash";
+
+const settings = await getSiteSettings();
+---
+
+<html lang="en">
+  <head>
+    <title>{settings.title}</title>
+    {settings.favicon && (
+      <link rel="icon" href={settings.favicon.url} />
+    )}
+  </head>
+  <body>
+    <header>
+      {settings.logo ? (
+        <img src={settings.logo.url} alt={settings.logo.alt || settings.title} />
+      ) : (
+        <span class="site-title">{settings.title}</span>
+      )}
+      {settings.tagline && <p class="tagline">{settings.tagline}</p>
+}
+    </header>
+    <slot />
+  </body>
+</html>
+```
+
+## 사용 가능한 설정
+
+EmDash는 다음과 같은 핵심 설정을 제공합니다:
+
+```ts
+interface SiteSettings {
+	// Identity
+	title: string;
+	tagline?: string;
+	logo?: MediaReference;
+	favicon?: MediaReference;
+
+	// URLs
+	url?: string;
+
+	// Display
+	postsPerPage: number;
+	dateFormat: string;
+	timezone: string;
+
+	// Social
+	social?: {
+		twitter?: string;
+		github?: string;
+		facebook?: string;
+		instagram?: string;
+		linkedin?: string;
+		youtube?: string;
+	};
+}
+
+interface MediaReference {
+	mediaId: string;
+	alt?: string;
+	url?: string; // 해석된 URL(읽기 전용)
+}
+```
+
+## 개별 설정 가져오기
+
+`getSiteSetting()`을 사용하여 키로 단일 설정을 가져옵니다:
+
+```ts
+import { getSiteSetting } from "emdash";
+
+const title = await getSiteSetting("title");
+// 반환값: "내 사이트" 또는 undefined
+
+const logo = await getSiteSetting("logo");
+// 반환값: { mediaId: "...", url: "/_emdash/api/media/file/..." }
+```
+
+이는 모든 것을 가져오지 않고 하나 또는 두 개의 값만 필요할 때 유용합니다.
+
+## 컴포넌트에서 설정 사용하기
+
+### 사이트 헤더
+
+```
+astro title="src/components/Header.astro"
+---
+import { getSiteSettings, getMenu } from "emdash";
+
+const settings = await getSiteSettings();
+const menu = await getMenu("primary");
+---
+
+<header class="header">
+  <a href="/" class="logo">
+    {settings.logo ? (
+      <img
+        src={settings.logo.url}
+        alt={settings.logo.alt || settings.title}
+        width="150"
+        height="50"
+      />
+    ) : (
+      <span class="site-name">{settings.title}</span>
+    )}
+  </a>
+
+  {menu && (
+    <nav>
+      {menu.items.map(item => (
+        <a href={item.url}>{item.label}</a>
+      ))}
+    </nav>
+  )}
+</header>
+```
+
+### 소셜 링크
+
+```
+astro title="src/components/SocialLinks.astro"
+---
+import { getSiteSetting } from "emdash";
+
+const social = await getSiteSetting("social");
+
+const platforms = [
+  { key: "twitter", label: "Twitter", baseUrl: "https://twitter.com/" },
+  { key: "github", label: "GitHub", baseUrl: "https://github.com/" },
+  { key: "facebook", label: "Facebook", baseUrl: "https://facebook.com/" },
+  { key: "instagram", label: "Instagram", baseUrl: "https://instagram.com/" },
+  { key: "linkedin", label: "LinkedIn", baseUrl: "https://linkedin.com/in/" },
+  { key: "youtube", label: "YouTube", baseUrl: "https://youtube.com/@" },
+] as const;
+---
+
+{social && (
+  <div class="social-links">
+    {platforms.map(({ key, label, baseUrl }) => (
+      social[key] && (
+        <a
+          href={baseUrl + social[key]}
+          rel="noopener noreferrer"
+          target="_blank"
+          aria-label={label}
+        >
+          {label}
+        </a>
+      )
+    ))}
+  </div>
+)}
+```
+
+### SEO 메타 태그
+
+```
+astro title="src/components/SEO.astro"
+---
+import { getSiteSettings } from "emdash";
+
+interface Props {
+  title?: string;
+  description?: string;
+  image?: string;
+}
+
+const settings = await getSiteSettings();
+const {
+  title,
+  description = settings.tagline,
+  image,
+} = Astro.props;
+
+const pageTitle = title
+  ? `${title} | ${settings.title}`
+  : settings.title;
+---
+
+<title>{pageTitle}</title>
+{description && <meta name="description" content={description} />}
+
+<!-- Open Graph -->
+<meta property="og:title" content={pageTitle} />
+{description && <meta property="og:description" content={description} />}
+{image && <meta property="og:image" content={image} />}
+{settings.url && <meta property="og:url" content={settings.url + Astro.url.pathname} />}
+
+<!-- Twitter -->
+{settings.social?.twitter && (
+  <meta name="twitter:site" content={settings.social.twitter} />
+)}
+<meta name="twitter:card" content={image ? "summary_large_image" : "summary"} />
+```
+
+## 날짜 형식 지정
+
+일관된 날짜 표시를 위해 `dateFormat` 및 `timezone` 설정을 사용하세요:
+
+```
+astro title="src/components/PostDate.astro"
+---
+import { getSiteSetting } from "emdash";
+
+interface Props {
+  date: string;
+}
+
+const { date } = Astro.props;
+const dateFormat = await getSiteSetting("dateFormat") || "MMMM d, yyyy";
+const timezone = await getSiteSetting("timezone") || "UTC";
+
+// Intl.DateTimeFormat 또는 date-fns와 같은 라이브러리를 사용하여 형식 지정
+const formatted = new Intl.DateTimeFormat("en-US", {
+  timeZone: timezone,
+  dateStyle: "long",
+}).format(new Date(date));
+---
+
+<time datetime={date}>{formatted}</time>
+```
+
+<Aside>
+	`dateFormat` 설정은 패턴 문자열(예: "MMMM d, yyyy")을 사용합니다. 이러한 패턴을 파싱하고 적용하려면
+	`date-fns`와 같은 라이브러리가 필요할 수 있습니다.
+</Aside>
+
+## 관리자 API
+
+프로그래밍 방식으로 설정을 가져옵니다:
+
+```http
+GET /_emdash/api/settings
+```
+
+응답:
+
+```json
+{
+	"title": "My EmDash Site",
+	"tagline": "현대적인 CMS",
+	"logo": {
+		"mediaId": "med_123",
+		"url": "/_emdash/api/media/file/abc123"
+	},
+	"postsPerPage": 10,
+	"dateFormat": "MMMM d, yyyy",
+	"timezone": "America/New_York",
+	"social": {
+		"twitter": "@handle",
+		"github": "username"
+	}
+}
+```
+
+설정 업데이트하기(부분 업데이트 지원):
+
+```http
+POST /_emdash/api/settings
+Content-Type: application/json
+
+{
+  "title": "새 사이트 제목",
+  "tagline": "업데이트된 태그라인"
+}
+```
+
+제공된 필드만 변경됩니다. 생략된 필드는 현재 값을 유지합니다.
+
+## 미디어 참조
+
+`logo` 및 `favicon` 설정은 미디어 참조를 저장합니다. 이를 읽을 때 EmDash는 `url` 속성을 자동으로 해석합니다:
+
+```ts
+const logo = await getSiteSetting("logo");
+// {
+//   mediaId: "med_123",
+//   alt: "Site logo",
+//   url: "/_emdash/api/media/file/abc123"
+// }
+```
+
+API를 통해 업데이트할 때는 `mediaId`만 제공하세요:
+
+```json
+{
+	"logo": {
+		"mediaId": "med_456",
+		"alt": "New logo"
+	}
+}
+```
+
+## API 참조
+
+### `getSiteSettings()`
+
+해석된 미디어 URL과 함께 모든 사이트 설정을 가져옵니다.
+
+**반환값:** `Promise<Partial<SiteSettings>>`
+
+부분 객체를 반환합니다. 설정되지 않은 값은 `undefined`입니다.
+
+### `getSiteSetting(key)`
+
+키로 단일 설정을 가져옵니다.
+
+**매개변수:**
+
+- `key` — 설정 키(예: `"title"`, `"logo"`, `"social"`)
+
+**반환값:** `Promise<SiteSettings[K] | undefined>`
+
+타입 안전: 반환 유형은 요청한 키와 일치합니다.

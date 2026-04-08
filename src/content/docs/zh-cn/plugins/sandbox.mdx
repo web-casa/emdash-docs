@@ -1,0 +1,201 @@
+---
+title: 插件沙箱
+description: EmDash 如何在 Cloudflare Workers 与 Node.js 部署中隔离不受信任的插件。
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDash 支持以两种执行模式运行插件：**受信任**模式和**沙箱**模式。本页将解释每种模式的工作原理、它们提供的保护措施以及针对不同部署目标的安全影响。
+
+## 执行模式
+
+| | 受信任模式 | 沙箱模式 |
+|---|---|---|
+| **运行于** | 主进程 | 隔离的 V8 隔离环境（动态 Worker 加载器） |
+| **能力限制** | 建议性（不强制执行） | 运行时强制执行 |
+| **资源限制** | 无 | CPU、内存、子请求、挂钟时间 |
+| **网络访问** | 无限制 | 被阻止；仅能通过 `ctx.http` 并使用主机允许列表 |
+| **数据访问** | 完全数据库访问 | 通过 RPC 桥接，仅限于声明的能力范围 |
+| **可用平台** | 所有平台 | 仅限 Cloudflare Workers |
+
+## 受信任模式
+
+受信任插件在与你的 Astro 站点相同的进程中运行。它们从 npm 包或本地文件加载，并在 `astro.config.mjs` 中配置：
+
+```typescript title="astro.config.mjs"
+import myPlugin from "@emdash-cms/plugin-analytics";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			plugins: [myPlugin()],
+		}),
+	],
+});
+```
+
+在受信任模式下：
+
+- **能力声明是文档，而非强制措施。** 一个声明了 `["read:content"]` 的插件仍然可以访问进程中的任何内容。`capabilities` 字段告诉管理员该插件*意图*使用什么。
+- **无资源限制。** CPU、内存和网络使用不受限制。行为不当的插件可能导致整个请求停滞。
+- **完全进程访问。** 插件与你的 Astro 站点共享 Node.js/Workers 运行时。它们可以导入任何模块、访问环境变量，以及读写文件系统（在 Node.js 上）。
+
+<Aside type="caution" title="安全影响">
+	仅安装来自你信任来源的受信任插件——即你已审查过的 npm 包，或你自己编写的代码。在受信任模式下，恶意插件拥有与你的应用程序代码相同的访问权限。
+</Aside>
+
+## 沙箱模式（Cloudflare Workers）
+
+沙箱插件在由 Cloudflare 的[动态 Worker 加载器](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/) API 提供的隔离 V8 隔离环境中运行。每个插件都有自己的隔离环境，并强制执行限制。
+
+要启用沙箱，请在 Astro 配置中配置沙箱运行器：
+
+```typescript title="astro.config.mjs"
+export default defineConfig({
+	integrations: [
+		emdash({
+			sandboxRunner: "@emdash-cms/cloudflare/sandbox",
+			sandboxed: [
+				{
+					manifest: seoPluginManifest,
+					code: seoPluginCode,
+				},
+			],
+		}),
+	],
+});
+```
+
+### 沙箱强制执行的内容
+
+<Steps>
+
+1. **能力强制执行**
+
+   如果插件声明 `capabilities: ["read:content"]`，则它只能调用 `ctx.content.get()` 和 `ctx.content.list()`。尝试调用 `ctx.content.create()` 将抛出权限错误。这是由 RPC 桥接强制执行的——插件无法绕过它，因为它没有直接的数据库访问权限。
+
+2. **资源限制**
+
+   每次调用（钩子或路由调用）都运行在以下限制下：
+
+   | 资源 | 默认值 | 强制执行者 |
+   |---|---|---|
+   | CPU 时间 | 50ms | Worker 加载器（V8 隔离环境） |
+   | 子请求 | 每次调用 10 个 | Worker 加载器（V8 隔离环境） |
+   | 挂钟时间 | 30 秒 | EmDash 运行器（`Promise.race`） |
+   | 内存 | ~128MB | V8 平台上限（不可按插件配置） |
+
+   超出 CPU 或子请求限制会导致 Worker 加载器中止隔离环境并抛出异常。超出挂钟时间限制会导致 EmDash 拒绝调用承诺。内存受 V8 平台上限限制，但无法按插件配置。
+
+   这些是内置的默认值。可以通过提供自定义的 `SandboxRunnerFactory` 来配置自定义限制，该工厂通过 `SandboxOptions.limits` 传递不同的值。通过 EmDash 集成配置进行按站点配置的功能尚未实现。
+
+3. **网络隔离**
+
+   沙箱插件的 `globalOutbound: null`——直接的 `fetch()` 调用在 V8 级别被阻止。插件必须使用 `ctx.http.fetch()`，该调用通过桥接代理。桥接会根据插件的 `allowedHosts` 列表验证目标主机。
+
+4. **存储范围限定**
+
+   所有存储操作（KV、集合）都限定在插件的 ID 范围内。一个插件无法读取另一个插件的数据。内容和媒体访问通过桥接进行，桥接会在每次调用时检查能力。
+
+5. **功能限制**
+
+   某些功能仅在受信任模式下可用：
+
+   - **API 路由** — 自定义 REST 端点（`routes`）不可用。沙箱插件通过 Block Kit 管理页面和钩子与用户交互。
+   - **Portable Text 块类型** — PT 块需要 Astro 组件进行站点端渲染（`componentsEntry`），这些组件在构建时从 npm 加载。沙箱插件在运行时安装，无法提供组件。
+   - **自定义 React 管理页面** — 沙箱插件使用 Block Kit 作为管理 UI，而不是提供 React 组件。
+
+   `emdash plugin bundle` 命令会在插件声明这些功能时发出警告。
+
+</Steps>
+
+### 架构
+
+沙箱插件通过 RPC 桥接与 EmDash 通信：
+
+```
+┌─────────────────────┐     RPC      ┌──────────────────────┐
+│  Plugin Isolate     │ ◄──────────► │  PluginBridge        │
+│  (Worker Loader)    │   (binding)  │  (WorkerEntrypoint)  │
+│                     │              │                      │
+│  ctx.kv.get(k)      │──────────────│► kvGet(k)            │
+│  ctx.content.list() │──────────────│► contentList()       │
+│  ctx.http.fetch(u)  │──────────────│► httpFetch(u)        │
+└─────────────────────┘              └──────────────────────┘
+                                            │
+                                            ▼
+                                     ┌──────────────┐
+                                     │  D1 / R2     │
+                                     └──────────────┘
+```
+
+插件的代码在 V8 隔离环境中运行。它接收一个 `ctx` 对象，其中每个方法都是桥接的代理。桥接在主 EmDash worker 中运行，并在验证能力后执行实际的数据库/存储操作。
+
+### Wrangler 配置
+
+沙箱需要动态 Worker 加载器。添加到你的 `wrangler.jsonc`：
+
+```jsonc
+{
+	"worker_loaders": [{ "binding": "LOADER" }],
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "emdash-media" }],
+	"d1_databases": [{ "binding": "DB", "database_name": "emdash" }]
+}
+```
+
+## Node.js 部署
+
+<Aside type="danger" title="Node.js 上无隔离">
+	Node.js 不支持插件沙箱。无论配置如何，所有插件都以受信任模式运行。没有 V8 隔离边界，没有资源限制，也没有运行时级别的能力强制执行。
+</Aside>
+
+当部署到 Node.js（或任何非 Cloudflare 平台）时：
+
+- 使用 `NoopSandboxRunner`。它返回 `isAvailable() === false`。
+- 尝试加载沙箱插件会抛出 `SandboxNotAvailableError`。
+- 所有插件必须在 `plugins` 数组中注册为受信任插件。
+- 能力声明纯粹是信息性的——它们不被强制执行。
+
+### 这对安全意味着什么
+
+| 威胁 | Cloudflare（沙箱模式） | Node.js（仅受信任模式） |
+|---|---|---|
+| 插件读取不应访问的数据 | 被桥接能力检查阻止 | **无法阻止** — 插件拥有完全数据库访问权限 |
+| 插件进行未经授权的网络调用 | 被 `globalOutbound: null` + 主机允许列表阻止 | **无法阻止** — 插件可以直接调用 `fetch()` |
+| 插件耗尽 CPU | 隔离环境被 Worker 加载器中止 | **无法阻止** — 阻塞事件循环 |
+| 插件耗尽内存 | 隔离环境被 Worker 加载器终止 | **无法阻止** — 可能导致进程崩溃 |
+| 插件访问环境变量 | 无访问权限（隔离的 V8 上下文） | **无法阻止** — 共享 `process.env` |
+| 插件访问文件系统 | Workers 中无文件系统 | **无法阻止** — 拥有完整的 `fs` 访问权限 |
+
+### 对 Node.js 部署的建议
+
+1. **仅安装来自受信任来源的插件。** 在安装前审查任何插件的源代码。优先选择由已知维护者发布的插件。
+2. **将能力声明用作审查清单。** 即使能力不被强制执行，它们也记录了插件的预期范围。一个声明了 `["network:fetch"]` 但不需要网络访问的插件是可疑的。
+3. **监控资源使用情况。** 使用进程级监控（例如，`--max-old-space-size`、健康检查）来捕获失控的插件。
+4. **对于不受信任的插件，考虑使用 Cloudflare。** 如果你需要运行来自未知来源（例如，市场）的插件，请部署在支持沙箱的 Cloudflare Workers 上。
+
+## 相同的 API，不同的保证
+
+无论执行模式如何，插件的代码都是相同的。`definePlugin()` API、上下文结构、钩子、路由和存储都以相同的方式工作。改变的是**强制执行**：
+
+```typescript
+// This plugin works in both trusted and sandboxed mode
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+	capabilities: ["read:content", "network:fetch"],
+	allowedHosts: ["api.analytics.example.com"],
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			// In trusted mode: ctx.http is always present (capabilities not enforced)
+			// In sandboxed mode: ctx.http is present because "network:fetch" is declared
+			await ctx.http.fetch("https://api.analytics.example.com/track", {
+				method: "POST",
+				body: JSON.stringify({ contentId: event.content.id }),
+			});
+		},
+	},
+});
+```
+
+目标是让插件作者在本地以受信任模式开发（迭代更快，调试更容易），并在生产环境中部署到沙箱模式，而无需更改代码。

@@ -1,0 +1,566 @@
+---
+title: MCP サーバーリファレンス
+description: MCP サーバーのプロトコル詳細、ツール仕様、OAuth 設定について。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDashには、AIアシスタント向けにコンテンツ管理操作をツールとして公開する組み込みの[Model Context Protocol](https://modelcontextprotocol.io)（MCP）サーバーが`/_emdash/api/mcp`に含まれています。
+
+<Aside>
+	Claude、ChatGPT、または他のAIツールをサイトに接続したいですか？セットアップ手順と使用上のヒントについては、[AIツールガイド](/ja/guides/ai-tools)を参照してください。
+</Aside>
+
+このページでは、プロトコルの詳細：認証、トランスポート、ツール仕様、OAuthディスカバリー、およびエラー処理について説明します。
+
+## 認証
+
+MCPサーバーは3つの認証方法をサポートしています：
+
+| 方法 | 仕組み |
+| --- | --- |
+| **OAuth 2.1 Authorization Code + PKCE** | MCPクライアント向けの標準フロー。ユーザーがブラウザでスコープを承認します。 |
+| **Personal Access Token (PAT)** | 管理パネルで作成された長寿命の`ec_pat_*`トークン。 |
+| **Device Flow** | ブラウザでコードを承認するCLIスタイルのフロー。`emdash login`で使用されます。 |
+
+セッションCookie（管理UIからのもの）も機能しますが、外部MCPクライアントには実用的ではありません。
+
+### スコープ
+
+トークンは、クライアントが実行できる操作を制限するためにスコープが設定されています。スコープはOAuth認可中に要求され、すべてのツール呼び出しで強制されます。
+
+| スコープ | アクセス権限 |
+| --- | --- |
+| `content:read` | コンテンツの一覧表示、取得、比較、検索。タクソノミー用語とメニューの一覧表示。 |
+| `content:write` | コンテンツの作成、更新、削除、公開、非公開、スケジュール設定、複製、復元。タクソノミー用語の作成。 |
+| `media:read` | メディアアイテムの一覧表示と取得。 |
+| `media:write` | メディアメタデータの更新と削除。 |
+| `schema:read` | コレクションの一覧表示とコレクションスキーマの取得。 |
+| `schema:write` | コレクションとフィールドの作成と削除。 |
+| `admin` | すべての操作へのフルアクセス。 |
+
+`admin`スコープはすべてへのアクセス権を付与します。セッションベースの認証（トークンなし）も、ユーザーのロールに基づいてフルアクセス権を持ちます。
+
+### ロール要件
+
+スコープに加えて、一部のツールには最小限のRBACロールが必要です：
+
+| 操作 | 最小ロール |
+| --- | --- |
+| コンテンツ操作 | 最小要件なし（アクセスはスコープで制御） |
+| スキーマ読み取り | Editor (40) |
+| スキーマ書き込み | Admin (50) |
+
+ロールの定義については、[認証ガイド](/ja/guides/authentication#user-roles)を参照してください。
+
+## トランスポート
+
+サーバーは**ステートレスモード**でStreamable HTTPトランスポートを使用します。各リクエストは独立しており、セッションや長寿命の接続はありません。
+
+- **`POST /_emdash/api/mcp`** -- JSON-RPCツール呼び出しを送信
+- **`GET /_emdash/api/mcp`** -- 405を返す（ステートレスモードではSSEなし）
+- **`DELETE /_emdash/api/mcp`** -- 405を返す（閉じるセッションなし）
+
+レスポンスは[JSON-RPC 2.0](https://www.jsonrpc.org/specification)形式に従います。エラーは標準のJSON-RPCエラーコードを使用し、スコープと権限の失敗にはMCP固有のコードが使用されます。
+
+## ツール
+
+サーバーは7つのドメインにわたる33のツールを公開しています。各ツールは結果をJSONテキストコンテンツとして返すか、失敗時には`isError: true`を含むエラーメッセージを返します。
+
+### コンテンツツール
+
+#### `content_list`
+
+オプションのフィルタリングとページネーションを使用して、コレクション内のコンテンツアイテムを一覧表示します。
+
+| パラメータ | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ（例：`posts`、`pages`） |
+| `status` | `string` | いいえ | フィルター：`draft`、`published`、または`scheduled` |
+| `limit` | `integer` | いいえ | 返す最大アイテム数（1-100、デフォルト50） |
+| `cursor` | `string` | いいえ | 前回のレスポンスからのページネーションカーソル |
+| `orderBy` | `string` | いいえ | ソートするフィールド（例：`created_at`、`updated_at`） |
+| `order` | `string` | いいえ | ソート方向：`asc`または`desc`（デフォルト`desc`） |
+| `locale` | `string` | いいえ | ロケールでフィルター（例：`en`、`fr`）。i18nに関連する場合のみ。 |
+
+**スコープ：** `content:read` | **読み取り専用：** はい
+
+#### `content_get`
+
+IDまたはスラッグで単一のコンテンツアイテムを取得します。すべてのフィールド値、メタデータ、および楽観的同時実行制御のための`_rev`トークンを返します。
+
+| パラメータ | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムID（ULID）またはスラッグ |
+| `locale` | `string` | いいえ | スラッグ検索用のロケール。IDはグローバルに一意です。 |
+
+**スコープ：** `content:read` | **読み取り専用：** はい
+
+<Aside>
+	レスポンス内の`_rev`トークンは競合検出に使用されます。更新時にこれを返すことで、読み取ってから他の誰もアイテムを変更していないことを確認します。
+</Aside>
+
+#### `content_create`
+
+新しいコンテンツアイテムを作成します。`data`オブジェクトには、コレクションのスキーマに一致するフィールド値を含める必要があります。利用可能なフィールドを確認するには`schema_get_collection`を使用してください。アイテムはデフォルトで`draft`として作成されます。
+
+| パラメータ | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `data` | `object` | はい | キーと値のペアとしてのフィールド値 |
+| `slug` | `string` | いいえ | URLスラッグ（省略時はタイトルから自動生成） |
+| `status` | `string` | いいえ | 初期ステータス：`draft`または`published`（デフォルト`draft`） |
+| `locale` | `string` | いいえ | このコンテンツのロケール（デフォルトはサイトのデフォルト） |
+| `translationOf` | `string` | いいえ | これが翻訳元であるアイテムのID |
+
+**スコープ：** `content:write`
+
+#### `content_update`
+
+既存のコンテンツアイテムを更新します。変更したいフィールドのみを含めてください。指定されていないフィールドは変更されません。
+
+| パラメータ | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+| `data` | `object` | いいえ | 更新するフィールド値 |
+| `slug` | `string` | いいえ | 新しいURLスラッグ |
+| `status` | `string` | いいえ | 新しいステータス：`draft`または`published` |
+| `_rev` | `string` | いいえ | 競合検出のための`content_get`からのリビジョントークン |
+
+**スコープ：** `content:write`
+
+#### `content_delete`
+
+コンテンツアイテムをゴミ箱に移動してソフト削除します。元に戻すには`content_restore`を、完全に削除するには`content_permanent_delete`を使用してください。
+
+| パラメータ | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+
+**スコープ：** `content:write` | **破壊的：** はい
+
+#### `content_restore`
+
+ごみ箱からソフト削除されたコンテンツアイテムを復元します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+
+**スコープ:** `content:write`
+
+#### `content_permanent_delete`
+
+ごみ箱内のコンテンツアイテムを完全かつ不可逆的に削除します。アイテムは事前にごみ箱に入っている必要があります。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+
+**スコープ:** `content:write` | **破壊的:** はい
+
+#### `content_publish`
+
+コンテンツアイテムを公開し、サイト上でライブにします。現在の下書きから公開リビジョンを作成します。それ以降の編集は、再公開されるまでライブバージョンに影響を与えずに新しい下書きを作成します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+
+**スコープ:** `content:write`
+
+#### `content_unpublish`
+
+公開済みアイテムを下書きステータスに戻します。ライブサイト上では表示されなくなりますが、そのコンテンツは保持されます。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+
+**スコープ:** `content:write`
+
+#### `content_schedule`
+
+コンテンツアイテムを将来の公開のためにスケジュールします。指定された日時で自動的に公開されます。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+| `scheduledAt` | `string` | はい | ISO 8601 日時形式 (例: `2026-06-01T09:00:00Z`) |
+
+**スコープ:** `content:write`
+
+#### `content_compare`
+
+コンテンツアイテムの公開済み（ライブ）バージョンと現在の下書きを比較します。両方のバージョンと、変更があるかどうかを示すフラグを返します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+
+**スコープ:** `content:read` | **読み取り専用:** はい
+
+#### `content_discard_draft`
+
+現在の下書きを破棄し、最後に公開されたバージョンに戻します。少なくとも一度は公開されたアイテムでのみ機能します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+
+**スコープ:** `content:write` | **破壊的:** はい
+
+#### `content_list_trashed`
+
+コレクションのごみ箱内にあるソフト削除されたコンテンツアイテムを一覧表示します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `limit` | `integer` | いいえ | 最大アイテム数 (1-100, デフォルト 50) |
+| `cursor` | `string` | いいえ | ページネーションカーソル |
+
+**スコープ:** `content:read` | **読み取り専用:** はい
+
+#### `content_duplicate`
+
+既存のコンテンツアイテムのコピーを作成します。複製は下書きとして作成され、タイトルには「(コピー)」が追加され、スラッグは自動生成されます。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | 複製するコンテンツアイテムIDまたはスラッグ |
+
+**スコープ:** `content:write`
+
+#### `content_translations`
+
+コンテンツアイテムのすべてのロケールバリアントを取得します。翻訳グループと各ロケールバージョンの概要を返します。i18nが有効な場合にのみ関連します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+
+**スコープ:** `content:read` | **読み取り専用:** はい
+
+### スキーマツール
+
+<Aside type="caution">
+	スキーマツールはデータベース構造を変更します。コレクションやフィールドの作成・削除は、基盤となるテーブルを変更します。これらの操作には管理者ロールが必要です。
+</Aside>
+
+#### `schema_list_collections`
+
+CMSで定義されているすべてのコンテンツコレクションを一覧表示します。スラッグ、ラベル、サポート機能、タイムスタンプを返します。
+
+**パラメータなし。**
+
+**スコープ:** `schema:read` | **最小ロール:** 編集者 | **読み取り専用:** はい
+
+#### `schema_get_collection`
+
+すべてのフィールド定義を含む、コレクションの詳細情報を取得します。フィールドはコンテンツモデルを記述します：名前、タイプ、制約、検証ルール。`content_create` と `content_update` が何を期待するかを理解するために使用します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `slug` | `string` | はい | コレクションスラッグ (例: `posts`) |
+
+**スコープ:** `schema:read` | **最小ロール:** 編集者 | **読み取り専用:** はい
+
+#### `schema_create_collection`
+
+新しいコンテンツコレクションを作成します。これにより、データベーステーブルとスキーマ定義が作成されます。スラッグは小文字の英数字とアンダースコアで、文字で始まる必要があります。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `slug` | `string` | はい | 一意の識別子 (`/^[a-z][a-z0-9_]*$/`) |
+| `label` | `string` | はい | 表示名 (複数形, 例: "ブログ投稿") |
+| `labelSingular` | `string` | いいえ | 単数形の表示名 |
+| `description` | `string` | いいえ | このコレクションの説明 |
+| `icon` | `string` | いいえ | 管理UI用のアイコン名 |
+| `supports` | `string[]` | いいえ | 機能: `drafts`, `revisions`, `preview`, `scheduling`, `search` (デフォルト: `['drafts', 'revisions']`) |
+
+**スコープ:** `schema:write` | **最小ロール:** 管理者
+
+#### `schema_delete_collection`
+
+コレクションとそのデータベーステーブルを削除します。これは不可逆的で、コレクション内のすべてのコンテンツを削除します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `slug` | `string` | はい | 削除するコレクションスラッグ |
+| `force` | `boolean` | いいえ | コレクションにコンテンツがあっても強制削除 |
+
+**スコープ:** `schema:write` | **最小ロール:** 管理者 | **破壊的:** はい
+
+#### `schema_create_field`
+
+コレクションのスキーマに新しいフィールドを追加します。これにより、データベーステーブルに列が追加されます。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `slug` | `string` | はい | フィールド識別子 (`/^[a-z][a-z0-9_]*$/`) |
+| `label` | `string` | はい | 表示名 |
+| `type` | `string` | はい | データ型 (下記参照) |
+| `required` | `boolean` | いいえ | フィールドが必須かどうか |
+| `unique` | `boolean` | いいえ | 値が一意である必要があるか |
+| `defaultValue` | `any` | いいえ | 新規アイテムのデフォルト値 |
+| `validation` | `object` | いいえ | 制約: `min`, `max`, `minLength`, `maxLength`, `pattern`, `options` |
+| `options` | `object` | いいえ | ウィジェット設定: `collection` (参照用), `rows` (テキストエリア用) |
+| `searchable` | `boolean` | いいえ | 全文検索インデックスに含めるか |
+| `translatable` | `boolean` | いいえ | このフィールドが翻訳可能か (デフォルトは true) |
+
+フィールドタイプ: `string`, `text`, `number`, `integer`, `boolean`, `datetime`, `select`, `multiSelect`, `portableText`, `image`, `file`, `reference`, `json`, `slug`.
+
+`select` および `multiSelect` タイプの場合、`validation.options` に許可される値を指定してください。
+
+**スコープ:** `schema:write` | **最小ロール:** 管理者
+
+#### `schema_delete_field`
+
+コレクションからフィールドを削除します。この操作は列を削除し、そのフィールド内のすべてのデータを消去します。元に戻せません。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `fieldSlug` | `string` | はい | 削除するフィールドスラッグ |
+
+**スコープ:** `schema:write` | **最小ロール:** 管理者 | **破壊的:** はい
+
+### メディアツール
+
+#### `media_list`
+
+アップロードされたメディアファイルを一覧表示します。オプションでMIMEタイプによるフィルタリングとページネーションが可能です。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `mimeType` | `string` | いいえ | MIMEタイププレフィックスによるフィルター (例: `image/`, `application/pdf`) |
+| `limit` | `integer` | いいえ | 最大アイテム数 (1-100, デフォルト 50) |
+| `cursor` | `string` | いいえ | ページネーションカーソル |
+
+**スコープ:** `media:read` | **読み取り専用:** はい
+
+#### `media_get`
+
+IDによる単一のメディアファイルの詳細を取得します。ファイル名、MIMEタイプ、サイズ、寸法、代替テキスト、URLを含むメタデータを返します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `id` | `string` | はい | メディアアイテムID |
+
+**スコープ:** `media:read` | **読み取り専用:** はい
+
+#### `media_update`
+
+アップロードされたメディアファイルのメタデータを更新します。ファイル自体は変更できません。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `id` | `string` | はい | メディアアイテムID |
+| `alt` | `string` | いいえ | アクセシビリティのための代替テキスト |
+| `caption` | `string` | いいえ | キャプションテキスト |
+| `width` | `integer` | いいえ | 画像の幅 (ピクセル単位) |
+| `height` | `integer` | いいえ | 画像の高さ (ピクセル単位) |
+
+**スコープ:** `media:write`
+
+#### `media_delete`
+
+メディアファイルを完全に削除します。データベースレコードとストレージからファイルを削除します。このメディアを参照しているコンテンツは参照が壊れます。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `id` | `string` | はい | メディアアイテムID |
+
+**スコープ:** `media:write` | **破壊的:** はい
+
+### 検索ツール
+
+#### `search`
+
+コンテンツコレクション全体で全文検索を実行します。コレクションは `supports` リストに `search` を含み、フィールドは `searchable` としてマークされている必要があります。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `query` | `string` | はい | 検索クエリテキスト |
+| `collections` | `string[]` | いいえ | 特定のコレクションスラッグに検索を制限 |
+| `locale` | `string` | いいえ | ロケールで結果をフィルター |
+| `limit` | `integer` | いいえ | 最大結果数 (1-50, デフォルト 20) |
+
+**スコープ:** `content:read` | **読み取り専用:** はい
+
+### タクソノミーツール
+
+#### `taxonomy_list`
+
+すべてのタクソノミー定義 (例: カテゴリ、タグ) を一覧表示します。名前、ラベル、階層構造かどうか、関連するコレクションを返します。
+
+**パラメータなし。**
+
+**スコープ:** `content:read` | **読み取り専用:** はい
+
+#### `taxonomy_list_terms`
+
+ページネーション付きでタクソノミー内の用語を一覧表示します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `taxonomy` | `string` | はい | タクソノミー名 (例: `categories`, `tags`) |
+| `limit` | `integer` | いいえ | 最大アイテム数 (1-100, デフォルト 50) |
+| `cursor` | `string` | いいえ | ページネーションカーソル |
+
+**スコープ:** `content:read` | **読み取り専用:** はい
+
+#### `taxonomy_create_term`
+
+タクソノミー内に新しい用語を作成します。階層型タクソノミーの場合、`parentId` を指定して子用語を作成します。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `taxonomy` | `string` | はい | タクソノミー名 |
+| `slug` | `string` | はい | URLセーフな識別子 |
+| `label` | `string` | はい | 表示名 |
+| `parentId` | `string` | いいえ | 親用語ID (階層型タクソノミー用) |
+| `description` | `string` | いいえ | 用語の説明 |
+
+**スコープ:** `content:write`
+
+### メニューツール
+
+#### `menu_list`
+
+すべてのナビゲーションメニューを一覧表示します。名前、ラベル、タイムスタンプを返します。
+
+**パラメータなし。**
+
+**スコープ:** `content:read` | **読み取り専用:** はい
+
+#### `menu_get`
+
+名前でメニューを取得し、そのすべてのアイテムを順序付きで含めます。アイテムにはラベル、URL、タイプ、およびネスト用のオプションの親があります。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `name` | `string` | はい | メニュー名 (例: `main`, `footer`) |
+
+**スコープ:** `content:read` | **読み取り専用:** はい
+
+### リビジョンツール
+
+#### `revision_list`
+
+コンテンツアイテムのリビジョン履歴を新しい順に一覧表示します。コレクションが `revisions` をサポートしている必要があります。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `collection` | `string` | はい | コレクションスラッグ |
+| `id` | `string` | はい | コンテンツアイテムIDまたはスラッグ |
+| `limit` | `integer` | いいえ | 最大リビジョン数 (1-50, デフォルト 20) |
+
+**スコープ:** `content:read` | **読み取り専用:** はい
+
+#### `revision_restore`
+
+コンテンツアイテムを以前のリビジョンに復元します。現在の下書きを指定されたリビジョンのデータで置き換えます。自動的には公開されません -- 必要に応じて後で `content_publish` を使用してください。
+
+| パラメータ | タイプ | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `revisionId` | `string` | はい | 復元するリビジョンID |
+
+**スコープ:** `content:write`
+
+## OAuth ディスカバリー
+
+OAuth 2.1をサポートするMCPクライアントは、認証方法を自動的に検出できます。サーバーは2つのメタデータ文書を公開します：
+
+### 保護されたリソースメタデータ
+
+```http
+GET /.well-known/oauth-protected-resource
+```
+
+```json
+{
+  "resource": "https://example.com/_emdash/api/mcp",
+  "authorization_servers": ["https://example.com/_emdash"],
+  "scopes_supported": [
+    "content:read", "content:write",
+    "media:read", "media:write",
+    "schema:read", "schema:write",
+    "admin"
+  ],
+  "bearer_methods_supported": ["header"]
+}
+```
+
+### 認証サーバーメタデータ
+
+```http
+GET /_emdash/.well-known/oauth-authorization-server
+```
+
+```json
+{
+  "issuer": "https://example.com/_emdash",
+  "authorization_endpoint": "https://example.com/_emdash/oauth/authorize",
+  "token_endpoint": "https://example.com/_emdash/api/oauth/token",
+  "scopes_supported": ["content:read", "content:write", "..."],
+  "response_types_supported": ["code"],
+  "grant_types_supported": [
+    "authorization_code",
+    "refresh_token",
+    "urn:ietf:params:oauth:grant-type:device_code"
+  ],
+  "code_challenge_methods_supported": ["S256"],
+  "token_endpoint_auth_methods_supported": ["none"],
+  "device_authorization_endpoint": "https://example.com/_emdash/api/oauth/device/code"
+}
+```
+
+認証されていないリクエストがMCPエンドポイントに到達すると、サーバーは以下を返します：
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"
+```
+
+これにより、標準的なMCPクライアント検出フローがトリガーされます。
+
+## エラー処理
+
+ツールエラーは、`isError: true`のテキストコンテンツとして返されます：
+
+```json
+{
+  "content": [{ "type": "text", "text": "Collection 'nonexistent' not found" }],
+  "isError": true
+}
+```
+
+スコープおよび権限エラーはMCPプロトコルエラーをスローします：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32600,
+    "message": "Insufficient scope: requires content:write"
+  },
+  "id": 1
+}
+```
+
+トランスポートレベルエラー（サーバー設定ミス、未処理例外）は、実装詳細を漏洩せずにJSON-RPCエラーコード`-32603`（内部エラー）を返します。

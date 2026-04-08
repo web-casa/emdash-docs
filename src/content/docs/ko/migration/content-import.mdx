@@ -1,0 +1,429 @@
+---
+title: 콘텐츠 가져오기
+description: WordPress 및 기타 소스에서 EmDash로 콘텐츠를 가져옵니다.
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash의 가져오기 시스템은 플러그형 소스 아키텍처를 사용합니다. 각 소스는 특정 플랫폼에서 콘텐츠를 탐색, 분석 및 가져오는 방법을 알고 있습니다.
+
+## 가져오기 소스
+
+| 소스 ID        | 플랫폼              | 탐색 | OAuth | 전체 가져오기 |
+| ---------------- | --------------------- | ----- | ----- | ----------- |
+| `wxr`            | WordPress 내보내기 파일 | 아니요    | 아니요    | 예         |
+| `wordpress-com`  | WordPress.com         | 예   | 예   | 예         |
+| `wordpress-rest` | 자체 호스팅 WordPress | 예   | 아니요    | 탐색만 가능  |
+
+### WXR 파일 업로드
+
+가장 완전한 가져오기 방법입니다. WordPress 확장 RSS(WXR) 내보내기 파일을 관리자 대시보드에 직접 업로드하세요.
+
+**기능:**
+
+- 모든 게시물 유형(사용자 정의 포함)
+- 모든 메타 필드
+- 초안 및 비공개 게시물
+- 전체 분류 체계
+- 미디어 첨부 파일 메타데이터
+
+**WXR 파일을 얻는 방법:**
+
+<Steps>
+
+1. WordPress 관리자에서 **도구 → 내보내기**로 이동
+2. **모든 콘텐츠** 또는 특정 게시물 유형 선택
+3. **내보내기 파일 다운로드** 클릭
+4. `.xml` 파일을 EmDash에 업로드
+
+</Steps>
+
+### WordPress.com OAuth
+
+WordPress.com에서 호스팅되는 사이트의 경우, OAuth를 통해 연결하여 수동 파일 내보내기 없이 가져올 수 있습니다.
+
+<Steps>
+
+1. WordPress.com 사이트 URL 입력
+2. **WordPress.com으로 연결** 클릭
+3. WordPress.com 팝업에서 EmDash 승인
+4. 가져올 콘텐츠 선택
+
+</Steps>
+
+<Aside type="caution">
+	WordPress.com OAuth는 환경 변수 `WPCOM_CLIENT_ID`와 `WPCOM_CLIENT_SECRET`이 필요합니다.
+	[developer.wordpress.com](https://developer.wordpress.com/apps/)에서 앱을 등록하세요.
+</Aside>
+
+**포함 내용:**
+
+- 게시됨 및 초안 콘텐츠
+- 비공개 게시물(승인 시)
+- API를 통한 미디어 파일
+- REST API에 노출된 사용자 정의 필드
+
+### WordPress REST API 탐색
+
+URL을 입력하면 EmDash가 사이트를 탐색하여 WordPress를 감지하고 사용 가능한 콘텐츠를 표시합니다:
+
+```
+Detected: WordPress 6.4
+├── Posts: 127 (published)
+├── Pages: 12 (published)
+└── Media: 89 files
+
+참고: 초안 및 비공개 콘텐츠는 인증
+또는 전체 WXR 내보내기가 필요합니다.
+```
+
+REST 탐색은 정보 제공용입니다. 완전한 가져오기를 위해서는 WXR 파일 업로드 또는 OAuth 연결(WordPress.com용)을 제안합니다.
+
+## 가져오기 흐름
+
+모든 소스는 동일한 흐름을 따릅니다:
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Connect   │────▶│   Analyze   │────▶│   Prepare   │────▶│   Execute   │
+│  (probe/    │     │  (schema    │     │  (create    │     │  (import    │
+│   upload)   │     │   check)    │     │   schema)   │     │   content)  │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+```
+
+### 1단계: 연결
+
+URL을 입력하여 탐색하거나 파일을 직접 업로드하세요.
+
+**URL 탐색**은 등록된 모든 소스를 병렬로 실행합니다. 가장 높은 신뢰도 일치가 제안된 다음 작업을 결정합니다:
+
+- **WordPress.com 사이트** → OAuth 연결 제공
+- **자체 호스팅 WordPress** → 내보내기 지침 표시
+- **알 수 없음** → 파일 업로드 제안
+
+### 2단계: 분석
+
+소스는 콘텐츠를 구문 분석하고 스키마 호환성을 확인합니다:
+
+```
+Post Types:
+├── post (127) → posts [New collection]
+├── page (12)  → pages [Existing, compatible]
+├── product (45) → products [Add 3 fields]
+└── revision (234) → [Skip - internal type]
+
+필요한 스키마 변경:
+├── 컬렉션 생성: posts
+├── 페이지에 필드 추가: featured_image
+└── 컬렉션 생성: products
+```
+
+각 게시물 유형은 상태를 표시합니다:
+
+| 상태         | 의미                                  |
+| -------------- | ---------------------------------------- |
+| 준비됨          | 호환 가능한 필드가 있는 컬렉션이 존재함 |
+| 새 컬렉션 | 자동으로 생성될 예정            |
+| 필드 추가     | 컬렉션이 존재하지만, 누락된 필드가 추가됨  |
+| 호환되지 않음   | 필드 유형 충돌(수동 수정 필요) |
+
+### 3단계: 스키마 준비
+
+**스키마 생성 및 가져오기**를 클릭하여:
+
+1. SchemaRegistry를 통해 새 컬렉션 생성
+2. 올바른 열 유형으로 누락된 필드 추가
+3. 인덱스가 있는 콘텐츠 테이블 설정
+
+### 4단계: 가져오기 실행
+
+콘텐츠는 순차적으로 가져옵니다:
+
+- Gutenberg/HTML이 Portable Text로 변환됨
+- WordPress 상태가 EmDash 상태로 매핑됨
+- WordPress 작성자가 소유권(`authorId`) 및 발표자 바이라인으로 매핑됨
+- 분류가 생성되고 연결됨
+- 재사용 가능 블록(`wp_block`)이 [섹션](/ko/guides/sections/)으로 가져옴
+- 실시간으로 진행 상황 표시
+
+작성자 가져오기 동작:
+
+- 작성자 매핑이 EmDash 사용자를 가리키면, 소유권이 해당 사용자로 설정되고 동일한 사용자에 대해 연결된 바이라인이 생성/재사용됩니다.
+- 사용자 매핑이 없으면, WordPress 작성자 신원에서 게스트 바이라인이 생성/재사용됩니다.
+- 가져온 항목에는 순서가 지정된 바이라인 크레딧이 부여되며, 첫 번째 크레딧이 `primaryBylineId`로 설정됩니다.
+
+### 5단계: 미디어 가져오기 (선택 사항)
+
+콘텐츠 후, 선택적으로 미디어를 가져옵니다:
+
+<Steps>
+
+1. **분석** — 유형별 첨부 파일 수 표시
+
+   ```
+   Media found:
+   ├── Images: 75 files
+   ├── Video: 10 files
+   └── Other: 4 files
+   ```
+
+2. **다운로드** — 진행 상황과 함께 WordPress URL에서 스트리밍
+
+   ```
+   Importing media...
+   ├── 45 of 89 (50%)
+   ├── Current: vacation-photo.jpg
+   └── Status: Uploading
+   ```
+
+3. **URL 재작성** — 콘텐츠가 새 미디어 URL로 자동 업데이트됨
+
+</Steps>
+
+미디어 가져오기는 중복 제거를 위해 콘텐츠 해싱(xxHash64)을 사용합니다. 여러 게시물에서 사용된 동일한 이미지는 한 번만 저장됩니다.
+
+## 소스 인터페이스
+
+가져오기 소스는 표준 인터페이스를 구현합니다:
+
+```typescript
+interface ImportSource {
+	/** 고유 식별자 */
+	id: string;
+
+	/** 표시 이름 */
+	name: string;
+
+	/** URL 탐색 (선택 사항) */
+	probe?(url: string): Promise<SourceProbeResult | null>;
+
+	/** 이 소스의 콘텐츠 분석 */
+	analyze(input: SourceInput, context: ImportContext): Promise<ImportAnalysis>;
+
+	/** 콘텐츠 항목 스트리밍 */
+	fetchContent(input: SourceInput, options: FetchOptions): AsyncGenerator<NormalizedItem>;
+}
+```
+
+### 입력 유형
+
+소스는 다양한 입력 유형을 허용합니다:
+
+```typescript
+// File upload (WXR)
+{ type: "file", file: File }
+
+// 선택적 토큰이 있는 URL (REST API)
+{ type: "url", url: string, token?: string }
+
+// OAuth 연결 (WordPress.com)
+{ type: "oauth", url: string, accessToken: string }
+```
+
+### 정규화된 출력
+
+모든 소스는 동일한 정규화된 형식을 생성합니다:
+
+```typescript
+interface NormalizedItem {
+	sourceId: string | number;
+	postType: string;
+	status: "publish" | "draft" | "pending" | "private" | "future";
+	slug: string;
+	title: string;
+	content: PortableTextBlock[];
+	excerpt?: string;
+	date: Date;
+	author?: string;
+	authors?: string[];
+	categories?: string[];
+	tags?: string[];
+	meta?: Record<string, unknown>;
+	featuredImage?: string;
+}
+```
+
+## API 엔드포인트
+
+가져오기 시스템은 다음 엔드포인트를 노출합니다:
+
+### URL 탐색
+
+```http
+POST /_emdash/api/import/probe
+Content-Type: application/json
+
+{ "url": "https://example.com" }
+```
+
+감지된 플랫폼과 제안된 작업을 반환합니다.
+
+### WXR 분석
+
+```http
+POST /_emdash/api/import/wordpress/analyze
+Content-Type: multipart/form-data
+
+file: [WordPress 내보내기 .xml]
+```
+
+스키마 호환성과 함께 게시물 유형 분석을 반환합니다.
+
+### 스키마 준비
+
+```http
+POST /_emdash/api/import/wordpress/prepare
+Content-Type: application/json
+
+{
+  "postTypes": [
+    { "name": "post", "collection": "posts", "enabled": true }
+  ]
+}
+```
+
+컬렉션과 필드를 생성합니다.
+
+### 가져오기 실행
+
+```http
+POST /_emdash/api/import/wordpress/execute
+Content-Type: multipart/form-data
+
+file: [WordPress 내보내기 .xml]
+config: { "postTypeMappings": { "post": { "collection": "posts" } } }
+```
+
+지정된 컬렉션으로 콘텐츠를 가져옵니다.
+
+### 미디어 가져오기
+
+```http
+POST /_emdash/api/import/wordpress/media
+Content-Type: application/json
+
+{
+  "attachments": [{ "id": 123, "url": "https://..." }],
+  "stream": true
+}
+```
+
+다운로드/업로드 중 NDJSON 진행 상황 업데이트를 스트리밍합니다.
+
+### URL 재작성
+
+```http
+POST /_emdash/api/import/wordpress/rewrite-urls
+Content-Type: application/json
+
+{
+  "urlMap": { "https://old.com/image.jpg": "/_emdash/media/abc123" }
+}
+```
+
+새 미디어 URL로 Portable Text 콘텐츠를 업데이트합니다.
+
+## 오류 처리
+
+### 복구 가능한 오류
+
+- **네트워크 시간 초과** — 백오프로 재시도
+- **단일 항목 구문 분석 실패** — 기록, 건너뛰기, 가져오기 계속
+- **미디어 다운로드 실패** — 수동 처리용으로 표시
+
+### 치명적 오류
+
+- **잘못된 파일 형식** — 오류 메시지와 함께 가져오기 중지
+- **데이터베이스 연결 손실** — 가져오기 일시 중지, 재개 허용
+- **저장 공간 할당량 초과** — 가져오기 중지, 사용량 표시
+
+### 오류 보고서
+
+가져오기 후:
+
+```
+Import Complete
+
+✓ 125개 게시물 가져옴
+✓ 12개 페이지 가져옴
+✓ 85개 미디어 참조 기록됨
+
+⚠ 2개 항목에 경고 발생:
+  - 게시물 "Special Characters ñ" - 제목 인코딩 수정됨
+  - 페이지 "소개" - 중복 슬러그가 "about-1"로 변경됨
+
+✗ 1개 항목 실패:
+  - 게시물 ID 456 - 콘텐츠 구문 분석 오류 (초안으로 저장됨)
+```
+
+실패한 항목은 검토를 위해 `_importError`에 원본 콘텐츠와 함께 초안으로 저장됩니다.
+
+## 사용자 정의 소스 구축
+
+다른 플랫폼용 소스 생성:
+
+```
+typescript title="src/import/custom-source.ts"
+import type { ImportSource } from "emdash/import";
+
+export const mySource: ImportSource = {
+	id: "my-platform",
+	name: "My Platform",
+	description: "Import from My Platform",
+	icon: "globe",
+	canProbe: true,
+
+	async probe(url) {
+		// URL이 플랫폼과 일치하는지 확인
+		const response = await fetch(`${url}/api/info`);
+		if (!response.ok) return null;
+
+		return {
+			sourceId: "my-platform",
+			confidence: "definite",
+			detected: { platform: "my-platform" },
+			// ...
+		};
+	},
+
+	async analyze(input, context) {
+		// Parse and analyze content
+		// Return ImportAnalysis
+	},
+
+	async *fetchContent(input, options) {
+		// 각 콘텐츠 조각에 대해 NormalizedItem 생성
+		for (const item of items) {
+			yield {
+				sourceId: item.id,
+				postType: "post",
+				title: item.title,
+				content: convertToPortableText(item.body),
+				// ...
+			};
+		}
+	},
+};
+```
+
+EmDash 구성에서 소스 등록:
+
+```
+typescript title="astro.config.mjs"
+import { mySource } from "../../migration/src/import/custom-source";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			import: {
+				sources: [mySource],
+			},
+		}),
+	],
+});
+```
+
+## 다음 단계
+
+- **[WordPress 마이그레이션](/ko/migration/from-wordpress/)** — 완전한 WordPress 마이그레이션 가이드
+- **[플러그인 이식](/ko/migration/plugin-porting/)** — WordPress 플러그인을 EmDash로 이식

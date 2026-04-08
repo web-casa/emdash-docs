@@ -1,0 +1,258 @@
+---
+title: WordPressからEmDashへの移行
+description: エクスポート、コンテンツインポート、メディア、タクソノミー、リダイレクト計画を網羅した、ステップバイステップのWordPressからEmDashへの移行ガイド。
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDashはWordPressからの完全な移行パスを提供します。投稿、ページ、メディア、タクソノミーを管理ダッシュボードからインポートできます。CLIは不要です。
+
+まずより高レベルな移行の概要を知りたい場合は、[WordPressからAstroへ（EmDashを使用）](/ja/wordpress-to-astro-with-emdash/)と[EmDash vs WordPress](/ja/emdash-vs-wordpress/)をお読みください。
+
+## 開始前に
+
+<CardGrid>
+	<Card title="コンテンツをエクスポート" icon="document">
+		WordPressで、**ツール → エクスポート**に移動し、完全なエクスポートファイル(.xml)をダウンロードします。
+	</Card>
+	<Card title="サイトをバックアップ" icon="warning">
+		移行が成功したことを確認するまで、WordPressサイトを稼働させたままにしてください。
+	</Card>
+</CardGrid>
+
+## インポート方法
+
+EmDashはWordPressコンテンツのインポートに3つの方法をサポートしています：
+
+| 方法           | 最適な用途                       | 下書きを含む | 認証が必要 |
+| ---------------- | ------------------------------ | --------------- | ------------- |
+| WXRファイルアップロード  | 完全な移行            | はい             | いいえ            |
+| WordPress.com    | WordPress.comでホストされたサイト     | はい             | OAuth         |
+| REST API (プローブ) | エクスポート前のコンテンツ確認 | いいえ              | オプション      |
+
+ほとんどの移行にはWXRファイルアップロードが推奨されます。下書き、カスタムフィールド、非公開投稿を含むすべてのコンテンツを取得します。
+
+## WXRファイルインポート
+
+<Steps>
+
+1. **WordPressからエクスポート**
+
+   WordPress管理パネルで、**ツール → エクスポート → すべてのコンテンツ → エクスポートファイルをダウンロード**に移動します。
+
+2. **インポートウィザードを開く**
+
+   EmDashで、**管理 → 設定 → インポート → WordPress**に移動します。
+
+3. **エクスポートファイルをアップロード**
+
+   `.xml`ファイルをドラッグ＆ドロップするか、クリックして参照します。ファイルはブラウザ内で解析されます。
+
+4. **検出されたコンテンツを確認**
+
+   ウィザードは検出された内容を表示します：
+
+   ```
+   Found in export:
+   ├── Posts: 127 → posts [New collection]
+   ├── Pages: 12  → pages [Add fields]
+   └── Media: 89 attachments
+   ```
+
+5. **マッピングを設定**
+
+   インポートする投稿タイプを切り替えます。EmDashは自動的に：
+   - マッピングされていない投稿タイプに新しいコレクションを作成
+   - 既存のコレクションに不足しているフィールドを追加
+   - フィールドタイプの競合について警告
+
+6. **インポートを実行**
+
+   **コンテンツをインポート**をクリックします。各項目が処理されるにつれて進捗が表示されます。
+
+7. **メディアをインポート（オプション）**
+
+   コンテンツのインポート後、メディアファイルをダウンロードするか選択します。EmDashは：
+   - WordPressのURLからダウンロード
+   - コンテンツハッシュで重複排除
+   - コンテンツ内のURLを自動的に書き換え
+
+</Steps>
+
+<Aside type="tip">
+	インポートを再実行しても安全です。項目はWordPress IDで照合されるため、重複は作成されません。
+</Aside>
+
+## コンテンツ変換
+
+### GutenbergからPortable Textへ
+
+EmDashはGutenbergブロックを[Portable Text](https://github.com/portabletext/portabletext)（構造化コンテンツ形式）に変換します。
+
+| Gutenbergブロック  | Portable Text                | 注記                         |
+| ---------------- | ---------------------------- | ----------------------------- |
+| `core/paragraph` | `block` style="normal"       | インラインマークは保持        |
+| `core/heading`   | `block` style="h1-h6"        | ブロック属性からのレベル   |
+| `core/image`     | `image` block                | メディア参照が更新       |
+| `core/list`      | `block` with `listItem` type | 順序付きと順序なし         |
+| `core/quote`     | `block` style="blockquote"   | 引用元を含む             |
+| `core/code`      | `code` block                 | 言語属性を保持  |
+| `core/embed`     | `embed` block                | URLとプロバイダーを保存       |
+| `core/gallery`   | `gallery` block              | 画像参照の配列     |
+| `core/columns`   | `columns` block              | ネストされたコンテンツを保持      |
+| 不明なブロック   | `htmlBlock`                  | レビューのため生のHTMLを保持 |
+
+不明なブロックは、元のHTMLとブロックメタデータを含む`htmlBlock`として保存されます。これらを手動でレビュー・変換するか、カスタムPortable Textコンポーネントを作成してレンダリングできます。
+
+### クラシックエディターのコンテンツ
+
+クラシックエディターからのHTMLはPortable Textブロックに変換されます。インラインスタイル（`<strong>`、`<em>`、`<a>`）はスパン上のマークになります。
+
+### ステータスマッピング
+
+| WordPressステータス | EmDashステータス |
+| ---------------- | --------------- |
+| `publish`        | `published`     |
+| `draft`          | `draft`         |
+| `pending`        | `pending`       |
+| `private`        | `private`       |
+| `future`         | `scheduled`     |
+| `trash`          | `archived`      |
+
+## タクソノミーインポート
+
+カテゴリーとタグは、階層を保持したタクソノミーとしてインポートされます：
+
+```
+WordPress:                    EmDash:
+├── Categories (hierarchical) ├── taxonomies table
+│   ├── News                  │   ├── category/news
+│   │   ├── Local             │   ├── category/local (parent: news)
+│   │   └── World             │   ├── category/world (parent: news)
+│   └── Sports                │   └── category/sports
+└── Tags (flat)               └── content_taxonomies junction
+    ├── featured                  ├── tag/featured
+    └── breaking                  └── tag/breaking
+```
+
+## カスタムフィールドとACF
+
+WordPressの投稿メタとACFフィールドはインポート中に分析されます：
+
+<Steps>
+
+1. **分析フェーズ**
+
+   ウィザードはカスタムフィールドを検出し、EmDashのフィールドタイプを提案します：
+
+   ```
+   Custom Fields:
+   ├── subtitle (string, 45 posts)
+   ├── _yoast_wpseo_title → seo.title (string, 127 posts)
+   ├── _thumbnail_id → featuredImage (reference, 89 posts)
+   └── price (number, 23 posts)
+   ```
+
+2. **フィールドマッピング**
+
+   内部WordPressフィールド（`_edit_`、`_wp_`で始まる）はデフォルトで非表示になります。SEOプラグインフィールドは`seo`オブジェクトにマッピングされます。
+
+3. **タイプ推論**
+
+   EmDashは値からフィールドタイプを推論します：
+   - 数値文字列 → `number`
+   - `"1"`、`"0"`、`"true"`、`"false"` → `boolean`
+   - ISO日付 → `date`
+   - シリアライズされたPHP/JSON → `json`
+   - WordPress ID（例：`_thumbnail_id`） → `reference`
+
+</Steps>
+
+<Aside>
+	ACFリピーターフィールドとフレキシブルコンテンツはJSONとしてインポートされます。EmDashで一致するPortable Textまたは配列フィールドを作成して、このデータを構造化してください。
+</Aside>
+
+## URLリダイレクト
+
+インポート後、EmDashはリダイレクトマップを生成します：
+
+```json
+{
+	"redirects": [
+		{ "from": "/?p=123", "to": "/posts/hello-world" },
+		{ "from": "/2024/01/hello-world/", "to": "/posts/hello-world" },
+		{ "from": "/category/news/", "to": "/categories/news" }
+	],
+	"feeds": [
+		{ "from": "/feed/", "to": "/rss.xml" },
+		{ "from": "/feed/atom/", "to": "/atom.xml" }
+	]
+}
+```
+
+これらのリダイレクトを以下に適用します：
+
+- Cloudflareリダイレクトルール
+- ホスティングプラットフォームのリダイレクト設定
+- Astroの`astro.config.mjs`内の`redirects`オプション
+
+## 概念マッピングリファレンス
+
+WordPressパターンをEmDashに適応させる際に、この表を使用してください：
+
+| WordPress               | EmDash                             | 備考                          |
+| ----------------------- | ------------------------------------ | ------------------------------ |
+| `register_post_type()`  | 管理UI内のコレクション               | ダッシュボードまたはAPI経由で作成   |
+| `register_taxonomy()`   | タクソノミーまたは配列フィールド      | 複雑さによる                     |
+| `register_meta()`       | コレクションスキーマ内のフィールド    | 型付き、キーバリューではない       |
+| `WP_Query`              | `getCollection(filters)`             | ランタイムクエリ                 |
+| `get_post()`            | `getEntry(collection, id)`           | エントリーまたはnullを返す        |
+| `wp_insert_post()`      | `POST /_emdash/api/content/{type}` | REST API                       |
+| `the_content`           | `<PortableText value={...} />`       | Portable Textレンダリング        |
+| `add_shortcode()`       | Portable Textカスタムブロック         | カスタムコンポーネントレンダラー   |
+| `register_block_type()` | Portable Textカスタムブロック         | ショートコードと同じ             |
+| `add_menu_page()`       | プラグイン管理ページ                  | `/_emdash/admin/`配下         |
+| `add_action/filter()`   | プラグインフック                      | `hooks.content:beforeSave`     |
+| `wp_options`            | `ctx.kv`                             | キーバリューストア               |
+| `wp_postmeta`           | コレクションフィールド                | 構造化、キーバリューではない       |
+| `$wpdb`                 | `ctx.storage`                        | 直接ストレージアクセス           |
+| Categories/Tags         | タクソノミー                          | 階層サポートは維持される         |
+
+## APIインポート（上級者向け）
+
+WordPressインポートは管理ダッシュボードとREST APIから利用可能です。最適な体験のためには管理ダッシュボードのインポートウィザードを使用してください — フィールドマッピング、競合解決、進捗追跡を提供します。
+
+インポートAPIエンドポイントはプログラムによるアクセスのために `/_emdash/api/import/wordpress/` 配下にあります。
+
+## トラブルシューティング
+
+### 「XML解析エラー」
+
+エクスポートファイルが破損しているか不完全です。WordPressから再エクスポートしてください。
+
+### メディアダウンロード失敗
+
+一部の画像が認証の背後にあるか、移動している可能性があります。インポートは継続され、失敗したURLは手動処理のためにログに記録されます。
+
+### フィールドタイプの競合
+
+既存のコレクションに互換性のない型のフィールドがある場合、インポートウィザードが競合を表示します。以下のいずれかを選択してください：
+
+- EmDashのフィールド名を変更する
+- WordPressフィールドマッピングを変更する
+- コレクションを削除して再作成する
+
+### 大規模なエクスポート
+
+100MBを超えるエクスポートの場合、以下を検討してください：
+
+1. WordPressで投稿タイプを個別にエクスポートする
+2. 各ファイルを順次インポートする
+3. 信頼性のために `--resume` オプション付きでCLIを使用する
+
+## 次のステップ
+
+- **[コンテンツインポート](/ja/migration/content-import/)** — その他のインポートソースと方法
+- **[プラグイン移植](/ja/migration/plugin-porting/)** — WordPressプラグイン機能の移行
+- **[コンテンツの操作](/ja/guides/working-with-content/)** — インポートしたコンテンツのクエリとレンダリング

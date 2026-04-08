@@ -1,0 +1,679 @@
+---
+title: 시드 파일 형식
+description: EmDash 시드 파일 구조와 구문에 대한 참조입니다.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+시드 파일은 EmDash 사이트를 부트스트랩하는 JSON 문서입니다. 컬렉션, 필드, 분류 체계, 메뉴, 리디렉션, 위젯 영역, 사이트 설정 및 선택적 샘플 콘텐츠를 정의합니다.
+
+## 루트 구조
+
+```json
+{
+	"$schema": "https://emdashcms.com/seed.schema.json",
+	"version": "1",
+	"meta": {},
+	"settings": {},
+	"collections": [],
+	"taxonomies": [],
+	"bylines": [],
+	"menus": [],
+	"redirects": [],
+	"widgetAreas": [],
+	"sections": [],
+	"content": {}
+}
+```
+
+| 필드         | 타입     | 필수 여부 | 설명                           |
+| ------------- | -------- | -------- | ------------------------------------- |
+| `$schema`     | `string` | 아니요       | 편집기 검증을 위한 JSON 스키마 URL |
+| `version`     | `"1"`    | 예      | 시드 형식 버전                   |
+| `meta`        | `object` | 아니요       | 시드에 대한 메타데이터               |
+| `settings`    | `object` | 아니요       | 사이트 설정                         |
+| `collections` | `array`  | 아니요       | 컬렉션 정의                |
+| `taxonomies`  | `array`  | 아니요       | 분류 체계 정의                  |
+| `bylines`     | `array`  | 아니요       | 바이라인 프로필 정의            |
+| `menus`       | `array`  | 아니요       | 네비게이션 메뉴                      |
+| `redirects`   | `array`  | 아니요       | 리디렉션 규칙                        |
+| `widgetAreas` | `array`  | 아니요       | 위젯 영역 정의               |
+| `sections`    | `array`  | 아니요       | 재사용 가능한 콘텐츠 블록               |
+| `content`     | `object` | 아니요       | 샘플 콘텐츠 항목                |
+
+## 메타
+
+시드에 대한 선택적 메타데이터:
+
+```json
+{
+	"meta": {
+		"name": "Blog Starter",
+		"description": "A simple blog with posts, pages, and categories",
+		"author": "EmDash"
+	}
+}
+```
+
+## 설정
+
+사이트 전체 구성 값:
+
+```json
+{
+	"settings": {
+			"title": "내 사이트",
+			"tagline": "현대적인 CMS",
+		"postsPerPage": 10,
+		"dateFormat": "MMMM d, yyyy"
+	}
+}
+```
+
+설정은 `site:` 접두사와 함께 `options` 테이블에 적용됩니다. 설정 마법사는 사용자가 `title`과 `tagline`을 재정의할 수 있게 합니다.
+
+## 컬렉션
+
+컬렉션 정의는 데이터베이스에 콘텐츠 유형을 생성합니다:
+
+```json
+{
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Posts",
+			"labelSingular": "Post",
+			"description": "Blog posts",
+			"icon": "file-text",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{
+					"slug": "title",
+					"label": "Title",
+					"type": "string",
+					"required": true
+				},
+				{
+					"slug": "content",
+					"label": "Content",
+					"type": "portableText"
+				},
+				{
+					"slug": "featured_image",
+					"label": "Featured Image",
+					"type": "image"
+				}
+			]
+		}
+	]
+}
+```
+
+### 컬렉션 속성
+
+| 속성        | 타입     | 필수 여부 | 설명                                  |
+| --------------- | -------- | -------- | -------------------------------------------- |
+| `slug`          | `string` | 예      | URL-안전 식별자 (소문자, 밑줄) |
+| `label`         | `string` | 예      | 복수 표시 이름                          |
+| `labelSingular` | `string` | 아니요       | 단수 표시 이름                        |
+| `description`   | `string` | 아니요       | 관리자 UI 설명                         |
+| `icon`          | `string` | 아니요       | Lucide 아이콘 이름                             |
+| `supports`      | `array`  | 아니요       | 기능: `"drafts"`, `"revisions"`          |
+| `fields`        | `array`  | 예      | 필드 정의                            |
+
+### 필드 속성
+
+| 속성       | 타입      | 필수 여부 | 설명                          |
+| -------------- | --------- | -------- | ------------------------------------ |
+| `slug`         | `string`  | 예      | 열 이름 (소문자, 밑줄) |
+| `label`        | `string`  | 예      | 표시 이름                         |
+| `type`         | `string`  | 예      | 필드 타입                           |
+| `required`     | `boolean` | 아니요       | 유효성 검사: 필드에 값이 있어야 함  |
+| `unique`       | `boolean` | 아니요       | 유효성 검사: 값이 고유해야 함     |
+| `defaultValue` | `any`     | 아니요       | 새 항목에 대한 기본값        |
+| `validation`   | `object`  | 아니요       | 추가 유효성 검사 규칙          |
+| `widget`       | `string`  | 아니요       | 관리자 UI 위젯 재정의             |
+| `options`      | `object`  | 아니요       | 위젯별 구성        |
+
+### 필드 타입
+
+| 타입           | 설명                | 저장 형식         |
+| -------------- | -------------------------- | ----------------- |
+| `string`       | 짧은 텍스트                 | `TEXT`            |
+| `text`         | 긴 텍스트 (텍스트 영역)       | `TEXT`            |
+| `number`       | 숫자 값              | `REAL`            |
+| `integer`      | 정수               | `INTEGER`         |
+| `boolean`      | 참/거짓                 | `INTEGER`         |
+| `date`         | 날짜 값                 | `TEXT` (ISO 8601) |
+| `datetime`     | 날짜 및 시간              | `TEXT` (ISO 8601) |
+| `email`        | 이메일 주소              | `TEXT`            |
+| `url`          | URL                        | `TEXT`            |
+| `slug`         | URL-안전 문자열            | `TEXT`            |
+| `portableText` | 리치 텍스트 콘텐츠          | `JSON`            |
+| `image`        | 이미지 참조            | `JSON`            |
+| `file`         | 파일 참조             | `JSON`            |
+| `json`         | 임의의 JSON             | `JSON`            |
+| `reference`    | 다른 항목에 대한 참조 | `TEXT`            |
+
+## 분류 체계
+
+콘텐츠를 위한 분류 시스템:
+
+```json
+{
+	"taxonomies": [
+		{
+			"name": "category",
+				"label": "카테고리",
+				"labelSingular": "카테고리",
+			"hierarchical": true,
+			"collections": ["posts"],
+			"terms": [
+					{ "slug": "news", "label": "뉴스" },
+					{ "slug": "tutorials", "label": "튜토리얼" },
+				{
+					"slug": "advanced",
+						"label": "고급 튜토리얼",
+					"parent": "tutorials"
+				}
+			]
+		},
+		{
+			"name": "tag",
+			"label": "Tags",
+			"labelSingular": "Tag",
+			"hierarchical": false,
+			"collections": ["posts"]
+		}
+	]
+}
+```
+
+### 분류 체계 속성
+
+| 속성        | 타입      | 필수 여부 | 설명                                    |
+| --------------- | --------- | -------- | ---------------------------------------------- |
+| `name`          | `string`  | 예      | 고유 식별자                              |
+| `label`         | `string`  | 예      | 복수 표시 이름                            |
+| `labelSingular` | `string`  | 아니요       | 단수 표시 이름                          |
+| `hierarchical`  | `boolean` | 예      | 중첩된 용어 허용 (카테고리) 또는 평면적 (태그) |
+| `collections`   | `array`   | 예      | 이 분류 체계가 적용되는 컬렉션           |
+| `terms`         | `array`   | 아니요       | 사전 정의된 용어                              |
+
+### 용어 속성
+
+| 속성      | 타입     | 필수 여부 | 설명                          |
+| ------------- | -------- | -------- | ------------------------------------ |
+| `slug`        | `string` | 예      | URL-안전 식별자                  |
+| `label`       | `string` | 예      | 표시 이름                         |
+| `description` | `string` | 아니요       | 용어 설명                     |
+| `parent`      | `string` | 아니요       | 상위 용어 슬러그 (계층적 전용) |
+
+## 메뉴
+
+관리자에서 편집 가능한 네비게이션 메뉴:
+
+```json
+{
+	"menus": [
+		{
+			"name": "primary",
+				"label": "기본 내비게이션",
+				"items": [
+					{ "type": "custom", "label": "홈", "url": "/" },
+					{ "type": "page", "ref": "about" },
+				{ "type": "custom", "label": "Blog", "url": "/posts" },
+				{
+					"type": "custom",
+					"label": "External",
+					"url": "https://example.com",
+					"target": "_blank"
+				}
+			]
+		}
+	]
+}
+```
+
+### 메뉴 항목 타입
+
+| 타입         | 설명                          | 필수 필드             |
+| ------------ | ---------------------------- | ------------------- |
+| `custom`     | 사용자 정의 URL              | `url`               |
+| `page`       | 페이지 항목 링크             | `ref`               |
+| `post`       | 게시물 항목 링크             | `ref`               |
+| `taxonomy`   | 분류 아카이브 링크           | `ref`, `collection` |
+| `collection` | 컬렉션 아카이브 링크         | `collection`        |
+
+### 메뉴 항목 속성
+
+| 속성         | 타입      | 설명                                      |
+| ------------ | -------- | ------------------------------------------------ |
+| `type`       | `string` | 항목 타입 (위 참조)                            |
+| `label`      | `string` | 표시 텍스트 (페이지/게시물 참조 시 자동 생성) |
+| `url`        | `string` | 사용자 정의 URL (`custom` 타입용)               |
+| `ref`        | `string` | 시드 내 콘텐츠 ID (`page`/`post` 타입용)       |
+| `collection` | `string` | 컬렉션 슬러그                                  |
+| `target`     | `string` | 새 창 열기용 `"_blank"`                        |
+| `titleAttr`  | `string` | HTML title 속성                                |
+| `cssClasses` | `string` | 사용자 정의 CSS 클래스                         |
+| `children`   | `array`  | 중첩된 메뉴 항목                               |
+
+## 바이라인
+
+바이라인 프로필은 소유권(`author_id`)과 별개입니다. 재사용 가능한 바이라인 신원을 한 번 정의한 후 콘텐츠 항목에서 참조하세요.
+
+```json
+{
+	"bylines": [
+		{
+			"id": "editorial",
+			"slug": "emdash-editorial",
+			"displayName": "EmDash Editorial"
+		},
+		{
+			"id": "guest",
+			"slug": "guest-contributor",
+			"displayName": "Guest Contributor",
+			"isGuest": true
+		}
+	]
+}
+```
+
+| 속성          | 타입       | 필수 여부 | 설명                                |
+| ------------ | --------- | -------- | ------------------------------------------ |
+| `id`         | `string`  | 예      | `content[].bylines`에서 사용하는 시드-로컬 ID  |
+| `slug`       | `string`  | 예      | URL-안전 바이라인 슬러그                       |
+| `displayName`| `string`  | 예      | 템플릿 및 API에 표시되는 이름           |
+| `bio`        | `string`  | 아니요  | 선택적 프로필 소개                       |
+| `websiteUrl` | `string`  | 아니요  | 선택적 웹사이트 URL                       |
+| `isGuest`    | `boolean` | 아니요  | 바이라인을 게스트 프로필로 표시              |
+
+## 리디렉션
+
+마이그레이션 후 레거시 URL을 보존하기 위한 리디렉션 규칙:
+
+```json
+{
+	"redirects": [
+		{ "source": "/old-about", "destination": "/about" },
+		{ "source": "/legacy-feed", "destination": "/rss.xml", "type": 308 },
+		{
+			"source": "/category/news",
+			"destination": "/categories/news",
+			"groupName": "migration"
+		}
+	]
+}
+```
+
+### 리디렉션 속성
+
+| 속성          | 타입       | 필수 여부 | 설명                                        |
+| ------------- | --------- | -------- | -------------------------------------------------- |
+| `source`      | `string`  | 예      | 소스 경로 (`/`로 시작해야 함)                  |
+| `destination` | `string`  | 예      | 대상 경로 (`/`로 시작해야 함)             |
+| `type`        | `number`  | 아니요  | HTTP 상태 코드: `301`, `302`, `307`, 또는 `308`         |
+| `enabled`     | `boolean` | 아니요  | 리디렉션이 활성화되었는지 여부 (기본값: `true`)   |
+| `groupName`   | `string`  | 아니요  | 관리자 필터링/검색을 위한 선택적 그룹핑 레이블 |
+
+<Aside type="caution">
+	`source`와 `destination`은 로컬 경로여야 합니다. 외부 URL, 프로토콜 상대 경로(`//...`),
+	경로 탐색 세그먼트(`..`), 및 개행 문자는 시드 유효성 검사에서 거부됩니다.
+</Aside>
+
+## 위젯 영역
+
+구성 가능한 콘텐츠 영역:
+
+```json
+{
+	"widgetAreas": [
+		{
+			"name": "sidebar",
+				"label": "메인 사이드바",
+				"description": "블로그 게시물과 페이지에 표시됩니다",
+			"widgets": [
+				{
+					"type": "component",
+						"title": "최근 게시물",
+					"componentId": "core:recent-posts",
+					"props": { "count": 5 }
+				},
+				{
+					"type": "menu",
+						"title": "빠른 링크",
+					"menuName": "footer"
+				},
+				{
+					"type": "content",
+						"title": "소개",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+								"children": [{ "_type": "span", "text": "우리 사이트에 오신 것을 환영합니다!" }]
+						}
+					]
+				}
+			]
+		}
+	]
+}
+```
+
+### 위젯 타입
+
+| 타입        | 설명          | 필수 필드           |
+| ----------- | -------------------- | ------------------------- |
+| `content`   | 서식 있는 텍스트 콘텐츠    | `content` (Portable Text) |
+| `menu`      | 메뉴 렌더링       | `menuName`                |
+| `component` | 등록된 컴포넌트 | `componentId`             |
+
+### 내장 컴포넌트
+
+| 컴포넌트 ID        | 설명          |
+| ------------------- | -------------------- |
+| `core:recent-posts` | 최근 게시물 목록 |
+| `core:categories`   | 카테고리 목록        |
+| `core:tags`         | 태그 클라우드            |
+| `core:search`       | 검색 양식          |
+| `core:archives`     | 월별 아카이브     |
+
+## 섹션
+
+편집자가 `/section` 슬래시 명령을 통해 Portable Text 필드에 삽입할 수 있는 재사용 가능한 콘텐츠 블록:
+
+```json
+{
+	"sections": [
+		{
+			"slug": "hero-centered",
+			"title": "Centered Hero",
+			"description": "Full-width hero with centered heading and CTA button",
+			"keywords": ["hero", "banner", "header", "landing"],
+			"content": [
+				{
+					"_type": "block",
+					"style": "h1",
+						"children": [{ "_type": "span", "text": "우리 사이트에 오신 것을 환영합니다" }]
+				},
+				{
+					"_type": "block",
+					"children": [
+						{ "_type": "span", "text": "Your compelling tagline goes here." }
+					]
+				}
+			]
+		}
+	]
+}
+```
+
+### 섹션 속성
+
+| 속성          | 타입     | 필수 여부 | 설명                                     |
+| ------------- | -------- | -------- | ----------------------------------------------- |
+| `slug`        | `string` | 예      | URL-안전 식별자                             |
+| `title`       | `string` | 예      | 섹션 선택기에 표시되는 표시 이름        |
+| `description` | `string` | 아니요  | 이 섹션을 사용할 시기를 설명               |
+| `keywords`    | `array`  | 아니요  | 섹션을 찾기 위한 검색어            |
+| `content`     | `array`  | 예      | Portable Text 블록                            |
+| `source`      | `string` | 아니요  | `"theme"` (시드 기본값) 또는 `"import"`     |
+
+시드 파일의 섹션은 `source: "theme"`으로 표시되며 관리자 UI에서 삭제할 수 없습니다. 편집자는 자신의 섹션(`source: "user"`)을 생성하고 콘텐츠 편집 시 모든 섹션 타입을 삽입할 수 있습니다.
+
+## 콘텐츠
+
+컬렉션별로 구성된 샘플 콘텐츠:
+
+```json
+{
+	"content": {
+		"posts": [
+			{
+				"id": "hello-world",
+				"slug": "hello-world",
+				"status": "published",
+				"bylines": [
+					{ "byline": "editorial" },
+					{ "byline": "guest", "roleLabel": "Guest essay" }
+				],
+				"data": {
+						"title": "안녕하세요",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+								"children": [{ "_type": "span", "text": "환영합니다!" }]
+						}
+					],
+						"excerpt": "첫 게시물입니다."
+				},
+				"taxonomies": {
+					"category": ["news"],
+					"tag": ["welcome", "first-post"]
+				}
+			}
+		],
+		"pages": [
+			{
+				"id": "about",
+				"slug": "about",
+				"status": "published",
+				"data": {
+					"title": "About Us",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+							"children": [{ "_type": "span", "text": "About page content." }]
+						}
+					]
+				}
+			}
+		]
+	}
+}
+```
+
+### 콘텐츠 항목 속성
+
+| 속성         | 타입     | 필수 여부 | 설명                                         |
+| ------------ | -------- | -------- | --------------------------------------------------- |
+| `id`         | `string` | 예      | 참조용 시드-로컬 ID                        |
+| `slug`       | `string` | 예      | URL 슬러그                                            |
+| `status`     | `string` | 아니요  | `"published"` 또는 `"draft"` (기본값: `"published"`) |
+| `data`       | `object` | 예      | 필드 값                                        |
+| `bylines`    | `array`  | 아니요  | 순서가 지정된 바이라인 크레딧 (`byline`, 선택적 `roleLabel`) |
+| `taxonomies` | `object` | 아니요  | 분류 이름별 용어 할당                   |
+
+## 콘텐츠 참조
+
+`$ref:` 접두사를 사용하여 다른 콘텐츠 항목을 참조하세요:
+
+```json
+{
+	"data": {
+		"related_posts": ["$ref:another-post", "$ref:third-post"]
+	}
+}
+```
+
+`$ref:` 접두사는 시딩 중에 시드 ID를 데이터베이스 ID로 해석합니다.
+
+## 미디어 참조
+
+URL에서 이미지를 포함하세요:
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"url": "https://images.unsplash.com/photo-xxx",
+				"alt": "Description of the image",
+				"filename": "hero.jpg",
+				"caption": "Photo by Someone"
+			}
+		}
+	}
+}
+```
+
+`.emdash/media/`에서 로컬 이미지 포함하기:
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"file": "hero.jpg",
+				"alt": "Description of the image"
+			}
+		}
+	}
+}
+```
+
+### 미디어 속성
+
+| 속성       | 유형       | 필수 여부 | 설명                                  |
+| ---------- | -------- | -------- | ------------------------------------ |
+| `url`      | `string` | 예\*     | 다운로드할 원격 URL                   |
+| `file`     | `string` | 예\*     | `.emdash/media/` 내 로컬 파일명      |
+| `alt`      | `string` | 아니요   | 접근성을 위한 대체 텍스트             |
+| `filename` | `string` | 아니요   | 파일명 재정의                         |
+| `caption`  | `string` | 아니요   | 미디어 캡션                           |
+
+\*`url` 또는 `file` 중 하나가 필요하며, 둘 다 필요하지는 않습니다.
+
+<Aside>
+	미디어는 시딩 중에 다운로드됩니다. 큰 이미지는 설정 마법사를 느리게 할 수 있습니다. 샘플 콘텐츠에는
+	압축된 이미지나 썸네일 버전 사용을 고려하세요.
+</Aside>
+
+## 프로그래밍 방식으로 시드 적용하기
+
+CLI 도구나 스크립트에 시드 API 사용하기:
+
+```typescript
+import { applySeed, validateSeed } from "emdash/seed";
+import seedData from "../../themes/.emdash/seed.json";
+
+// 먼저 검증
+const validation = validateSeed(seedData);
+if (!validation.valid) {
+	console.error(validation.errors);
+	process.exit(1);
+}
+
+// 시드 적용
+const result = await applySeed(db, seedData, {
+	includeContent: true,
+	onConflict: "skip",
+	storage: myStorage,
+	baseUrl: "http://localhost:4321",
+});
+
+console.log(result);
+// {
+//   collections: { created: 2, skipped: 0 },
+//   fields: { created: 8, skipped: 0 },
+//   taxonomies: { created: 2, terms: 5 },
+//   bylines: { created: 2, skipped: 0 },
+//   menus: { created: 1, items: 4 },
+//   redirects: { created: 3, skipped: 0 },
+//   widgetAreas: { created: 1, widgets: 3 },
+//   settings: { applied: 3 },
+//   content: { created: 3, skipped: 0 },
+//   media: { created: 2, skipped: 0 }
+// }
+```
+
+### 적용 옵션
+
+| 옵션               | 유형        | 기본값     | 설명                                  |
+| ---------------- | --------- | -------- | ---------------------------------- |
+| `includeContent` | `boolean` | `false`  | 샘플 콘텐츠 항목 생성                |
+| `onConflict`     | `string`  | `"skip"` | `"skip"`, `"update"`, 또는 `"error"` |
+| `mediaBasePath`  | `string`  | —        | 로컬 미디어 파일의 기본 경로          |
+| `storage`        | `Storage` | —        | 미디어 업로드를 위한 스토리지 어댑터  |
+| `baseUrl`        | `string`  | —        | 미디어 URL의 기본 URL                |
+
+## 멱등성
+
+시딩은 여러 번 실행해도 안전합니다. 엔티티 유형별 충돌 동작:
+
+| 엔티티                | 동작                                  |
+| ------------------- | ------------------------------------- |
+| Collection          | 슬러그가 존재하면 건너뛰기             |
+| Field               | 컬렉션 + 슬러그가 존재하면 건너뛰기     |
+| Taxonomy definition | 이름이 존재하면 건너뛰기               |
+| Taxonomy term       | 이름 + 슬러그가 존재하면 건너뛰기       |
+| Byline profile      | 슬러그가 존재하면 건너뛰기             |
+| Menu                | 이름이 존재하면 건너뛰기               |
+| Menu items          | 모두 교체 (메뉴가 재생성됨)            |
+| Redirect            | 소스가 존재하면 건너뛰기               |
+| Widget area         | 이름이 존재하면 건너뛰기               |
+| Widgets             | 모두 교체 (영역이 재생성됨)            |
+| Section             | 슬러그가 존재하면 건너뛰기             |
+| Settings            | 업데이트 (설정은 변경되도록 의도됨)     |
+| Content             | 컬렉션 내 슬러그가 존재하면 건너뛰기    |
+
+<Aside type="caution">
+	메뉴 항목과 위젯은 **병합되지 않고 교체**됩니다. 시드 파일이 메뉴와 위젯 영역 구조의
+	진실의 원천입니다.
+</Aside>
+
+## 검증
+
+시드 파일은 적용 전에 검증됩니다:
+
+```typescript
+import { validateSeed } from "emdash/seed";
+
+const { valid, errors, warnings } = validateSeed(seedData);
+
+if (!valid) {
+	errors.forEach((e) => console.error(e));
+}
+
+warnings.forEach((w) => console.warn(w));
+```
+
+검증 확인 사항:
+
+- 필수 필드가 존재함
+- 슬러그가 명명 규칙을 따름 (소문자, 밑줄)
+- 필드 유형이 유효함
+- 참조가 기존 콘텐츠를 가리킴
+- 계층적 용어 부모가 존재함
+- 리디렉션 경로가 안전한 로컬 URL임
+- 리디렉션 소스가 고유함
+- 컬렉션 내 중복 슬러그 없음
+
+## CLI 명령어
+
+```bash
+# Apply seed file
+npx emdash seed .emdash/seed.json
+
+# 샘플 콘텐츠 없이 적용
+npx emdash seed .emdash/seed.json --no-content
+
+# 검증만 수행
+npx emdash seed .emdash/seed.json --validate
+
+# 현재 스키마를 시드로 내보내기
+npx emdash export-seed > seed.json
+
+# 콘텐츠와 함께 내보내기
+npx emdash export-seed --with-content > seed.json
+```
+
+## 다음 단계
+
+- **[테마 만들기](/ko/themes/creating-themes/)** — 완전한 테마 구축하기
+- **[테마 개요](/ko/themes/overview/)** — 테마 작동 방식

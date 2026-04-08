@@ -1,0 +1,201 @@
+---
+title: Plugin-Sandbox
+description: Wie EmDash nicht vertrauenswürdige Plugins auf Cloudflare Workers im Vergleich zu Node.js-Bereitstellungen isoliert.
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDash unterstützt zwei Ausführungsmodi für Plugins: **vertrauenswürdig** und **sandboxed**. Diese Seite erklärt, wie beide Modi funktionieren, welche Schutzmechanismen sie bieten und welche Sicherheitsfolgen sich je nach Zielplattform ergeben.
+
+## Ausführungsmodi
+
+| | Vertrauenswürdig | Sandboxed |
+|---|---|---|
+| **Läuft in** | Hauptprozess | Isolierter V8-Isolate (Dynamic Worker Loader) |
+| **Fähigkeiten** | Informativ (nicht erzwungen) | Zur Laufzeit erzwungen |
+| **Ressourcenlimits** | Keine | CPU, Speicher, Subrequests, Laufzeit |
+| **Netzwerkzugriff** | Uneingeschränkt | Blockiert; nur über `ctx.http` mit Host-Allowlist |
+| **Datenzugriff** | Vollständiger Datenbankzugriff | Auf deklarierte Fähigkeiten beschränkt via RPC-Bridge |
+| **Verfügbar auf** | Allen Plattformen | Nur Cloudflare Workers |
+
+## Vertrauenswürdiger Modus
+
+Vertrauenswürdige Plugins laufen im selben Prozess wie Ihre Astro-Site. Sie werden aus npm-Paketen oder lokalen Dateien geladen und in `astro.config.mjs` konfiguriert:
+
+```typescript title="astro.config.mjs"
+import myPlugin from "@emdash-cms/plugin-analytics";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			plugins: [myPlugin()],
+		}),
+	],
+});
+```
+
+Im vertrauenswürdigen Modus:
+
+- **Fähigkeiten sind Dokumentation, keine Durchsetzung.** Ein Plugin, das `["read:content"]` deklariert, kann trotzdem auf alles im Prozess zugreifen. Das Feld `capabilities` zeigt Administratoren nur, was das Plugin *voraussichtlich* nutzen will.
+- **Keine Ressourcenlimits.** CPU-, Speicher- und Netzwerknutzung sind unbegrenzt. Ein fehlerhaftes Plugin kann die gesamte Anfrage blockieren.
+- **Voller Prozesszugriff.** Plugins teilen sich die Node.js- oder Workers-Laufzeit mit Ihrer Astro-Site. Sie können beliebige Module importieren, auf Umgebungsvariablen zugreifen und unter Node.js auf das Dateisystem lesen und schreiben.
+
+<Aside type="caution" title="Sicherheitsimplikation">
+		Installieren Sie vertrauenswürdige Plugins nur aus Quellen, die Sie geprüft haben, etwa npm-Pakete aus vertrauenswürdiger Herkunft oder eigenen Code. Im vertrauenswürdigen Modus hat ein bösartiges Plugin denselben Zugriff wie Ihre Anwendung.
+</Aside>
+
+## Sandboxed-Modus (Cloudflare Workers)
+
+Sandboxed-Plugins laufen in isolierten V8-Isolates, die von der [Dynamic Worker Loader](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/)-API von Cloudflare bereitgestellt werden. Jedes Plugin erhält seine eigene Laufzeitumgebung mit erzwungenen Limits.
+
+Um Sandboxing zu aktivieren, konfigurieren Sie den Sandbox-Runner in Ihrer Astro-Konfiguration:
+
+```typescript title="astro.config.mjs"
+export default defineConfig({
+	integrations: [
+		emdash({
+			sandboxRunner: "@emdash-cms/cloudflare/sandbox",
+			sandboxed: [
+				{
+					manifest: seoPluginManifest,
+					code: seoPluginCode,
+				},
+			],
+		}),
+	],
+});
+```
+
+### Was die Sandbox durchsetzt
+
+<Steps>
+
+1. **Fähigkeitserzwingung**
+
+   Wenn ein Plugin `capabilities: ["read:content"]` deklariert, kann es nur `ctx.content.get()` und `ctx.content.list()` aufrufen. Der Versuch, `ctx.content.create()` aufzurufen, löst einen Berechtigungsfehler aus. Das wird von der RPC-Bridge durchgesetzt, und das Plugin kann es nicht umgehen, weil es keinen direkten Datenbankzugriff hat.
+
+2. **Ressourcenlimits**
+
+   Jeder Aufruf (Hook oder Routenaufruf) läuft mit:
+
+   | Ressource | Standard | Erzwungen durch |
+   |---|---|---|
+   | CPU-Zeit | 50ms | Worker Loader (V8-Isolate) |
+   | Subrequests | 10 pro Aufruf | Worker Loader (V8-Isolate) |
+   | Gesamtzeit | 30 Sekunden | EmDash-Runner (`Promise.race`) |
+   | Speicher | ~128MB | V8-Plattformlimit (nicht pro Plugin konfigurierbar) |
+
+   Wenn CPU- oder Subrequest-Limits überschritten werden, bricht der Worker Loader den Isolate ab und wirft eine Exception. Wird die Gesamtzeit überschritten, lehnt EmDash das Aufruf-Promise ab. Der Speicher ist durch das V8-Plattformlimit begrenzt und kann nicht pro Plugin konfiguriert werden.
+
+   Dies sind die eingebauten Standardwerte. Eigene Limits lassen sich mit einer benutzerdefinierten `SandboxRunnerFactory` setzen, die andere Werte in `SandboxOptions.limits` übergibt. Eine Konfiguration pro Site über die EmDash-Integration ist bisher nicht implementiert.
+
+3. **Netzwerkisolation**
+
+   Sandboxed-Plugins haben `globalOutbound: null`, daher sind direkte `fetch()`-Aufrufe auf V8-Ebene blockiert. Plugins müssen `ctx.http.fetch()` verwenden, das über die Bridge läuft. Die Bridge validiert den Zielhost gegen die `allowedHosts`-Liste des Plugins.
+
+4. **Speicherbereichsbegrenzung**
+
+   Alle Speicheroperationen wie KV und Collections sind auf die Plugin-ID beschränkt. Ein Plugin kann nicht die Daten eines anderen Plugins lesen. Der Zugriff auf Inhalte und Medien läuft über die Bridge, die bei jedem Aufruf die Fähigkeiten prüft.
+
+5. **Funktionseinschränkungen**
+
+   Einige Funktionen sind nur im vertrauenswürdigen Modus verfügbar:
+
+   - **API-Routen** – Benutzerdefinierte REST-Endpunkte (`routes`) sind nicht verfügbar. Sandboxed-Plugins interagieren mit Benutzern über Block-Kit-Adminseiten und Hooks.
+   - **Portable-Text-Blocktypen** – PT-Blöcke benötigen Astro-Komponenten für das Rendering auf der Website (`componentsEntry`), die zur Build-Zeit aus npm geladen werden. Sandboxed-Plugins werden zur Laufzeit installiert und können keine Komponenten mitbringen.
+   - **Benutzerdefinierte React-Adminseiten** – Sandboxed-Plugins verwenden Block Kit für die Admin-UI anstelle von mitgelieferten React-Komponenten.
+
+   Der Befehl `emdash plugin bundle` warnt, wenn ein Plugin diese Funktionen deklariert.
+
+</Steps>
+
+### Architektur
+
+Sandboxed-Plugins kommunizieren mit EmDash über eine RPC-Bridge:
+
+```
+┌─────────────────────┐     RPC      ┌──────────────────────┐
+│  Plugin Isolate     │ ◄──────────► │  PluginBridge        │
+│  (Worker Loader)    │   (binding)  │  (WorkerEntrypoint)  │
+│                     │              │                      │
+│  ctx.kv.get(k)      │──────────────│► kvGet(k)            │
+│  ctx.content.list() │──────────────│► contentList()       │
+│  ctx.http.fetch(u)  │──────────────│► httpFetch(u)        │
+└─────────────────────┘              └──────────────────────┘
+                                            │
+                                            ▼
+                                     ┌──────────────┐
+                                     │  D1 / R2     │
+                                     └──────────────┘
+```
+
+Der Code des Plugins läuft in einem V8-Isolate. Er erhält ein `ctx`-Objekt, bei dem jede Methode als Proxy zur Bridge dient. Die Bridge läuft im Haupt-Worker von EmDash und führt nach der Prüfung der Fähigkeiten die eigentlichen Datenbank- und Speicheroperationen aus.
+
+### Wrangler-Konfiguration
+
+Sandboxing erfordert Dynamic Worker Loader. Fügen Sie zu Ihrer `wrangler.jsonc` hinzu:
+
+```jsonc
+{
+	"worker_loaders": [{ "binding": "LOADER" }],
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "emdash-media" }],
+	"d1_databases": [{ "binding": "DB", "database_name": "emdash" }]
+}
+```
+
+## Node.js-Bereitstellungen
+
+<Aside type="danger" title="Keine Isolation auf Node.js">
+	Node.js unterstützt kein Plugin-Sandboxing. Alle Plugins laufen unabhängig von der Konfiguration im vertrauenswürdigen Modus. Es gibt keine V8-Isolates, keine Ressourcenlimits und keine Fähigkeitsdurchsetzung auf Laufzeitebene.
+</Aside>
+
+Bei der Bereitstellung auf Node.js (oder einer beliebigen Nicht-Cloudflare-Plattform):
+
+- Der `NoopSandboxRunner` wird verwendet. Er gibt `isAvailable() === false` zurück.
+- Der Versuch, Sandboxed-Plugins zu laden, löst `SandboxNotAvailableError` aus.
+- Alle Plugins müssen als vertrauenswürdige Plugins im `plugins`-Array registriert sein.
+- Fähigkeitsdeklarationen sind rein informativ – sie werden nicht erzwungen.
+
+### Was das für die Sicherheit bedeutet
+
+| Bedrohung | Cloudflare (sandboxed) | Node.js (nur vertrauenswürdig) |
+|---|---|---|
+| Plugin liest Daten, die es nicht sollte | Durch Capability-Prüfungen in der Bridge blockiert | **Nicht verhindert** — Plugin hat vollen DB-Zugriff |
+| Plugin führt nicht autorisierte Netzwerkaufrufe durch | Durch `globalOutbound: null` und Host-Allowlist blockiert | **Nicht verhindert** — Plugin kann `fetch()` direkt aufrufen |
+| Plugin erschöpft CPU | Isolate wird durch Worker Loader abgebrochen | **Nicht verhindert** — blockiert die Event Loop |
+| Plugin erschöpft Speicher | Isolate wird durch Worker Loader beendet | **Nicht verhindert** — kann den Prozess abstürzen lassen |
+| Plugin greift auf Umgebungsvariablen zu | Kein Zugriff (isolierter V8-Kontext) | **Nicht verhindert** — teilt sich `process.env` |
+| Plugin greift auf das Dateisystem zu | Kein Dateisystem in Workers | **Nicht verhindert** — voller `fs`-Zugriff |
+
+### Empfehlungen für Node.js-Bereitstellungen
+
+1. **Installieren Sie Plugins nur aus vertrauenswürdigen Quellen.** Überprüfen Sie den Quellcode eines Plugins vor der Installation. Bevorzugen Sie Plugins, die von bekannten Maintainern veröffentlicht werden.
+2. **Nutzen Sie Capability-Deklarationen als Prüfliste.** Auch wenn Capabilities nicht durchgesetzt werden, dokumentieren sie den beabsichtigten Umfang des Plugins. Ein Plugin, das `["network:fetch"]` deklariert, aber keinen Netzwerkzugriff benötigt, ist verdächtig.
+3. **Überwachen Sie die Ressourcennutzung.** Verwenden Sie Monitoring auf Prozessebene, zum Beispiel `--max-old-space-size` und Health Checks, um aus dem Ruder laufende Plugins zu erkennen.
+4. **Erwägen Sie Cloudflare für nicht vertrauenswürdige Plugins.** Wenn Sie Plugins aus unbekannten Quellen ausführen müssen, etwa aus einem Marketplace, stellen Sie sie auf Cloudflare Workers bereit, wo Sandboxing verfügbar ist.
+
+## Gleiche API, unterschiedliche Garantien
+
+Der Code eines Plugins ist unabhängig vom Ausführungsmodus identisch. Die `definePlugin()`-API, die Kontextform, Hooks, Routen und Storage funktionieren alle auf die gleiche Weise. Was sich ändert, ist die **Durchsetzung**:
+
+```typescript
+// Dieses Plugin funktioniert sowohl im vertrauenswürdigen als auch im sandboxed Modus
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+	capabilities: ["read:content", "network:fetch"],
+	allowedHosts: ["api.analytics.example.com"],
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			// Im vertrauenswürdigen Modus ist ctx.http immer vorhanden, weil Capabilities nicht erzwungen werden
+			// Im sandboxed Modus ist ctx.http vorhanden, weil "network:fetch" deklariert wurde
+			await ctx.http.fetch("https://api.analytics.example.com/track", {
+				method: "POST",
+				body: JSON.stringify({ contentId: event.content.id }),
+			});
+		},
+	},
+});
+```
+
+Das Ziel ist es, Plugin-Autoren die lokale Entwicklung im vertrauenswürdigen Modus zu ermöglichen, mit schnellerer Iteration und einfacherem Debugging, und dieselben Plugins ohne Codeänderungen im Sandboxed-Modus in Produktion bereitzustellen.

@@ -1,0 +1,521 @@
+---
+title: Ganchos de Plugin
+description: Conéctate a eventos del ciclo de vida de contenido, medios y plugins.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Los hooks permiten que los plugins ejecuten código en respuesta a eventos. Todos los hooks reciben un objeto de evento y el contexto del plugin. Los hooks se declaran en el momento de la definición del plugin, no se registran dinámicamente en tiempo de ejecución.
+
+## Firma del Hook
+
+Cada manejador de hook recibe dos argumentos:
+
+```typescript
+async (event: EventType, ctx: PluginContext) => ReturnType;
+```
+
+- `event` — Datos sobre el evento (contenido que se está guardando, medios subidos, etc.)
+- `ctx` — El [contexto del plugin](/es/plugins/overview/#plugin-context) con almacenamiento, KV, registro y APIs controladas por capacidades
+
+## Configuración del Hook
+
+Los hooks se pueden declarar como un manejador simple o con configuración completa:
+
+<Tabs>
+  <TabItem label="Simple">
+```typescript
+hooks: {
+  "content:afterSave": async (event, ctx) => {
+    ctx.log.info("Content saved");
+  }
+}
+```
+  </TabItem>
+  <TabItem label="Configuración Completa">
+```typescript
+hooks: {
+  "content:afterSave": {
+    priority: 100,
+    timeout: 5000,
+    dependencies: ["audit-log"],
+    errorPolicy: "continue",
+    handler: async (event, ctx) => {
+      ctx.log.info("Content saved");
+    }
+  }
+}
+```
+  </TabItem>
+</Tabs>
+
+### Opciones de Configuración
+
+| Opción          | Tipo                    | Por defecto | Descripción                                 |
+| ---------------- | ----------------------- | ----------- | ------------------------------------------- |
+| `priority`       | `number`                | `100`       | Orden de ejecución. Los números más bajos se ejecutan primero. |
+| `timeout`        | `number`                | `5000`      | Tiempo máximo de ejecución en milisegundos. |
+| `dependencies`   | `string[]`              | `[]`        | IDs de plugins que deben ejecutarse antes de este hook. |
+| `errorPolicy`    | `"abort" \| "continue"` | `"abort"`   | Si se debe detener la canalización en caso de error. |
+| `exclusive`      | `boolean`               | `false`     | Solo un plugin puede ser el proveedor activo. Se usa para `email:deliver` y `comment:moderate`. |
+| `handler`        | `function`              | —           | La función manejadora del hook. Requerida.  |
+
+<Aside type="tip">
+	Usa `errorPolicy: "continue"` para hooks no críticos como notificaciones. Usa `"abort"` (el
+	valor por defecto) cuando el resultado del hook es esencial.
+</Aside>
+
+## Hooks del Ciclo de Vida
+
+Los hooks del ciclo de vida se ejecutan durante la instalación, activación y desactivación del plugin.
+
+### `plugin:install`
+
+Se ejecuta una vez cuando el plugin se añade por primera vez a un sitio.
+
+```typescript
+"plugin:install": async (_event, ctx) => {
+  ctx.log.info("Installing plugin...");
+
+  // Inicializar datos por defecto
+  await ctx.kv.set("settings:enabled", true);
+  await ctx.storage.items!.put("default", { name: "Default Item" });
+}
+```
+
+**Evento:** `{}`  
+**Retorna:** `Promise<void>`
+
+### `plugin:activate`
+
+Se ejecuta cuando el plugin se habilita (después de la instalación o cuando se vuelve a habilitar).
+
+```typescript
+"plugin:activate": async (_event, ctx) => {
+  ctx.log.info("Plugin activated");
+}
+```
+
+**Evento:** `{}`  
+**Retorna:** `Promise<void>`
+
+### `plugin:deactivate`
+
+Se ejecuta cuando el plugin se deshabilita (pero no se elimina).
+
+```typescript
+"plugin:deactivate": async (_event, ctx) => {
+  ctx.log.info("Plugin deactivated");
+  // Release resources, pause background work
+}
+```
+
+**Evento:** `{}`  
+**Retorna:** `Promise<void>`
+
+### `plugin:uninstall`
+
+Se ejecuta cuando el plugin se elimina de un sitio.
+
+```typescript
+"plugin:uninstall": async (event, ctx) => {
+  ctx.log.info("Uninstalling plugin...");
+
+  if (event.deleteData) {
+    // El usuario optó por eliminar los datos del plugin
+    const result = await ctx.storage.items!.query({ limit: 1000 });
+    await ctx.storage.items!.deleteMany(result.items.map(i => i.id));
+  }
+}
+```
+
+**Evento:** `{ deleteData: boolean }`  
+**Retorna:** `Promise<void>`
+
+<Aside type="caution">
+	Sé conservador en `plugin:uninstall`. Por defecto, conserva los datos—los usuarios pueden reinstalar. Solo elimina
+	cuando `event.deleteData` sea `true`.
+</Aside>
+
+## Hooks de Contenido
+
+Los hooks de contenido se ejecutan durante las operaciones de creación, actualización y eliminación.
+
+### `content:beforeSave`
+
+Se ejecuta antes de que se guarde el contenido. Retorna contenido modificado o `void` para mantenerlo sin cambios. Lanza una excepción para cancelar el guardado.
+
+```typescript
+"content:beforeSave": async (event, ctx) => {
+  const { content, collection, isNew } = event;
+
+  // Validar
+  if (collection === "posts" && !content.title) {
+    throw new Error("Posts require a title");
+  }
+
+  // Transformar
+  if (content.slug) {
+    content.slug = content.slug.toLowerCase().replace(/\s+/g, "-");
+  }
+
+  return content;
+}
+```
+
+**Evento:**
+
+```typescript
+{
+	content: Record<string, unknown>; // Content data being saved
+	collection: string; // Collection name
+	isNew: boolean; // True if creating, false if updating
+}
+```
+
+**Retorna:** `Promise<Record<string, unknown> | void>`
+
+### `content:afterSave`
+
+Se ejecuta después de que el contenido se guarda exitosamente. Úsalo para efectos secundarios como notificaciones, registro o sincronización con sistemas externos.
+
+```typescript
+"content:afterSave": async (event, ctx) => {
+  const { content, collection, isNew } = event;
+
+  ctx.log.info(`${isNew ? "Created" : "Updated"} ${collection}/${content.id}`);
+
+  // Disparar sincronización externa
+  if (ctx.http) {
+    await ctx.http.fetch("https://api.example.com/webhook", {
+      method: "POST",
+      body: JSON.stringify({ event: "content:save", id: content.id })
+    });
+  }
+}
+```
+
+**Evento:**
+
+```typescript
+{
+	content: Record<string, unknown>; // Saved content (includes id, timestamps)
+	collection: string;
+	isNew: boolean;
+}
+```
+
+**Retorna:** `Promise<void>`
+
+### `content:beforeDelete`
+
+Se ejecuta antes de que se elimine el contenido. Retorna `false` para cancelar la eliminación, `true` o `void` para permitirla.
+
+```typescript
+"content:beforeDelete": async (event, ctx) => {
+  const { id, collection } = event;
+
+  // Prevenir eliminación de contenido protegido
+  if (collection === "pages" && id === "home") {
+    ctx.log.warn("Cannot delete home page");
+    return false;
+  }
+
+  return true;
+}
+```
+
+**Evento:**
+
+```typescript
+{
+	id: string; // Content ID being deleted
+	collection: string;
+}
+```
+
+**Retorna:** `Promise<boolean | void>`
+
+### `content:afterDelete`
+
+Se ejecuta después de que el contenido se elimina exitosamente.
+
+```typescript
+"content:afterDelete": async (event, ctx) => {
+  const { id, collection } = event;
+
+  ctx.log.info(`Eliminado ${collection}/${id}`);
+
+  // Limpiar datos relacionados del plugin
+  await ctx.storage.cache!.delete(`${collection}:${id}`);
+}
+```
+
+**Evento:**
+
+```typescript
+{
+	id: string;
+	collection: string;
+}
+```
+
+**Retorna:** `Promise<void>`
+
+## Hooks de Medios
+
+Los hooks de medios se ejecutan durante las subidas de archivos.
+
+### `media:beforeUpload`
+
+Se ejecuta antes de que se suba un archivo. Retorna información del archivo modificada o `void` para mantenerla sin cambios. Lanza una excepción para cancelar la subida.
+
+```typescript
+"media:beforeUpload": async (event, ctx) => {
+  const { file } = event;
+
+  // Validar tipo de archivo
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Only images are allowed");
+  }
+
+  // Validar tamaño del archivo (máximo 10MB)
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error("File too large");
+  }
+
+  // Renombrar archivo
+  return {
+    ...file,
+    name: `${Date.now()}-${file.name}`
+  };
+}
+```
+
+**Evento:**
+
+```typescript
+{
+	file: {
+		name: string; // Original filename
+		type: string; // MIME type
+		size: number; // Size in bytes
+	}
+}
+```
+
+**Retorna:** `Promise<{ name: string; type: string; size: number } | void>`
+
+### `media:afterUpload`
+
+Se ejecuta después de que un archivo se sube exitosamente.
+
+```typescript
+"media:afterUpload": async (event, ctx) => {
+  const { media } = event;
+
+  ctx.log.info(`Subido ${media.filename}`, {
+    id: media.id,
+    size: media.size,
+    mimeType: media.mimeType
+  });
+}
+```
+
+**Evento:**
+
+```typescript
+{
+	media: {
+		id: string;
+		filename: string;
+		mimeType: string;
+		size: number | null;
+		url: string;
+		createdAt: string;
+	}
+}
+```
+
+**Retorna:** `Promise<void>`
+
+## Orden de Ejecución de Hooks
+
+Los hooks se ejecutan en este orden:
+
+1. Los hooks con valores de `priority` más bajos se ejecutan primero
+2. Para prioridades iguales, los hooks se ejecutan en el orden de registro del plugin
+3. Los hooks con `dependencies` esperan a que esos plugins terminen
+
+```typescript
+// Plugin A
+"content:afterSave": {
+  priority: 50,  // Runs first
+  handler: async () => {}
+}
+
+// Plugin B
+"content:afterSave": {
+  priority: 100,  // Se ejecuta segundo (prioridad por defecto)
+  handler: async () => {}
+}
+
+// Plugin C
+"content:afterSave": {
+  priority: 200,
+  dependencies: ["plugin-a"],  // Se ejecuta después de A, incluso si la prioridad era menor
+  handler: async () => {}
+}
+```
+
+## Manejo de Errores
+
+Cuando un hook lanza una excepción o se agota el tiempo:
+
+- **`errorPolicy: "abort"`** — Toda la canalización se detiene. La operación original puede fallar.
+- **`errorPolicy: "continue"** — El error se registra, y los hooks restantes aún se ejecutan.
+
+```typescript
+"content:afterSave": {
+  timeout: 5000,
+  errorPolicy: "continue",  // Don't fail the save if this hook fails
+  handler: async (event, ctx) => {
+    // External API call that might fail
+    await ctx.http!.fetch("https://unreliable-api.com/notify");
+  }
+}
+```
+
+<Aside type="tip">
+	Usa `errorPolicy: "continue"` para operaciones no críticas como análisis, notificaciones o
+	sincronizaciones externas. El guardado del contenido tiene éxito incluso si el hook falla.
+</Aside>
+
+## Tiempos de Espera
+
+Los hooks tienen un tiempo de espera por defecto de 5000ms (5 segundos). Auméntalo para operaciones que puedan tardar más:
+
+```typescript
+"content:afterSave": {
+  timeout: 30000,  // 30 seconds
+  handler: async (event, ctx) => {
+    // Long-running operation
+  }
+}
+```
+
+<Aside type="caution">
+	En el modo sandbox de Cloudflare, los límites de recursos se aplican a nivel de aislado. Los hooks de larga duración
+	pueden ser terminados independientemente del tiempo de espera configurado.
+</Aside>
+
+## Hooks de Página Pública
+
+Los hooks de página pública permiten a los plugins contribuir al `<head>` y `<body>` de las páginas renderizadas. Las plantillas se suscriben usando los componentes `<EmDashHead>`, `<EmDashBodyStart>`, y `<EmDashBodyEnd>` de `emdash/ui`.
+
+### `page:metadata`
+
+Contribuye con metadatos tipados al `<head>` — etiquetas meta, propiedades OpenGraph, enlaces canónicos/alternativos y datos estructurados JSON-LD. Funciona tanto en modo confiable como en sandbox.
+
+El núcleo valida, elimina duplicados y renderiza las contribuciones. Los plugins devuelven datos estructurados, nunca HTML crudo.
+
+```typescript
+"page:metadata": async (event, ctx) => {
+  if (event.page.kind !== "content") return null;
+
+  return {
+    kind: "jsonld",
+    id: `schema:${event.page.content?.collection}:${event.page.content?.id}`,
+    graph: {
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      headline: event.page.title,
+      description: event.page.description,
+    },
+  };
+}
+```
+
+**Evento:**
+
+```typescript
+{
+  page: {
+    url: string;
+    path: string;
+    locale: string | null;
+    kind: "content" | "custom";
+    pageType: string;
+    title: string | null;
+    description: string | null;
+    canonical: string | null;
+    image: string | null;
+    content?: { collection: string; id: string; slug: string | null };
+  }
+}
+```
+
+**Devuelve:** `PageMetadataContribution | PageMetadataContribution[] | null`
+
+**Tipos de contribución:**
+
+| Tipo       | Renderiza                                            | Clave de deduplicación       |
+| ---------- | -------------------------------------------------- | ----------------------- |
+| `meta`     | `<meta name="..." content="...">`                  | `key` o `name`         |
+| `property` | `<meta property="..." content="...">`              | `key` o `property`     |
+| `link`     | `<link rel="canonical\|alternate" href="...">`     | canónico: único; alternativo: `key` o `hreflang` |
+| `jsonld`   | `<script type="application/ld+json">`              | `id` (si está presente)       |
+
+La primera contribución gana para cualquier clave de deduplicación. Los href de los enlaces deben ser HTTP o HTTPS.
+
+### `page:fragments`
+
+Contribuye con HTML crudo, scripts o marcado a los puntos de inserción de la página. **Solo plugins confiables** — los plugins en sandbox no pueden usar este hook.
+
+```typescript
+"page:fragments": async (event, ctx) => {
+  return {
+    kind: "external-script",
+    placement: "head",
+    src: "https://www.googletagmanager.com/gtm.js?id=GTM-XXXXX",
+    async: true,
+  };
+}
+```
+
+**Devuelve:** `PageFragmentContribution | PageFragmentContribution[] | null`
+
+Ubicaciones: `"head"`, `"body:start"`, `"body:end"`. Las plantillas que omiten un componente para una ubicación ignoran silenciosamente las contribuciones dirigidas a ella.
+
+<Aside type="caution">
+	`page:fragments` es solo para confiables porque su salida se ejecuta como código de primera parte en el navegador.
+	El aislamiento del Worker Loader no se extiende a los scripts ejecutados en el navegador. Usa `page:metadata` para
+	contribuciones seguras en sandbox.
+</Aside>
+
+## Referencia de Hooks
+
+| Hook                    | Disparador                        | Retorno                         | Exclusivo |
+| ----------------------- | ------------------------------ | ------------------------------ | --------- |
+| `plugin:install`        | Primera instalación del plugin      | `void`                         | No        |
+| `plugin:activate`       | Plugin habilitado                 | `void`                         | No        |
+| `plugin:deactivate`     | Plugin deshabilitado                | `void`                         | No        |
+| `plugin:uninstall`      | Plugin eliminado                 | `void`                         | No        |
+| `content:beforeSave`    | Antes de guardar contenido            | Contenido modificado o `void`     | No        |
+| `content:afterSave`     | Después de guardar contenido             | `void`                         | No        |
+| `content:beforeDelete`  | Antes de eliminar contenido          | `false` para cancelar, de lo contrario permitir  | No        |
+| `content:afterDelete`   | Después de eliminar contenido           | `void`                         | No        |
+| `media:beforeUpload`    | Antes de subir archivo             | Información del archivo modificada o `void`   | No        |
+| `media:afterUpload`     | Después de subir archivo              | `void`                         | No        |
+| `cron`                  | Se activa tarea programada           | `void`                         | No        |
+| `email:beforeSend`      | Antes de enviar correo          | Mensaje modificado, `false`, o `void` | No  |
+| `email:deliver`         | Entregar correo vía transporte    | `void`                         | Sí       |
+| `email:afterSend`       | Después de enviar correo           | `void`                         | No        |
+| `comment:beforeCreate`  | Antes de almacenar comentario          | Evento modificado, `false`, o `void` | No    |
+| `comment:moderate`      | Decidir estado del comentario          | `{ status, reason? }`          | Sí       |
+| `comment:afterCreate`   | Después de almacenar comentario           | `void`                         | No        |
+| `comment:afterModerate` | Admin cambia estado del comentario   | `void`                         | No        |
+| `page:metadata`         | Renderizado de página                    | Contribuciones o `null`        | No        |
+| `page:fragments`        | Renderizado de página (confiable)          | Contribuciones o `null`        | No        |
+
+Consulta la [Referencia de Hooks](/es/reference/hooks/) para ver los tipos de evento completos y las firmas de los manejadores.

@@ -1,0 +1,459 @@
+---
+title: Contribuir a EmDash
+description: Descripción general de la arquitectura, configuración de desarrollo local y pautas de contribución.
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Esta guía cubre cómo configurar un entorno de desarrollo local, comprender la arquitectura del código base y contribuir a EmDash.
+
+## Estructura del Repositorio
+
+EmDash es un **monorepo de pnpm** con múltiples paquetes:
+
+```
+emdash/
+├── packages/
+│   ├── core/              # emdash — integracion de Astro, APIs y panel de administracion (paquete principal)
+│   ├── auth/              # @emdash-cms/auth — autenticacion (passkeys, OAuth, magic links)
+│   ├── cloudflare/        # @emdash-cms/cloudflare — adaptador de Cloudflare y sandbox runner
+│   ├── admin/             # @emdash-cms/admin — SPA de administracion en React
+│   ├── create-emdash/     # create-emdash — generador de proyectos
+│   ├── gutenberg-to-portable-text/ # convertidor de bloques de WordPress a Portable Text
+│   └── plugins/           # plugins oficiales; cada subdirectorio es su propio paquete
+├── demos/
+│   ├── simple/            # emdash-demo — demo principal para desarrollo y pruebas (Node.js)
+│   ├── cloudflare/        # demo para Cloudflare Workers
+│   └── ...                # plugins-demo, showcase, wordpress-import
+└── docs/                  # sitio de documentacion (Starlight)
+```
+
+El paquete principal es `packages/core`. Contiene:
+
+```
+packages/core/src/
+├── astro/
+│   ├── integration/       # punto de entrada de la integracion de Astro y generacion de modulos virtuales
+│   ├── middleware/        # autenticacion, comprobacion de setup y contexto de solicitud (ALS)
+│   └── routes/
+│       ├── api/           # manejadores de rutas REST API
+│       └── admin-shell.astro # shell de la SPA de administracion
+├── database/
+│   ├── migrations/        # archivos de migracion numerados (001_initial.ts, ...)
+│   │   └── runner.ts      # StaticMigrationProvider — registra aqui las migraciones
+│   ├── repositories/      # capa de acceso a datos (content, media, settings, ...)
+│   └── types.ts           # tipo Database de Kysely
+├── plugins/
+│   ├── types.ts           # tipos de la API de plugins
+│   ├── define-plugin.ts   # definePlugin()
+│   ├── context.ts         # fabrica de PluginContext
+│   ├── hooks.ts           # HookPipeline
+│   ├── manager.ts         # PluginManager (plugins confiables)
+│   └── sandbox/           # interfaz de sandbox y runner no-op
+├── schema/
+│   └── registry.ts        # SchemaRegistry — gestiona las tablas ec_*
+├── media/                 # proveedores de medios (local, types)
+├── auth/                  # almacenes de challenge y estado OAuth
+├── query.ts               # getEmDashCollection, getEmDashEntry
+├── loader.ts              # implementacion de Astro LiveLoader
+└── emdash-runtime.ts      # EmDashRuntime — orquestador central
+```
+
+## Prerrequisitos
+
+- **Node.js** 22 o superior
+- **pnpm** 10 o superior
+- **Git**
+
+```bash
+# Instala pnpm si aun no lo tienes
+npm install -g pnpm
+```
+
+## Configuración Local
+
+<Steps>
+
+1. **Clonar el repositorio**
+
+   ```bash
+   git clone <repository-url>
+   cd emdash
+   ```
+
+2. **Instalar dependencias**
+
+   ```bash
+   pnpm install
+   ```
+
+3. **Construir paquetes** (requerido antes de ejecutar la demo)
+
+   ```bash
+   pnpm build
+   ```
+
+4. **Poblar la base de datos de demostración** (`demos/simple/`)
+
+   ```bash
+   pnpm --filter emdash-demo seed
+   ```
+
+5. **Iniciar el servidor de desarrollo**
+
+   ```bash
+   pnpm --filter emdash-demo dev
+   ```
+
+6. **Abrir el administrador**
+
+   Visitar [http://localhost:4321/_emdash/admin](http://localhost:4321/_emdash/admin)
+
+   En modo de desarrollo, usar el endpoint de omisión de desarrollo para saltar la autenticación con passkey:
+
+   ```
+   http://localhost:4321/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin
+   ```
+
+</Steps>
+
+## Flujo de Trabajo de Desarrollo
+
+### Modo de Observación
+
+Para el desarrollo de paquetes, usar el modo de observación junto con la demo:
+
+```bash
+# Terminal 1: observar cambios en packages/core
+pnpm --filter emdash dev
+
+# Terminal 2: Ejecutar la demo (demos/simple/)
+pnpm --filter emdash-demo dev
+```
+
+### Ejecutar Pruebas
+
+<Tabs>
+<TabItem label="Todas las pruebas">
+```bash
+pnpm test
+```
+</TabItem>
+<TabItem label="Solo paquete core">
+```bash
+pnpm --filter emdash test
+```
+</TabItem>
+<TabItem label="Modo observación">
+```bash
+pnpm --filter emdash test --watch
+```
+</TabItem>
+<TabItem label="Pruebas E2E">
+```bash
+pnpm test:e2e
+```
+</TabItem>
+</Tabs>
+
+### Verificación de Tipos y Linting
+
+```bash
+# Comprobar tipos en los paquetes TypeScript
+pnpm typecheck
+
+# Verificar tipos en demos de Astro
+pnpm typecheck:demos
+
+# Lint rápido (< 1s) — ejecutar después de cada edición
+pnpm lint:quick
+
+# Lint completo con reglas conscientes de tipos (~10s) — ejecutar antes de commits
+pnpm lint:json
+```
+
+<Aside type="caution">
+  La verificación de tipos debe pasar después de cada ronda de ediciones. Ejecutar `pnpm typecheck` antes de hacer commit.
+</Aside>
+
+### Formateo
+
+```bash
+pnpm format
+```
+
+EmDash usa **oxfmt** (formateador Oxc). La configuración está en `.oxfmtrc.json`. Tabulaciones, no espacios.
+
+## Descripción General de la Arquitectura
+
+### Conceptos Clave
+
+**D1 es la fuente de verdad.** El esquema reside en dos tablas del sistema:
+- `_emdash_collections` — metadatos de colecciones
+- `_emdash_fields` — definiciones de campos
+
+Cuando creas una colección, EmDash ejecuta `ALTER TABLE` para crear una tabla real `ec_*` con columnas tipadas. No se utiliza un enfoque EAV (Entidad-Atributo-Valor).
+
+**Cadena de middleware** (en orden para cada solicitud):
+
+1. **Inicialización del entorno de ejecución** — crea la conexión a la base de datos, inicializa `EmDashRuntime`
+2. **Verificación de configuración** — redirige al asistente de configuración si no está configurado
+3. **Autenticación** — valida la sesión, llena `locals.user`
+4. **Contexto de solicitud** — configura AsyncLocalStorage para el modo de vista previa/edición
+
+**Capa de manejadores:** la lógica de negocio reside en `api/handlers/*.ts`. Los archivos de ruta son envoltorios delgados que analizan la entrada, llaman a los manejadores y formatean las respuestas. Los manejadores devuelven `ApiResponse<T> = { success: boolean; data?: T; error?: { code, message } }`.
+
+### Archivos Clave
+
+| Archivo | Propósito |
+|------|---------|
+| `src/astro/integration/index.ts` | Punto de entrada de la integración de Astro; genera módulos virtuales |
+| `src/emdash-runtime.ts` | Entorno de ejecución central; orquesta la base de datos, plugins, almacenamiento |
+| `src/schema/registry.ts` | Gestiona la creación/modificación de tablas `ec_*` |
+| `src/database/migrations/runner.ts` | StaticMigrationProvider; registrar nuevas migraciones aquí |
+| `src/plugins/manager.ts` | Carga y orquesta plugins confiables |
+
+### Patrones de Base de Datos
+
+EmDash usa **Kysely** para todas las consultas. Reglas clave:
+
+```ts
+// CORRECTO: valores parametrizados
+const post = await db
+  .selectFrom("ec_posts")
+  .selectAll()
+  .where("slug", "=", slug)  // parametrizado
+  .executeTakeFirst();
+
+// CORRECTO: identificador validado en SQL crudo
+validateIdentifier(tableName);
+const result = await sql.raw(`SELECT * FROM ${tableName}`).execute(db);
+
+// INCORRECTO: nunca interpolar valores no validados en SQL
+const result = await sql.raw(`SELECT * FROM ${userInput}`).execute(db);
+```
+
+Nunca usar `sql.raw()` con interpolación de cadenas para valores. Usar `sql.ref()` para identificadores, y la API fluida de Kysely para todo lo demás.
+
+### Agregar una Migración
+
+<Steps>
+
+1. Crear `packages/core/src/database/migrations/NNN_description.ts`:
+
+   ```ts
+   import type { Kysely } from "kysely";
+
+   export async function up(db: Kysely<unknown>): Promise<void> {
+     await db.schema
+       .createTable("my_table")
+       .addColumn("id", "text", (col) => col.primaryKey())
+       .addColumn("name", "text", (col) => col.notNull())
+       .execute();
+   }
+
+   export async function down(db: Kysely<unknown>): Promise<void> {
+     await db.schema.dropTable("my_table").execute();
+   }
+   ```
+
+2. Registrarla en `packages/core/src/database/migrations/runner.ts`:
+
+   ```ts
+   import * as m018 from "./018_my_migration.js";
+
+   // Agregar al valor de retorno de getMigrations():
+   "018_my_migration": m018,
+   ```
+
+</Steps>
+
+<Aside>
+  Las migraciones se importan estáticamente (no se descubren automáticamente) para compatibilidad con el empaquetador de Workers. Siempre registrar nuevas migraciones en `runner.ts`.
+</Aside>
+
+### Agregar una Ruta de API
+
+Los archivos de ruta viven en `packages/core/src/astro/routes/api/`. Seguir estas convenciones:
+
+```ts
+// packages/core/src/astro/routes/api/my-resource.ts
+import type { APIRoute } from "astro";
+import type { User } from "@emdash-cms/auth";
+import { apiError, handleError } from "#api/error.js";
+import { requirePerm } from "#api/authorize.js";
+import { parseBody } from "#api/parse.js";
+import { z } from "zod";
+
+export const prerender = false;
+
+const createInput = z.object({
+  name: z.string().min(1),
+});
+
+export const POST: APIRoute = async ({ request, locals }) => {
+  const { emdash } = locals;
+  const user = (locals as { user?: User }).user;
+
+  if (!emdash) return apiError("NOT_CONFIGURED", "EmDash no está inicializado", 500);
+
+  // requirePerm devuelve un Response (403) si se deniega, o null si está autorizado
+  const denied = requirePerm(user, "content:edit_any");
+  if (denied) return denied;
+
+  const body = await parseBody(request, createInput);
+  if (body instanceof Response) return body;
+
+  try {
+    // lógica de negocio aquí
+    return Response.json({ success: true });
+  } catch (error) {
+    return handleError(error, "No se pudo crear el recurso", "CREATE_ERROR");
+  }
+};
+```
+
+Luego registrar la ruta en `packages/core/src/astro/integration/routes.ts`.
+
+### Desarrollo de Plugins
+
+Los plugins se definen con `definePlugin()` y se registran en la configuración de Astro. Ver la [documentación del Sistema de Plugins](/es/plugins/overview/) para la API completa.
+
+Para desarrollo local de plugins:
+
+```bash
+# Crea un plugin local dentro de packages/
+pnpm --filter emdash dev  # modo observacion
+```
+
+Enlazar tu plugin en el `astro.config.mjs` de la demo:
+
+```ts
+import myPlugin from "../../../packages/my-plugin/src/index.ts";
+
+emdash({
+  plugins: [myPlugin()],
+});
+```
+
+## Patrones de Pruebas
+
+Las pruebas viven en `packages/core/tests/`. La estructura refleja la fuente:
+
+```
+tests/
+├── unit/          # pruebas de funciones puras
+├── integration/   # pruebas con base de datos real (SQLite en memoria)
+└── e2e/           # pruebas de navegador con Playwright
+```
+
+**Las pruebas de base de datos usan SQLite real**, no mocks:
+
+```ts
+import { describe, it, beforeEach, afterEach } from "vitest";
+import { setupTestDatabase } from "../../utils/test-db.js";
+import type { Kysely } from "kysely";
+import type { Database } from "../../../src/database/types.js";
+
+describe("ContentRepository", () => {
+  let db: Kysely<Database>;
+
+  beforeEach(async () => {
+    db = await setupTestDatabase();
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  it("creates a content entry", async () => {
+    // probar con una base de datos real
+  });
+});
+```
+
+**Pruebas E2E** usan Playwright con la omisión de desarrollo para autenticación:
+
+```ts
+await page.goto(
+  "http://localhost:4321/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin"
+);
+```
+
+## Convenciones de Código
+
+### Importaciones
+
+Siempre usar extensiones `.js` para importaciones internas (requisito de ESM):
+
+```ts
+// Correcto
+import { ContentRepository } from "../../../database/repositories/content.js";
+
+// Incorrecto
+import { ContentRepository } from "../../../database/repositories/content";
+```
+
+Usar `import type` para importaciones solo de tipos:
+
+```ts
+import type { Kysely } from "kysely";
+import type { User } from "@emdash-cms/auth";
+```
+
+### Manejo de Errores
+
+Usar las utilidades de error compartidas en las rutas de API:
+
+```ts
+// Respuestas de error
+return apiError("NOT_FOUND", "Contenido no encontrado", 404);
+
+// Bloques catch
+catch (error) {
+  return handleError(error, "No se pudo actualizar el contenido", "CONTENT_UPDATE_ERROR");
+}
+```
+
+### Autorización
+
+Cada ruta que cambia el estado debe verificar la autorización. Usar `requirePerm()` desde `#api/authorize.js` — devuelve un `Response` (403) si se deniega, o `null` si está autorizado:
+
+```ts
+import { requirePerm } from "#api/authorize.js";
+
+const denied = requirePerm(user, "content:edit_any");
+if (denied) return denied;
+```
+
+Para acciones con alcance de propiedad, usar `requireOwnerPerm()`:
+
+```ts
+import { requireOwnerPerm } from "#api/authorize.js";
+
+const denied = requireOwnerPerm(user, item.authorId, "content:edit_own", "content:edit_any");
+if (denied) return denied;
+```
+
+## Proceso de Commit y PR
+
+1. Crea una rama de funcionalidad desde `main`
+2. Realiza cambios, asegúrate de que `pnpm typecheck` y `pnpm lint:json` pasen
+3. Ejecuta las pruebas relevantes
+4. Haz un commit con un mensaje descriptivo
+5. Abre una PR apuntando a `main`
+
+Los mensajes de commit deben describir *por qué*, no solo *qué*:
+
+```
+# Bueno
+fix: prevent media MIME sniffing with X-Content-Type-Options header
+
+# Menos bueno
+fix: add header to media endpoint
+```
+
+## Obtener Ayuda
+
+- Lee `AGENTS.md` para decisiones de arquitectura y patrones de código
+- Consulta el [sitio de documentación](https://docs.emdashcms.com) para guías y referencia de API

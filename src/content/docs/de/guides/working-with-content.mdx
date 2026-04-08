@@ -1,0 +1,284 @@
+---
+title: Arbeiten mit Inhalten
+description: Inhalte im EmDash-Admin-Dashboard erstellen, bearbeiten und verwalten.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Diese Anleitung behandelt das Erstellen, Bearbeiten und Verwalten von Inhalten über das EmDash-Admin-Dashboard.
+
+## Zugriff auf das Admin-Oberfläche
+
+Öffnen Sie in Ihrem Browser `/_emdash/admin` auf Ihrer Website. Melden Sie sich mit den während der Einrichtung erstellten Zugangsdaten an.
+
+Das Dashboard zeigt:
+
+- **Seitenleiste** - Navigation zu Sammlungen, Medien und Einstellungen
+- **Inhaltsliste** - Einträge in der ausgewählten Sammlung
+- **Schnellaktionen** - Neue Inhalte erstellen, Sammelaktionen ausführen
+
+## Inhalte erstellen
+
+1. Klicken Sie in der Seitenleiste auf einen Sammlungsnamen (z.B. **Posts**)
+
+2. Klicken Sie auf **New Post** oder die entsprechende Aktion für Ihre Sammlung
+
+3. Füllen Sie die erforderlichen Felder aus:
+   - **Title** - sichtbarer Titel des Inhalts
+   - **Slug** - URL-Bezeichner, automatisch aus dem Titel erzeugt und bearbeitbar
+
+4. Fügen Sie Inhalte mit dem Rich-Text-Editor hinzu
+
+5. Setzen Sie Metadaten in der Seitenleiste:
+   - **Status** - Entwurf, Veröffentlicht oder Archiviert
+   - **Publication date** - wann veröffentlicht werden soll
+   - **Categories and tags** - zugewiesene Taxonomie-Begriffe
+
+6. Klicken Sie auf **Save**
+
+<Aside>
+	Entwürfe sind nur im Admin sichtbar. Ändern Sie den Status auf **Published**, um den Inhalt auf
+	Ihrer Website sichtbar zu machen.
+</Aside>
+
+## Inhaltsstatus
+
+Jeder Eintrag hat einen von drei Statuswerten:
+
+| Status        | Sichtbarkeit | Anwendungsfall         |
+| ------------- | ---------- | ---------------- |
+| **Draft**     | Nur Admin  | Arbeit in Bearbeitung |
+| **Published** | Öffentlich | Live-Inhalt      |
+| **Archived**  | Nur Admin  | Zurückgezogener Inhalt |
+
+Ändern Sie den Status über das Dropdown-Menü in der Editor-Seitenleiste.
+
+## Der Rich-Text-Editor
+
+Der Editor von EmDash unterstützt:
+
+- **Überschriften** - H2 bis H6
+- **Formatierung** - Fett, kursiv, unterstrichen, durchgestrichen
+- **Listen** - Geordnet und ungeordnet
+- **Links** - Intern und extern
+- **Bilder** - Einfügen aus der Mediathek
+- **Codeblöcke** - Mit Syntaxhervorhebung
+- **Einbettungen** - YouTube, Vimeo, Twitter
+- **Abschnitte** - Wiederverwendbare Inhaltsblöcke über den Befehl `/section`
+
+### Slash-Befehle
+
+Geben Sie `/` ein, um auf Schnelleinfüge-Befehle zuzugreifen:
+
+| Befehl                      | Aktion                              |
+| ---------------------------- | ----------------------------------- |
+| `/section`                   | Einen wiederverwendbaren Abschnitt einfügen |
+| `/image`                     | Ein Bild aus der Mediathek einfügen |
+| `/code`                      | Einen Codeblock einfügen            |
+
+### Tastenkürzel
+
+| Aktion | Tastenkürzel               |
+| ------ | ---------------------- |
+| Fett   | `Ctrl/Cmd + B`         |
+| Kursiv | `Ctrl/Cmd + I`         |
+| Link   | `Ctrl/Cmd + K`         |
+| Rückgängig | `Ctrl/Cmd + Z`         |
+| Wiederholen | `Ctrl/Cmd + Shift + Z` |
+| Speichern | `Ctrl/Cmd + S`         |
+
+### Bilder einfügen
+
+1. Klicken Sie auf die Bildschaltfläche in der Symbolleiste
+
+2. Wählen Sie ein vorhandenes Bild aus der Mediathek aus oder laden Sie ein neues hoch
+
+3. Fügen Sie Alt-Text hinzu (erforderlich für Barrierefreiheit)
+
+4. Passen Sie Ausrichtung und Größenoptionen an
+
+5. Klicken Sie auf **Insert**
+
+## Inhalte bearbeiten
+
+1. Navigieren Sie zur Sammlung, die den Inhalt enthält
+
+2. Klicken Sie auf den Eintrag, den Sie bearbeiten möchten
+
+3. Nehmen Sie Ihre Änderungen vor
+
+4. Klicken Sie auf **Save**
+
+Änderungen an veröffentlichten Inhalten erscheinen sofort auf Ihrer Website. Ein Neubuild ist nicht erforderlich.
+
+### Versionsverlauf
+
+EmDash verfolgt Änderungen an Inhalten. Greifen Sie auf den Versionsverlauf über die Editor-Seitenleiste zu:
+
+1. Klicken Sie in der Editor-Seitenleiste auf **Revisions**
+
+2. Sehen Sie sich die Liste der vorherigen Versionen mit Zeitstempeln an
+
+3. Klicken Sie auf eine Version, um sie in der Vorschau anzuzeigen
+
+4. Klicken Sie auf **Restore**, um zu dieser Version zurückzukehren
+
+<Aside type="caution">
+	Das Wiederherstellen einer Version erstellt eine neue Version mit dem wiederhergestellten Inhalt. Der ursprüngliche
+	Versionsverlauf bleibt erhalten.
+</Aside>
+
+## Sammelaktionen
+
+Führen Sie Aktionen für mehrere Einträge gleichzeitig aus:
+
+1. Verwenden Sie die Kontrollkästchen, um Einträge in der Inhaltsliste auszuwählen
+
+2. Klicken Sie auf das Dropdown-Menü **Bulk Actions**
+
+3. Wählen Sie eine Aktion:
+   - **Publish** - Alle Ausgewählten auf veröffentlicht setzen
+   - **Archive** - Alle Ausgewählten auf archiviert setzen
+   - **Delete** - Ausgewählte dauerhaft entfernen
+
+4. Bestätigen Sie die Aktion
+
+## Suchen und filtern
+
+### Suche
+
+Verwenden Sie das Suchfeld, um Inhalte nach Titel oder Inhalt zu finden. Die Suche ist nicht case-sensitiv und findet Teilwörter.
+
+### Filter
+
+Filtern Sie die Inhaltsliste nach:
+
+- **Status** - Entwurf, Veröffentlicht, Archiviert
+- **Datumsbereich** - Erstellungs- oder Änderungsdaten
+- **Autor** - Wer den Inhalt erstellt hat
+- **Taxonomie** - Kategorie- oder Tag-Zuweisungen
+
+Klicken Sie auf **Clear Filters**, um zurückzusetzen.
+
+## Inhalte planen
+
+Planen Sie Inhalte für eine Veröffentlichung zu einem zukünftigen Datum:
+
+1. Erstellen oder bearbeiten Sie Inhalte
+
+2. Setzen Sie den Status auf **Draft**
+
+3. Setzen Sie das **Publication date** auf ein zukünftiges Datum und eine Uhrzeit
+
+4. Klicken Sie auf **Save**
+
+Wenn das Veröffentlichungsdatum erreicht ist, wird der Inhalt automatisch veröffentlicht.
+
+<Aside type="tip">
+	Geplante Veröffentlichungen erfordern, dass Ihre Website serverseitig gerendert wird oder einen geplanten Task hat, der
+	nach ausstehenden Veröffentlichungen sucht.
+</Aside>
+
+## Inhalte löschen
+
+Löschen Sie Inhalte vom Bearbeitungsbildschirm oder aus der Inhaltsliste:
+
+### Vom Editor
+
+1. Öffnen Sie den Inhalt, den Sie löschen möchten
+
+2. Klicken Sie in der Symbolleiste auf **Delete**
+
+3. Bestätigen Sie das Löschen
+
+### Von der Liste
+
+1. Wählen Sie Einträge mit Kontrollkästchen aus
+
+2. Klicken Sie auf **Bulk Actions** > **Delete**
+
+3. Bestätigen Sie das Löschen
+
+<Aside type="caution">
+	Gelöschte Inhalte werden dauerhaft entfernt und können nicht wiederhergestellt werden. Ziehen Sie stattdessen eine Archivierung in Betracht, falls Sie
+	den Inhalt später möglicherweise benötigen.
+</Aside>
+
+## Content-API
+
+Für programmatischen Zugriff verwenden Sie die EmDash-Admin-API:
+
+### Inhalte erstellen
+
+```bash
+POST /_emdash/api/content/posts
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "title": "Mein neuer Beitrag",
+  "slug": "my-new-post",
+  "content": "<p>Hier steht der Beitragsinhalt</p>
+",
+  "status": "draft"
+}
+```
+
+### Inhalte aktualisieren
+
+```bash
+PUT /_emdash/api/content/posts/my-new-post
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "title": "Aktualisierter Titel",
+  "status": "published"
+}
+```
+
+### Inhalte löschen
+
+```bash
+DELETE /_emdash/api/content/posts/my-new-post
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+## Inhalte übersetzen
+
+Wenn [i18n aktiviert ist](/de/guides/internationalization/), können Sie Übersetzungen für jeden Inhalteintrag erstellen.
+
+### Eine Übersetzung erstellen
+
+1. Öffnen Sie den Inhalteintrag, den Sie übersetzen möchten
+
+2. Finden Sie in der Editor-Seitenleiste das Panel **Translations**
+
+3. Klicken Sie neben dem Ziel-Locale auf **Translate**
+
+4. Bearbeiten Sie den vorausgefüllten Inhalt – passen Sie Titel, Slug und Hauptteil für die neue Sprache an
+
+5. Klicken Sie auf **Save**
+
+Die neue Übersetzung ist mit dem ursprünglichen Eintrag verknüpft und startet als Entwurf. Veröffentlichen Sie sie unabhängig, wenn die Übersetzung fertig ist.
+
+### Zwischen Übersetzungen wechseln
+
+Das Translations-Panel zeigt alle konfigurierten Locales an. Klicken Sie neben einer vorhandenen Übersetzung auf **Edit**, um direkt dorthin zu navigieren. Das aktuelle Locale ist mit einem Häkchen markiert.
+
+### Locale-Filter
+
+In der Inhaltsliste können Sie das Sprachmenü in der Symbolleiste verwenden, um Einträge nach Sprache zu filtern. Jeder Eintrag zeigt seine Sprache in einer eigenen Spalte an.
+
+<Aside type="tip">
+  Jede Übersetzung hat ihren eigenen Slug, Status und Revisionsverlauf. Veröffentlichen, planen und verwalten Sie Übersetzungen unabhängig voneinander.
+</Aside>
+
+Weitere Details zur Konfiguration, Abfrage und zum Sprachumschalter finden Sie im [Internationalisierungsleitfaden](/de/guides/internationalization/).
+
+## Nächste Schritte
+
+- [Inhalte abfragen](/de/guides/querying-content/) - Inhalte in Ihren Vorlagen abrufen
+- [Medienbibliothek](/de/guides/media-library/) - Dateien hochladen und verwalten
+- [Taxonomien](/de/guides/taxonomies/) - Inhalte mit Kategorien und Schlagwörtern organisieren
+- [Internationalisierung](/de/guides/internationalization/) - Mehrsprachige Inhalte und Übersetzungen

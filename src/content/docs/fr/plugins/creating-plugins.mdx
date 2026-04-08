@@ -1,0 +1,480 @@
+---
+title: Création de Plugins
+description: Créez un plugin EmDash avec des hooks, un stockage, des paramètres et une interface d'administration.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Ce guide vous explique comment construire un plugin complet pour EmDash. Vous apprendrez à structurer le code, définir les hooks et le stockage, et exporter les composants d'interface d'administration.
+
+## Structure du Plugin
+
+Chaque plugin comporte deux parties qui **s'exécutent dans des contextes différents** :
+
+1. **Descripteur du plugin** (`PluginDescriptor`) — retourné par la fonction factory, indique à EmDash comment charger le plugin. **S'exécute au moment de la construction dans Vite** (importé dans `astro.config.mjs`). Doit être sans effet de bord et ne peut pas utiliser les APIs d'exécution.
+2. **Définition du plugin** (`definePlugin()`) — contient la logique d'exécution (hooks, routes, stockage). **S'exécute au moment de la requête sur le serveur déployé.** A accès au contexte complet du plugin (`ctx`).
+
+Ces parties doivent être dans **des points d'entrée séparés** car elles s'exécutent dans des environnements complètement différents :
+
+```
+my-plugin/
+├── src/
+│   ├── descriptor.ts     # Plugin descriptor (runs in Vite at build time)
+│   ├── index.ts           # Plugin definition with definePlugin() (runs at deploy time)
+│   ├── admin.tsx          # Admin UI exports (React components) — optional
+│   └── astro/             # Optional: Astro components for site-side rendering
+│       └── index.ts       # Must export `blockComponents`
+├── package.json
+└── tsconfig.json
+```
+
+## Création du Plugin
+
+### Descripteur (temps de construction)
+
+Le descripteur indique à EmDash où trouver le plugin et quelle interface d'administration il fournit. Ce fichier est importé dans `astro.config.mjs` et s'exécute dans Vite.
+
+```
+typescript title="src/descriptor.ts"
+import type { PluginDescriptor } from "emdash";
+
+// Options your plugin accepts at registration time
+export interface MyPluginOptions {
+	enabled?: boolean;
+	maxItems?: number;
+}
+
+export function myPlugin(options: MyPluginOptions = {}): PluginDescriptor {
+	return {
+		id: "my-plugin",
+		version: "1.0.0",
+		entrypoint: "@my-org/plugin-example",
+		options,
+		adminEntry: "@my-org/plugin-example/admin",
+		componentsEntry: "@my-org/plugin-example/astro",
+		adminPages: [{ path: "/settings", label: "Settings", icon: "settings" }],
+		adminWidgets: [{ id: "status", title: "Status", size: "half" }],
+	};
+}
+```
+
+### Définition (temps d'exécution)
+
+La définition contient la logique d'exécution — hooks, routes, stockage et configuration d'administration. Ce fichier est chargé au moment de la requête sur le serveur déployé.
+
+```
+typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+import type { MyPluginOptions } from "../../plugins/descriptor.js";
+
+export function createPlugin(options: MyPluginOptions = {}) {
+	const maxItems = options.maxItems ?? 100;
+
+	return definePlugin({
+		id: "my-plugin",
+		version: "1.0.0",
+
+		// Déclarer les capacités requises
+		capabilities: ["read:content"],
+
+		// Stockage du plugin (collections de documents)
+		storage: {
+			items: {
+				indexes: ["status", "createdAt", ["status", "createdAt"]],
+			},
+		},
+
+		// Configuration de l'interface d'administration
+		admin: {
+			entry: "@my-org/plugin-example/admin",
+			settingsSchema: {
+				maxItems: {
+					type: "number",
+					label: "Maximum Items",
+					description: "Limit stored items",
+					default: maxItems,
+					min: 1,
+					max: 1000,
+				},
+				enabled: {
+					type: "boolean",
+					label: "Enabled",
+					default: options.enabled ?? true,
+				},
+			},
+			pages: [{ path: "/settings", label: "Settings", icon: "settings" }],
+			widgets: [{ id: "status", title: "Status", size: "half" }],
+		},
+
+		// Gestionnaires de hooks
+		hooks: {
+			"plugin:install": async (_event, ctx) => {
+				ctx.log.info("Plugin installed");
+			},
+
+			"content:afterSave": async (event, ctx) => {
+				const enabled = await ctx.kv.get<boolean>("settings:enabled");
+				if (enabled === false) return;
+
+				ctx.log.info("Contenu sauvegardé", {
+					collection: event.collection,
+					id: event.content.id,
+				});
+			},
+		},
+
+		// Routes API (uniquement de confiance — non disponibles dans les plugins en bac à sable)
+		routes: {
+			status: {
+				handler: async (ctx) => {
+					const count = await ctx.storage.items!.count();
+					return { count, maxItems };
+				},
+			},
+		},
+	});
+}
+
+export default createPlugin;
+```
+
+## Règles pour l'ID du Plugin
+
+Le champ `id` doit respecter ces règles :
+
+- Uniquement des caractères alphanumériques minuscules et des traits d'union
+- Soit simple (`my-plugin`) soit avec scope (`@my-org/my-plugin`)
+- Unique parmi tous les plugins installés
+
+```typescript
+// Valid IDs
+"seo";
+"audit-log";
+"@emdash-cms/plugin-forms";
+
+// IDs invalides
+"MyPlugin"; // Pas de majuscules
+"my_plugin"; // Pas de tirets bas
+"my.plugin"; // Pas de points
+```
+
+## Format de Version
+
+Utilisez le versionnage sémantique :
+
+```typescript
+version: "1.0.0"; // Valid
+version: "1.2.3-beta"; // Valid (prerelease)
+version: "1.0"; // Invalid (missing patch)
+```
+
+## Exports du Package
+
+Configurez les exports dans `package.json` pour qu'EmDash puisse charger chaque point d'entrée. Le descripteur et la définition sont des exports séparés car ils s'exécutent dans des environnements différents :
+
+```
+json title="package.json"
+{
+	"name": "@my-org/plugin-example",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./descriptor": {
+			"types": "./dist/descriptor.d.ts",
+			"import": "./dist/descriptor.js"
+		},
+		"./admin": {
+			"types": "./dist/admin.d.ts",
+			"import": "./dist/admin.js"
+		},
+		"./astro": {
+			"types": "./dist/astro/index.d.ts",
+			"import": "./dist/astro/index.js"
+		}
+	},
+	"files": ["dist"],
+	"peerDependencies": {
+		"emdash": "^0.1.0",
+		"react": "^18.0.0"
+	}
+}
+```
+
+| Export | Contexte | Objectif |
+|--------|---------|---------|
+| `"."` | Serveur (exécution) | `createPlugin()` / `definePlugin()` — chargé par `entrypoint` au moment de la requête |
+| `"./descriptor"` | Vite (construction) | Factory `PluginDescriptor` — importé dans `astro.config.mjs` |
+| `"./admin"` | Navigateur | Composants React pour les pages/widgets d'administration |
+| `"./astro"` | Serveur (SSR) | Composants Astro pour le rendu côté site des blocs |
+
+N'incluez les exports `./admin` et `./astro` que si le plugin les utilise.
+
+<Aside type="tip">
+	Gardez `emdash` et `react` comme dépendances peer. Cela évite les conflits de version lorsque le plugin
+	est installé dans un site.
+</Aside>
+
+## Exemple Complet : Plugin de Journal d'Audit
+
+Cet exemple démontre le stockage, les hooks de cycle de vie, les hooks de contenu et les routes API :
+
+```
+typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+
+interface AuditEntry {
+	timestamp: string;
+	action: "create" | "update" | "delete";
+	collection: string;
+	resourceId: string;
+	userId?: string;
+}
+
+export function createPlugin() {
+	return definePlugin({
+		id: "audit-log",
+		version: "0.1.0",
+
+		storage: {
+			entries: {
+				indexes: [
+					"timestamp",
+					"action",
+					"collection",
+					["collection", "timestamp"],
+					["action", "timestamp"],
+				],
+			},
+		},
+
+		admin: {
+			settingsSchema: {
+				retentionDays: {
+					type: "number",
+					label: "Retention (days)",
+					description: "Days to keep entries. 0 = forever.",
+					default: 90,
+					min: 0,
+					max: 365,
+				},
+			},
+				pages: [{ path: "/history", label: "Historique d'audit", icon: "history" }],
+				widgets: [{ id: "recent-activity", title: "Activité récente", size: "half" }],
+		},
+
+		hooks: {
+			"plugin:install": async (_event, ctx) => {
+				ctx.log.info("Audit log plugin installed");
+			},
+
+			"content:afterSave": {
+				priority: 200, // S'exécute après les autres plugins
+				timeout: 2000,
+				handler: async (event, ctx) => {
+					const { content, collection, isNew } = event;
+
+					const entry: AuditEntry = {
+						timestamp: new Date().toISOString(),
+						action: isNew ? "create" : "update",
+						collection,
+						resourceId: content.id as string,
+					};
+
+					const entryId = `${Date.now()}-${content.id}`;
+					await ctx.storage.entries!.put(entryId, entry);
+
+					ctx.log.info(`Journalisé ${entry.action} sur ${collection}/${content.id}`);
+				},
+			},
+
+			"content:afterDelete": {
+				priority: 200,
+				timeout: 1000,
+				handler: async (event, ctx) => {
+					const { id, collection } = event;
+
+					const entry: AuditEntry = {
+						timestamp: new Date().toISOString(),
+						action: "delete",
+						collection,
+						resourceId: id,
+					};
+
+					const entryId = `${Date.now()}-${id}`;
+					await ctx.storage.entries!.put(entryId, entry);
+
+					ctx.log.info(`Suppression journalisée sur ${collection}/${id}`);
+				},
+			},
+		},
+
+		routes: {
+			recent: {
+				handler: async (ctx) => {
+					const result = await ctx.storage.entries!.query({
+						orderBy: { timestamp: "desc" },
+						limit: 10,
+					});
+
+					return {
+						entries: result.items.map((item) => ({
+							id: item.id,
+							...(item.data as AuditEntry),
+						})),
+					};
+				},
+			},
+
+			history: {
+				handler: async (ctx) => {
+					const url = new URL(ctx.request.url);
+					const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+					const cursor = url.searchParams.get("cursor") || undefined;
+
+					const result = await ctx.storage.entries!.query({
+						orderBy: { timestamp: "desc" },
+						limit,
+						cursor,
+					});
+
+					return {
+						entries: result.items.map((item) => ({
+							id: item.id,
+							...(item.data as AuditEntry),
+						})),
+						cursor: result.cursor,
+						hasMore: result.hasMore,
+					};
+				},
+			},
+		},
+	});
+}
+
+export default createPlugin;
+```
+
+## Test des Plugins
+
+Testez les plugins en créant un site Astro minimal avec le plugin enregistré :
+
+1. Créez un site de test avec EmDash installé.
+
+2. Enregistrez votre plugin dans `astro.config.mjs` :
+
+   ```typescript
+   import myPlugin from "../path/to/my-plugin/src";
+
+   export default defineConfig({
+   	integrations: [
+   		emdash({
+   			plugins: [myPlugin()],
+   		}),
+   	],
+   });
+   ```
+
+3. Lancez le serveur de développement et déclenchez les hooks en créant/mettant à jour du contenu.
+
+4. Vérifiez la console pour la sortie `ctx.log` et validez le stockage via les routes API.
+
+Pour les tests unitaires, simulez l'interface `PluginContext` et appelez les gestionnaires de hooks directement.
+
+## Types de Blocs Portable Text
+
+Les plugins peuvent ajouter des types de blocs personnalisés à l'éditeur Portable Text. Ceux-ci apparaissent dans le menu de commande slash de l'éditeur et peuvent être insérés dans n'importe quel champ `portableText`.
+
+### Déclaration des types de blocs
+
+Dans `createPlugin()`, déclarez les blocs sous `admin.portableTextBlocks` :
+
+```
+typescript title="src/index.ts"
+admin: {
+	portableTextBlocks: [
+		{
+			type: "youtube",
+			label: "YouTube Video",
+			icon: "video",           // Named icon: video, code, link, link-external
+			placeholder: "Paste YouTube URL...",
+			fields: [                // Block Kit fields for the editing UI
+				{ type: "text_input", action_id: "id", label: "YouTube URL" },
+				{ type: "text_input", action_id: "title", label: "Title" },
+				{ type: "text_input", action_id: "poster", label: "Poster Image URL" },
+			],
+		},
+	],
+}
+```
+
+Chaque type de bloc définit :
+
+- **`type`** — Nom du type de bloc (utilisé dans Portable Text `_type`)
+- **`label`** — Nom d'affichage dans le menu de commande slash
+- **`icon`** — Clé d'icône (`video`, `code`, `link`, `link-external`). Retombe sur un cube générique.
+- **`placeholder`** — Texte de l'espace réservé pour la saisie
+- **`fields`** — Champs de formulaire Block Kit pour l'édition. Si omis, une simple saisie d'URL est affichée.
+
+### Rendu côté site
+
+Pour rendre vos types de blocs sur le site, exportez des composants Astro depuis un `componentsEntry` :
+
+```
+typescript title="src/astro/index.ts"
+import YouTube from "../../plugins/YouTube.astro";
+import CodePen from "../../plugins/CodePen.astro";
+
+// This export name is required — the virtual module imports it
+export const blockComponents = {
+	youtube: YouTube,
+	codepen: CodePen,
+};
+```
+
+Définissez `componentsEntry` dans votre descripteur de plugin :
+
+```typescript
+export function myPlugin(options = {}): PluginDescriptor {
+	return {
+		id: "my-plugin",
+		entrypoint: "@my-org/my-plugin",
+		componentsEntry: "@my-org/my-plugin/astro",
+		// ...
+	};
+}
+```
+
+Les composants de bloc du plugin sont automatiquement fusionnés dans `<PortableText>` — les auteurs du site n'ont rien besoin d'importer. Les composants fournis par l'utilisateur ont la priorité sur les valeurs par défaut du plugin.
+
+<Aside type="tip">
+	Le plugin d'intégrations (`@emdash-cms/plugin-embeds`) est un exemple complet de ce modèle. Il fournit
+	des types de bloc YouTube, Vimeo, Tweet, Bluesky, Mastodon, Gist et Aperçu de lien avec à la fois des champs
+	d'édition dans l'admin et des composants de rendu Astro côté site.
+</Aside>
+
+### Exports du package
+
+Ajoutez l'export `./astro` dans `package.json` :
+
+```
+json title="package.json"
+{
+	"exports": {
+		".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+		"./admin": { "types": "./dist/admin.d.ts", "import": "./dist/admin.js" },
+		"./astro": { "types": "./dist/astro/index.d.ts", "import": "./dist/astro/index.js" }
+	}
+}
+```
+
+## Prochaines étapes
+
+- [Référence des Hooks](/fr/plugins/hooks/) — Tous les hooks disponibles avec leurs signatures
+- [API de Stockage](/fr/plugins/storage/) — Collections de documents et requêtes
+- [Paramètres](/fr/plugins/settings/) — Schéma de paramètres et stockage clé-valeur
+- [Interface d'administration](/fr/plugins/admin-ui/) — Pages et widgets
+- [Routes API](/fr/plugins/api-routes/) — Points de terminaison REST

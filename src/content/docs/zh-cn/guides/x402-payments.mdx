@@ -1,0 +1,253 @@
+---
+title: x402 支付协议
+description: 通过 x402 支付协议实现内容变现——向机器人收费，而非人类用户。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+`@emdash-cms/x402` 包为 Cloudflare 上的任何 Astro 站点添加了 [x402 支付协议](https://www.x402.org/) 支持。它可以独立工作——不依赖于 EmDash 核心——但与 EmDash 的 CMS 字段结合使用效果更佳，可实现按页面定价。
+
+x402 是一种原生 HTTP 支付协议。当客户端请求付费资源但未支付时，服务器会响应 `402 Payment Required` 并提供机器可读的支付指令。理解 x402 的代理和浏览器可以自动完成支付并重试请求。
+
+## 使用场景
+
+最常见的用例是 **仅机器人模式**：向 AI 代理和爬虫程序收取内容访问费用，同时允许人类访客免费阅读。这利用了 Cloudflare 的 Bot Management 来区分机器人和人类。
+
+你也可以对所有访客强制要求支付，或者在不强制的情况下检查支付头信息（用于条件渲染）。
+
+## 安装
+
+<Tabs>
+<TabItem label="pnpm">
+```bash
+pnpm add @emdash-cms/x402
+```
+</TabItem>
+<TabItem label="npm">
+```bash
+npm install @emdash-cms/x402
+```
+</TabItem>
+<TabItem label="yarn">
+```bash
+yarn add @emdash-cms/x402
+```
+</TabItem>
+</Tabs>
+
+## 设置
+
+将集成添加到你的 Astro 配置中：
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import { x402 } from "@emdash-cms/x402";
+
+export default defineConfig({
+	integrations: [
+		x402({
+			payTo: "0xYourWalletAddress",
+			network: "eip155:8453", // Base mainnet
+			defaultPrice: "$0.01",
+			botOnly: true,
+			botScoreThreshold: 30,
+		}),
+	],
+});
+```
+
+添加类型引用，以便 TypeScript 识别 `Astro.locals.x402`：
+
+```ts title="src/env.d.ts"
+/// <reference types="@emdash-cms/x402/locals" />
+```
+
+## 基本用法
+
+该集成在 `Astro.locals.x402` 上放置了一个强制执行器。在你的页面 frontmatter 中调用 `enforce()` 来将内容置于支付门槛之后：
+
+```astro title="src/pages/posts/[...slug].astro"
+---
+const { x402 } = Astro.locals;
+
+const result = await x402.enforce(Astro.request, {
+  price: "$0.05",
+  description: "Premium article",
+});
+
+// If the request has no valid payment, enforce() returns a 402 Response.
+// Return it directly to send payment instructions to the client.
+if (result instanceof Response) return result;
+
+// Payment verified (or skipped in botOnly mode). Apply response headers
+// so the client gets settlement proof.
+x402.applyHeaders(result, Astro.response);
+---
+
+<article>
+  <h1>Premium content</h1>
+</article>
+```
+
+`enforce()` 方法返回以下两者之一：
+
+- **`Response`** (402) —— 客户端需要支付。直接返回它。
+- **`EnforceResult`** —— 请求应继续进行。内容已支付，或强制执行被跳过（在仅机器人模式下的人类请求）。
+
+## 仅机器人模式
+
+当 `botOnly` 为 `true` 时，集成会读取 `request.cf.botManagement.score` 来对请求进行分类：
+
+- **分数低于阈值**（默认 30） -> 视为机器人，强制执行支付
+- **分数达到或高于阈值** -> 视为人类，跳过强制执行
+- **无机器人管理数据**（本地开发、非 CF 部署） -> 视为人类
+
+`EnforceResult` 包含一个 `skipped` 标志，以便你可以区分“无需支付”和“已支付”：
+
+```astro
+---
+const result = await x402.enforce(Astro.request, { price: "$0.01" });
+if (result instanceof Response) return result;
+
+x402.applyHeaders(result, Astro.response);
+
+// result.paid    — true if payment was verified
+// result.skipped — true if enforcement was skipped (human in botOnly mode)
+// result.payer   — wallet address of payer (if paid)
+---
+```
+
+<Aside>
+	仅机器人模式需要启用 Bot Management 的 Cloudflare 部署。在本地开发环境中，
+	所有请求都被视为人类，强制执行会被跳过。
+</Aside>
+
+## 使用 EmDash 实现按页面定价
+
+使用 EmDash 时，你可以向集合添加一个 `number` 字段来实现按页面定价。无需特殊的模式或管理界面——只需一个常规的 CMS 字段：
+
+```astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry } = await getEmDashEntry("posts", slug);
+
+if (!entry) return Astro.redirect("/404");
+
+const { x402 } = Astro.locals;
+
+// Use the price from the CMS, falling back to a default
+const result = await x402.enforce(Astro.request, {
+  price: entry.data.price || "$0.01",
+  description: entry.data.title,
+});
+if (result instanceof Response) return result;
+
+x402.applyHeaders(result, Astro.response);
+---
+
+<article>
+  <h1>{entry.data.title}</h1>
+</article>
+```
+
+## 检查支付状态而不强制执行
+
+使用 `hasPayment()` 来检查请求是否包含支付头信息，而不进行验证或强制执行。这对于条件渲染非常有用——向付费与非付费访客展示不同的内容：
+
+```astro
+---
+const { x402 } = Astro.locals;
+
+const hasPaid = x402.hasPayment(Astro.request);
+---
+
+{hasPaid ? (
+  <p>Full premium content here.</p>
+) : (
+  <p>Subscribe for the full article.</p>
+)}
+```
+
+<Aside type="caution">
+	`hasPayment()` 仅检查支付头信息是否存在。它不验证支付是否有效。
+	当你需要已验证的支付时，请使用 `enforce()`。
+</Aside>
+
+## 配置参考
+
+| 选项                | 类型      | 默认值                           | 描述                                      |
+| ------------------- | --------- | -------------------------------- | ---------------------------------------- |
+| `payTo`             | `string`  | 必填                             | 目标钱包地址                               |
+| `network`           | `string`  | 必填                             | CAIP-2 网络标识符（例如，`eip155:8453`）  |
+| `defaultPrice`      | `Price`   | —                                | 默认价格，可按页面覆盖                      |
+| `facilitatorUrl`    | `string`  | `https://x402.org/facilitator`   | 支付协调器 URL                             |
+| `scheme`            | `string`  | `"exact"`                        | 支付方案                                   |
+| `maxTimeoutSeconds` | `number`  | `60`                             | 支付签名的最大超时时间                      |
+| `evm`               | `boolean` | `true`                           | 启用 EVM 链支持                            |
+| `svm`               | `boolean` | `false`                          | 启用 Solana 链支持（需要 `@x402/svm`）      |
+| `botOnly`           | `boolean` | `false`                          | 仅对机器人强制执行支付                      |
+| `botScoreThreshold` | `number`  | `30`                             | 机器人分数阈值（1-99，值越低越可能是机器人） |
+
+### 价格格式
+
+价格可以通过以下几种格式指定：
+
+- **美元字符串** —— `"$0.10"`（`$` 前缀会被移除，值按原样传递）
+- **数字字符串** —— `"0.10"`
+- **数字** —— `0.10`
+- **对象** —— `{ amount: "100000", asset: "0x...", extra: {} }` 用于指定明确的资产/金额
+
+### 网络标识符
+
+网络使用 [CAIP-2](https://github.com/ChainAgnostic/CAIPs/blob/main/CAIPs/caip-2.md) 格式：
+
+| 网络          | 标识符            |
+| ------------- | ----------------- |
+| Base 主网     | `eip155:8453`     |
+| Base Sepolia  | `eip155:84532`    |
+| Ethereum      | `eip155:1`        |
+| Solana        | `solana:mainnet`  |
+
+## 强制执行选项
+
+为特定页面覆盖配置默认值：
+
+```ts
+await x402.enforce(Astro.request, {
+	price: "$0.25", // Override price
+	payTo: "0xDifferentWallet", // Override wallet
+	network: "eip155:1", // Override network
+	description: "Article: How x402 Works", // Resource description
+	mimeType: "text/html", // MIME type hint
+});
+```
+
+## Solana 支持
+
+Solana 支持是可选的。安装 `@x402/svm` 并在配置中启用它：
+
+```bash
+pnpm add @x402/svm
+```
+
+```js title="astro.config.mjs"
+x402({
+	payTo: "YourSolanaAddress",
+	network: "solana:mainnet",
+	svm: true,
+	evm: false, // Disable EVM if only using Solana
+});
+```
+
+## 工作原理
+
+1. `x402()` 集成注册中间件，创建一个强制执行器并将其放置在 `Astro.locals.x402` 上
+2. 配置通过 Vite 虚拟模块 (`virtual:x402/config`) 传递给中间件
+3. 当调用 `enforce()` 时，它会检查请求上是否存在 `payment-signature` 头信息
+4. 如果没有支付头信息，则返回一个 `402 Payment Required` 响应，并在 `PAYMENT-REQUIRED` 头信息中包含支付指令
+5. 如果存在支付头信息，则通过协调器服务进行验证和结算
+6. 结算后，通过 `applyHeaders()` 在响应上设置 `PAYMENT-RESPONSE` 头信息
+
+资源服务器在首次请求时延迟初始化，并在工作器生命周期内缓存。

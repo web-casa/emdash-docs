@@ -1,0 +1,474 @@
+---
+title: WordPress 테마 포팅
+description: 구조화된 접근 방식을 사용하여 WordPress 테마를 EmDash 테마로 변환하기
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+WordPress 테마는 체계적으로 EmDash로 변환할 수 있습니다. 시각적 디자인, 콘텐츠 구조 및 동적 기능은 모두 3단계 접근법을 사용하여 이전됩니다.
+
+<Aside type="tip" title="AI 지원 포팅">
+	AI 코딩 에이전트는 템플릿 포팅과 같은 기계적 변환 작업에 뛰어납니다. 에이전트에
+	WordPress 테마 파일과 이 가이드의 개념 매핑 테이블을 제공하면, 에이전트는
+	Astro 컴포넌트의 견고한 초안을 생성할 수 있습니다. 출력을 검토하고 다듬으세요—에이전트가 지루한
+	부분을 처리하는 동안 여러분은 품질에 집중할 수 있습니다.
+</Aside>
+
+## 3단계 접근법
+
+<Steps>
+
+1. **디자인 추출**
+
+   WordPress 테마에서 CSS 변수, 글꼴, 색상 및 레이아웃 패턴을 추출합니다. 라이브 사이트를 분석하여 계산된 스타일과 반응형 중단점을 캡처합니다.
+
+2. **템플릿 변환**
+
+   PHP 템플릿을 Astro 컴포넌트로 변환합니다. WordPress 템플릿 계층 구조를 Astro 경로에 매핑하고 템플릿 태그를 EmDash API 호출로 변환합니다.
+
+3. **동적 기능**
+
+   탐색 메뉴, 위젯 영역, 분류 및 사이트 설정을 해당하는 EmDash 동등물로 포팅합니다. 완전한 콘텐츠 모델을 캡처할 시드 파일을 생성합니다.
+
+</Steps>
+
+## 1단계: 디자인 추출
+
+### CSS 및 디자인 토큰 찾기
+
+| 파일          | 목적                                    |
+| ------------- | ------------------------------------------ |
+| `style.css`   | 테마 헤더가 포함된 메인 스타일시트          |
+| `assets/css/` | 추가 스타일시트                     |
+| `theme.json`  | 블록 테마 (WP 5.9+) - 구조화된 토큰 |
+
+### 디자인 토큰 추출
+
+| WordPress 패턴 | EmDash 변수  |
+| ----------------- | ------------------ |
+| 본문 글꼴 패밀리  | `--font-body`      |
+| 제목 글꼴      | `--font-heading`   |
+| 기본 색상     | `--color-primary`  |
+| 배경        | `--color-base`     |
+| 텍스트 색상        | `--color-contrast` |
+| 콘텐츠 너비     | `--content-width`  |
+
+### 기본 레이아웃 생성
+
+추출한 CSS 변수, 헤더/푸터 구조, 글꼴 로딩 및 반응형 중단점을 포함하여 `src/layouts/Base.astro`를 생성합니다:
+
+```astro title="src/layouts/Base.astro"
+---
+import { getSiteSettings, getMenu } from "emdash";
+import "../styles/global.css";
+
+const { title, description } = Astro.props;
+const settings = await getSiteSettings();
+const primaryMenu = await getMenu("primary");
+const pageTitle = title ? `${title} | ${settings.title}` : settings.title;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <header>
+      {settings.logo ? (
+        <img src={settings.logo.url} alt={settings.title} />
+      ) : (
+        <span>{settings.title}</span>
+      )}
+      <nav>
+        {primaryMenu?.items.map((item) => (
+          <a href={item.url}>{item.label}</a>
+        ))}
+      </nav>
+    </header>
+    <main><slot /></main>
+  </body>
+</html>
+```
+
+## 2단계: 템플릿 변환
+
+### 템플릿 계층 구조 매핑
+
+| WordPress 템플릿          | Astro 경로                         |
+| --------------------------- | ----------------------------------- |
+| `index.php`                 | `src/pages/index.astro`             |
+| `single.php`                | `src/pages/posts/[slug].astro`      |
+| `single-{post_type}.php`    | `src/pages/{type}/[slug].astro`     |
+| `page.php`                  | `src/pages/[...slug].astro`         |
+| `archive.php`               | `src/pages/posts/index.astro`       |
+| `category.php`              | `src/pages/categories/[slug].astro` |
+| `tag.php`                   | `src/pages/tags/[slug].astro`       |
+| `search.php`                | `src/pages/search.astro`            |
+| `404.php`                   | `src/pages/404.astro`               |
+| `header.php` / `footer.php` | `src/layouts/Base.astro`의 일부    |
+| `sidebar.php`               | `src/components/Sidebar.astro`      |
+
+### 템플릿 태그 매핑
+
+| WordPress 함수            | EmDash 동등물                          |
+| ----------------------------- | -------------------------------------------- |
+| `have_posts()` / `the_post()` | `getEmDashCollection()`                    |
+| `get_post()`                  | `getEmDashEntry()`                         |
+| `the_title()`                 | `post.data.title`                            |
+| `the_content()`               | `<PortableText value={post.data.content} />` |
+| `the_excerpt()`               | `post.data.excerpt`                          |
+| `the_permalink()`             | `/posts/${post.slug}`                        |
+| `the_post_thumbnail()`        | `post.data.featured_image`                   |
+| `get_the_date()`              | `post.data.publishedAt`                      |
+| `get_the_category()`          | `getEntryTerms(coll, id, "categories")`      |
+| `get_the_tags()`              | `getEntryTerms(coll, id, "tags")`            |
+
+### 루프 변환
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php title="archive.php"
+<?php while (have_posts()) : the_post(); ?>
+  <article>
+    <h2><a href="<?php the_permalink(); ?>"><?php the_title(); ?></a>
+</h2>
+    <?php the_excerpt(); ?>
+  </article>
+<?php endwhile; ?>
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+astro title="src/pages/posts/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+where: { status: "published" },
+orderBy: { publishedAt: "desc" },
+});
+
+---
+
+<Base title="Blog">
+  {posts.map((post) => (
+    <article>
+      <h2><a href={`/posts/${post.slug}`}>{post.data.title}</a>
+</h2>
+      <p>{post.data.excerpt}</p>
+    </article>
+  ))}
+</Base>
+```
+</TabItem>
+</Tabs>
+
+### 단일 템플릿 변환
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php title="single.php"
+<?php get_header(); ?>
+<article>
+  <h1><?php the_title(); ?></h1>
+  <?php the_content(); ?>
+  <div class="post-meta">
+    Posted in: <?php the_category(', '); ?>
+  </div>
+</article>
+<?php get_footer(); ?>
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEntryTerms } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+	const { entries: posts } = await getEmDashCollection("posts");
+	return posts.map((post) => ({
+		params: { slug: post.slug },
+		props: { post },
+	}));
+}
+
+const { post } = Astro.props;
+const categories = await getEntryTerms("posts", post.id, "categories");
+
+---
+
+<Base title={post.data.title}>
+  <article>
+    <h1>{post.data.title}</h1>
+    <PortableText value={post.data.content} />
+    <div class="post-meta">
+      Posted in: {categories.map((cat) => (
+        <a href={`/categories/${cat.slug}`}>{cat.label}</a>
+      ))}
+    </div>
+  </article>
+</Base>
+```
+</TabItem>
+</Tabs>
+
+### 템플릿 파트 변환
+
+WordPress `get_template_part()` 호출은 Astro 컴포넌트 임포트가 됩니다. `template-parts/content-post.php` 부분은 루프에서 임포트하고 렌더링하는 `PostCard.astro` 컴포넌트가 됩니다.
+
+## 3단계: 동적 기능
+
+### 탐색 메뉴
+
+`functions.php`에서 메뉴를 식별하고 해당하는 EmDash 메뉴를 생성합니다:
+
+```
+astro title="src/components/PrimaryNav.astro"
+---
+import { getMenu } from "emdash";
+
+const menu = await getMenu("primary");
+---
+
+{menu && (
+  <nav class="primary-nav">
+    <ul>
+      {menu.items.map((item) => (
+        <li>
+          <a href={item.url} aria-current={Astro.url.pathname === item.url ? "page" : undefined}>
+            {item.label}
+          </a>
+          {item.children.length > 0 && (
+            <ul class="submenu">
+              {item.children.map((child) => (
+                <li><a href={child.url}>{child.label}</a>
+</li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+### 위젯 영역 (사이드바)
+
+테마 내 위젯 영역을 식별하고 렌더링합니다:
+
+```
+astro title="src/components/Sidebar.astro"
+---
+import { getWidgetArea, getMenu } from "emdash";
+import { PortableText } from "emdash/ui";
+import RecentPosts from "../../themes/widgets/RecentPosts.astro";
+
+const sidebar = await getWidgetArea("sidebar");
+const widgetComponents = { "core:recent-posts": RecentPosts };
+---
+
+{sidebar && sidebar.widgets.length > 0 && (
+  <aside class="sidebar">
+    {sidebar.widgets.map(async (widget) => (
+      <div class="widget">
+        {widget.title && <h3>{widget.title}</h3>
+}
+        {widget.type === "content" && <PortableText value={widget.content} />}
+        {widget.type === "menu" && (
+          <nav>
+            {await getMenu(widget.menuName).then((m) =>
+              m?.items.map((item) => <a href={item.url}>{item.label}</a>
+)
+            )}
+          </nav>
+        )}
+        {widget.type === "component" && widgetComponents[widget.componentId] && (
+          <Fragment>
+            {(() => {
+              const Component = widgetComponents[widget.componentId];
+              return <Component {...widget.componentProps} />;
+            })()}
+          </Fragment>
+        )}
+      </div>
+    ))}
+  </aside>
+)}
+```
+
+### 위젯 유형 매핑
+
+| WordPress 위젯 | EmDash 위젯 유형             |
+| ---------------- | -------------------------------- |
+| 텍스트/사용자 정의 HTML | `type: "content"`                |
+| 사용자 정의 메뉴      | `type: "menu"`                   |
+| 최근 글     | `component: "core:recent-posts"` |
+| 카테고리       | `component: "core:categories"`   |
+| 태그 클라우드        | `component: "core:tag-cloud"`    |
+| 검색           | `component: "core:search"`       |
+
+### 분류
+
+테마에 등록된 분류를 쿼리합니다:
+
+```
+astro title="src/pages/genres/[slug].astro"
+---
+import { getTaxonomyTerms, getEntriesByTerm } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const genres = await getTaxonomyTerms("genre");
+  return genres.map((genre) => ({
+    params: { slug: genre.slug },
+    props: { genre },
+  }));
+}
+
+const { genre } = Astro.props;
+const books = await getEntriesByTerm("books", "genre", genre.slug);
+---
+
+<Base title={genre.label}>
+  <h1>{genre.label}</h1>
+  {books.map((book) => (
+    <article>
+      <h2><a href={`/books/${book.slug}`}>{book.data.title}</a>
+</h2>
+    </article>
+  ))}
+</Base>
+```
+
+### 사이트 설정 매핑
+
+| WordPress 사용자 정의기 | EmDash 설정 |
+| -------------------- | ---------------- |
+| 사이트 제목           | `title`          |
+| 태그라인              | `tagline`        |
+| 사이트 아이콘            | `favicon`        |
+| 사용자 정의 로고          | `logo`           |
+| 페이지당 글 수       | `postsPerPage`   |
+
+## 숏코드에서 Portable Text로
+
+WordPress 숏코드는 Portable Text 사용자 정의 블록이 됩니다:
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php title="functions.php"
+add_shortcode('gallery', function($atts) {
+  $ids = explode(',', $atts['ids']);
+  return '<div class="gallery">...</div>
+';
+});
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+astro title="src/components/blocks/Gallery.astro"
+---
+const { images } = Astro.props;
+---
+
+<div class="gallery">
+	{images.map((img) => (
+		<img src={img.url} alt={img.alt || ""} loading="lazy" />
+	))}
+</div>
+```
+
+PortableText에 등록:
+
+```astro
+<PortableText value={content} components={{ gallery: Gallery }} />
+```
+
+</TabItem>
+</Tabs>
+
+## 시드 파일 구조
+
+시드 파일에 완전한 콘텐츠 모델을 캡처합니다. 설정, 분류, 메뉴 및 위젯 영역을 포함하세요:
+
+```
+json title=".emdash/seed.json"
+{
+	"$schema": "https://emdashcms.com/seed.schema.json",
+	"version": "1",
+		"meta": { "name": "포팅한 테마" },
+		"settings": { "title": "내 사이트", "tagline": "환영합니다", "postsPerPage": 10 },
+	"taxonomies": [
+		{
+			"name": "category",
+				"label": "카테고리",
+			"hierarchical": true,
+			"collections": ["posts"]
+		}
+	],
+	"menus": [
+		{
+			"name": "primary",
+				"label": "기본 내비게이션",
+				"items": [
+					{ "type": "custom", "label": "홈", "url": "/" },
+					{ "type": "custom", "label": "Blog", "url": "/posts" }
+			]
+		}
+	],
+	"widgetAreas": [
+		{
+			"name": "sidebar",
+				"label": "메인 사이드바",
+			"widgets": [
+				{
+					"type": "component",
+					"componentId": "core:recent-posts",
+					"props": { "count": 5 }
+				}
+			]
+		}
+	]
+}
+```
+
+전체 사양은 [시드 파일 형식](/ko/themes/seed-files/)을 참조하세요.
+
+## 이식 체크리스트
+
+**1단계 (디자인):** CSS 변수 추출, 글꼴 로딩, 색상 구성표 일치, 반응형 중단점 작동.
+
+**2단계 (템플릿):** 홈페이지, 단일 글, 아카이브 및 404 페이지가 모두 올바르게 렌더링됨.
+
+**3단계 (동적):** 사이트 설정 구성, 메뉴 기능 작동, 분류 쿼리 가능, 위젯 영역 렌더링, 시드 파일 완성.
+
+## 특수 사례
+
+### 자식 테마
+
+테마에 부모가 있는 경우 (`style.css`에서 `Template:` 확인), 먼저 부모 테마를 분석한 후 자식 테마 오버라이드를 적용하세요.
+
+### 블록 테마 (FSE)
+
+WordPress 5.9+ 블록 테마는 디자인 토큰에 `theme.json`을, 블록 마크업에 `templates/*.html`을 사용합니다. 블록 마크업을 Astro 컴포넌트로 변환하고 `theme.json`에서 토큰을 추출하세요.
+
+### 페이지 빌더
+
+Elementor, Divi 또는 유사한 도구로 구축된 콘텐츠는 테마 파일이 아닌 글 메타에 저장됩니다. 이 콘텐츠는 테마 이식이 아닌 WXR을 통해 가져옵니다. 테마 이식은 셸에 집중하세요—페이지 빌더 콘텐츠는 가져오기 후 Portable Text를 통해 렌더링됩니다.
+
+## 다음 단계
+
+- **[테마 생성하기](/ko/themes/creating-themes/)** — 배포 가능한 EmDash 테마 구축
+- **[시드 파일 형식](/ko/themes/seed-files/)** — 완전한 시드 파일 사양
+- **[WordPress에서 마이그레이션하기](/ko/migration/from-wordpress/)** — WordPress 콘텐츠 가져오기

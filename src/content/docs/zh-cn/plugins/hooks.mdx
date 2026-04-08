@@ -1,0 +1,515 @@
+---
+title: 插件钩子
+description: 挂钩到内容、媒体和插件生命周期事件。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+钩子允许插件在事件发生时运行代码。所有钩子都会接收一个事件对象和插件上下文。钩子在插件定义时声明，而不是在运行时动态注册。
+
+## 钩子签名
+
+每个钩子处理程序接收两个参数：
+
+```typescript
+async (event: EventType, ctx: PluginContext) => ReturnType;
+```
+
+- `event` — 关于事件的数据（正在保存的内容、上传的媒体等）
+- `ctx` — [插件上下文](/zh-cn/plugins/overview/#plugin-context)，包含存储、KV、日志记录和基于能力控制的 API
+
+## 钩子配置
+
+钩子可以声明为简单的处理程序，也可以使用完整配置：
+
+<Tabs>
+  <TabItem label="简单配置">
+```typescript
+hooks: {
+  "content:afterSave": async (event, ctx) => {
+    ctx.log.info("Content saved");
+  }
+}
+```
+  </TabItem>
+  <TabItem label="完整配置">
+```typescript
+hooks: {
+  "content:afterSave": {
+    priority: 100,
+    timeout: 5000,
+    dependencies: ["audit-log"],
+    errorPolicy: "continue",
+    handler: async (event, ctx) => {
+      ctx.log.info("Content saved");
+    }
+  }
+}
+```
+  </TabItem>
+</Tabs>
+
+### 配置选项
+
+| 选项            | 类型                    | 默认值     | 描述                                       |
+| --------------- | ----------------------- | ---------- | ------------------------------------------ |
+| `priority`      | `number`                | `100`      | 执行顺序。数值越小越先运行。               |
+| `timeout`       | `number`                | `5000`     | 最大执行时间（毫秒）。                     |
+| `dependencies`  | `string[]`              | `[]`       | 必须在此钩子之前运行的插件 ID。            |
+| `errorPolicy`   | `"abort" \| "continue"` | `"abort"`  | 出错时是否停止整个流水线。                 |
+| `exclusive`     | `boolean`               | `false`    | 只有一个插件可以作为活动提供者。用于 `email:deliver` 和 `comment:moderate`。 |
+| `handler`       | `function`              | —          | 钩子处理函数。必需。                       |
+
+<Aside type="tip">
+	对于非关键钩子（如通知），使用 `errorPolicy: "continue"`。当钩子的结果至关重要时，使用 `"abort"`（默认值）。
+</Aside>
+
+## 生命周期钩子
+
+生命周期钩子在插件安装、激活和停用时运行。
+
+### `plugin:install`
+
+在插件首次添加到站点时运行一次。
+
+```typescript
+"plugin:install": async (_event, ctx) => {
+  ctx.log.info("Installing plugin...");
+
+  // Seed default data
+  await ctx.kv.set("settings:enabled", true);
+  await ctx.storage.items!.put("default", { name: "Default Item" });
+}
+```
+
+**事件：** `{}`  
+**返回：** `Promise<void>`
+
+### `plugin:activate`
+
+在插件启用时运行（安装后或重新启用时）。
+
+```typescript
+"plugin:activate": async (_event, ctx) => {
+  ctx.log.info("Plugin activated");
+}
+```
+
+**事件：** `{}`  
+**返回：** `Promise<void>`
+
+### `plugin:deactivate`
+
+在插件禁用时运行（但未移除）。
+
+```typescript
+"plugin:deactivate": async (_event, ctx) => {
+  ctx.log.info("Plugin deactivated");
+  // Release resources, pause background work
+}
+```
+
+**事件：** `{}`  
+**返回：** `Promise<void>`
+
+### `plugin:uninstall`
+
+在插件从站点移除时运行。
+
+```typescript
+"plugin:uninstall": async (event, ctx) => {
+  ctx.log.info("Uninstalling plugin...");
+
+  if (event.deleteData) {
+    // User opted to delete plugin data
+    const result = await ctx.storage.items!.query({ limit: 1000 });
+    await ctx.storage.items!.deleteMany(result.items.map(i => i.id));
+  }
+}
+```
+
+**事件：** `{ deleteData: boolean }`  
+**返回：** `Promise<void>`
+
+<Aside type="caution">
+	在 `plugin:uninstall` 中要保守。默认保留数据——用户可能会重新安装。仅在 `event.deleteData` 为 `true` 时删除数据。
+</Aside>
+
+## 内容钩子
+
+内容钩子在创建、更新和删除操作期间运行。
+
+### `content:beforeSave`
+
+在内容保存之前运行。返回修改后的内容或 `void` 以保持不变。抛出错误以取消保存。
+
+```typescript
+"content:beforeSave": async (event, ctx) => {
+  const { content, collection, isNew } = event;
+
+  // Validate
+  if (collection === "posts" && !content.title) {
+    throw new Error("Posts require a title");
+  }
+
+  // Transform
+  if (content.slug) {
+    content.slug = content.slug.toLowerCase().replace(/\s+/g, "-");
+  }
+
+  return content;
+}
+```
+
+**事件：**
+
+```typescript
+{
+	content: Record<string, unknown>; // Content data being saved
+	collection: string; // Collection name
+	isNew: boolean; // True if creating, false if updating
+}
+```
+
+**返回：** `Promise<Record<string, unknown> | void>`
+
+### `content:afterSave`
+
+在内容成功保存后运行。用于副作用，如通知、日志记录或同步到外部系统。
+
+```typescript
+"content:afterSave": async (event, ctx) => {
+  const { content, collection, isNew } = event;
+
+  ctx.log.info(`${isNew ? "Created" : "Updated"} ${collection}/${content.id}`);
+
+  // Trigger external sync
+  if (ctx.http) {
+    await ctx.http.fetch("https://api.example.com/webhook", {
+      method: "POST",
+      body: JSON.stringify({ event: "content:save", id: content.id })
+    });
+  }
+}
+```
+
+**事件：**
+
+```typescript
+{
+	content: Record<string, unknown>; // Saved content (includes id, timestamps)
+	collection: string;
+	isNew: boolean;
+}
+```
+
+**返回：** `Promise<void>`
+
+### `content:beforeDelete`
+
+在内容删除之前运行。返回 `false` 以取消删除，返回 `true` 或 `void` 以允许删除。
+
+```typescript
+"content:beforeDelete": async (event, ctx) => {
+  const { id, collection } = event;
+
+  // Prevent deletion of protected content
+  if (collection === "pages" && id === "home") {
+    ctx.log.warn("Cannot delete home page");
+    return false;
+  }
+
+  return true;
+}
+```
+
+**事件：**
+
+```typescript
+{
+	id: string; // Content ID being deleted
+	collection: string;
+}
+```
+
+**返回：** `Promise<boolean | void>`
+
+### `content:afterDelete`
+
+在内容成功删除后运行。
+
+```typescript
+"content:afterDelete": async (event, ctx) => {
+  const { id, collection } = event;
+
+  ctx.log.info(`Deleted ${collection}/${id}`);
+
+  // Clean up related plugin data
+  await ctx.storage.cache!.delete(`${collection}:${id}`);
+}
+```
+
+**事件：**
+
+```typescript
+{
+	id: string;
+	collection: string;
+}
+```
+
+**返回：** `Promise<void>`
+
+## 媒体钩子
+
+媒体钩子在上传文件时运行。
+
+### `media:beforeUpload`
+
+在文件上传之前运行。返回修改后的文件信息或 `void` 以保持不变。抛出错误以取消上传。
+
+```typescript
+"media:beforeUpload": async (event, ctx) => {
+  const { file } = event;
+
+  // Validate file type
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Only images are allowed");
+  }
+
+  // Validate file size (10MB max)
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error("File too large");
+  }
+
+  // Rename file
+  return {
+    ...file,
+    name: `${Date.now()}-${file.name}`
+  };
+}
+```
+
+**事件：**
+
+```typescript
+{
+	file: {
+		name: string; // Original filename
+		type: string; // MIME type
+		size: number; // Size in bytes
+	}
+}
+```
+
+**返回：** `Promise<{ name: string; type: string; size: number } | void>`
+
+### `media:afterUpload`
+
+在文件成功上传后运行。
+
+```typescript
+"media:afterUpload": async (event, ctx) => {
+  const { media } = event;
+
+  ctx.log.info(`Uploaded ${media.filename}`, {
+    id: media.id,
+    size: media.size,
+    mimeType: media.mimeType
+  });
+}
+```
+
+**事件：**
+
+```typescript
+{
+	media: {
+		id: string;
+		filename: string;
+		mimeType: string;
+		size: number | null;
+		url: string;
+		createdAt: string;
+	}
+}
+```
+
+**返回：** `Promise<void>`
+
+## 钩子执行顺序
+
+钩子按以下顺序运行：
+
+1. `priority` 值较低的钩子先运行
+2. 对于相同优先级的钩子，按插件注册顺序运行
+3. 带有 `dependencies` 的钩子会等待这些插件完成
+
+```typescript
+// Plugin A
+"content:afterSave": {
+  priority: 50,  // Runs first
+  handler: async () => {}
+}
+
+// Plugin B
+"content:afterSave": {
+  priority: 100,  // Runs second (default priority)
+  handler: async () => {}
+}
+
+// Plugin C
+"content:afterSave": {
+  priority: 200,
+  dependencies: ["plugin-a"],  // Runs after A, even if priority was lower
+  handler: async () => {}
+}
+```
+
+## 错误处理
+
+当钩子抛出错误或超时时：
+
+-   **`errorPolicy: "abort"`** — 整个流水线停止。原始操作可能失败。
+-   **`errorPolicy: "continue"`** — 错误被记录，剩余的钩子仍会运行。
+
+```typescript
+"content:afterSave": {
+  timeout: 5000,
+  errorPolicy: "continue",  // Don't fail the save if this hook fails
+  handler: async (event, ctx) => {
+    // External API call that might fail
+    await ctx.http!.fetch("https://unreliable-api.com/notify");
+  }
+}
+```
+
+<Aside type="tip">
+	对于非关键操作（如分析、通知或外部同步），使用 `errorPolicy: "continue"`。即使钩子失败，内容保存也会成功。
+</Aside>
+
+## 超时设置
+
+钩子默认超时时间为 5000 毫秒（5 秒）。对于可能需要更长时间的操作，请增加此值：
+
+```typescript
+"content:afterSave": {
+  timeout: 30000,  // 30 seconds
+  handler: async (event, ctx) => {
+    // Long-running operation
+  }
+}
+```
+
+<Aside type="caution">
+	在 Cloudflare 的沙盒模式下，资源限制在隔离级别强制执行。无论配置的超时时间如何，长时间运行的钩子都可能被终止。
+</Aside>
+
+## 公共页面钩子
+
+公共页面钩子允许插件为渲染页面的 `<head>` 和 `<body>` 做出贡献。模板通过使用 `emdash/ui` 中的 `<EmDashHead>`、`<EmDashBodyStart>` 和 `<EmDashBodyEnd>` 组件来选择加入。
+
+### `page:metadata`
+
+向 `<head>` 贡献类型化的元数据——meta 标签、OpenGraph 属性、规范/备用链接以及 JSON-LD 结构化数据。在受信任和沙盒模式下均可工作。
+
+核心系统会验证、去重并渲染这些贡献。插件返回结构化数据，而不是原始 HTML。
+
+```typescript
+"page:metadata": async (event, ctx) => {
+  if (event.page.kind !== "content") return null;
+
+  return {
+    kind: "jsonld",
+    id: `schema:${event.page.content?.collection}:${event.page.content?.id}`,
+    graph: {
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      headline: event.page.title,
+      description: event.page.description,
+    },
+  };
+}
+```
+
+**事件：**
+
+```typescript
+{
+  page: {
+    url: string;
+    path: string;
+    locale: string | null;
+    kind: "content" | "custom";
+    pageType: string;
+    title: string | null;
+    description: string | null;
+    canonical: string | null;
+    image: string | null;
+    content?: { collection: string; id: string; slug: string | null };
+  }
+}
+```
+
+**返回：** `PageMetadataContribution | PageMetadataContribution[] | null`
+
+**贡献类型：**
+
+| 类型         | 渲染内容                                             | 去重键                     |
+| ------------ | ---------------------------------------------------- | -------------------------- |
+| `meta`       | `<meta name="..." content="...">`                    | `key` 或 `name`            |
+| `property`   | `<meta property="..." content="...">`                | `key` 或 `property`        |
+| `link`       | `<link rel="canonical\|alternate" href="...">`       | canonical: 单例；alternate: `key` 或 `hreflang` |
+| `jsonld`     | `<script type="application/ld+json">`                | `id`（如果存在）           |
+
+对于任何去重键，第一个贡献获胜。链接的 href 必须是 HTTP 或 HTTPS。
+
+### `page:fragments`
+
+向页面插入点贡献原始 HTML、脚本或标记。**仅限受信任插件**——沙盒插件不能使用此钩子。
+
+```typescript
+"page:fragments": async (event, ctx) => {
+  return {
+    kind: "external-script",
+    placement: "head",
+    src: "https://www.googletagmanager.com/gtm.js?id=GTM-XXXXX",
+    async: true,
+  };
+}
+```
+
+**返回：** `PageFragmentContribution | PageFragmentContribution[] | null`
+
+放置位置：`"head"`、`"body:start"`、`"body:end"`。模板如果省略了某个放置位置的组件，则会静默忽略针对该位置的贡献。
+
+<Aside type="caution">
+	`page:fragments` 仅限受信任插件使用，因为其输出在浏览器中作为第一方代码运行。Worker Loader 隔离不适用于浏览器执行的脚本。对于沙盒安全的贡献，请使用 `page:metadata`。
+</Aside>
+
+## 钩子参考
+
+| 钩子                     | 触发时机                         | 返回值                         | 独占性 |
+| ------------------------ | -------------------------------- | ------------------------------ | ------ |
+| `plugin:install`         | 首次安装插件时                   | `void`                         | 否     |
+| `plugin:activate`        | 插件启用时                       | `void`                         | 否     |
+| `plugin:deactivate`      | 插件禁用时                       | `void`                         | 否     |
+| `plugin:uninstall`       | 插件移除时                       | `void`                         | 否     |
+| `content:beforeSave`     | 内容保存前                       | 修改后的内容或 `void`          | 否     |
+| `content:afterSave`      | 内容保存后                       | `void`                         | 否     |
+| `content:beforeDelete`   | 内容删除前                       | `false` 取消，否则允许         | 否     |
+| `content:afterDelete`    | 内容删除后                       | `void`                         | 否     |
+| `media:beforeUpload`     | 文件上传前                       | 修改后的文件信息或 `void`      | 否     |
+| `media:afterUpload`      | 文件上传后                       | `void`                         | 否     |
+| `cron`                   | 计划任务触发时                   | `void`                         | 否     |
+| `email:beforeSend`       | 邮件发送前                       | 修改后的消息、`false` 或 `void` | 否     |
+| `email:deliver`          | 通过传输方式发送邮件             | `void`                         | 是     |
+| `email:afterSend`        | 邮件发送后                       | `void`                         | 否     |
+| `comment:beforeCreate`   | 评论存储前                       | 修改后的事件、`false` 或 `void` | 否     |
+| `comment:moderate`       | 决定评论状态                     | `{ status, reason? }`          | 是     |
+| `comment:afterCreate`    | 评论存储后                       | `void`                         | 否     |
+| `comment:afterModerate`  | 管理员更改评论状态后             | `void`                         | 否     |
+| `page:metadata`          | 页面渲染时                       | 贡献或 `null`                  | 否     |
+| `page:fragments`         | 页面渲染时（受信任）             | 贡献或 `null`                  | 否     |
+
+有关完整的事件类型和处理程序签名，请参阅[钩子参考](/zh-cn/reference/hooks/)。

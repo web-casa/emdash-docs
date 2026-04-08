@@ -1,0 +1,150 @@
+---
+title: KI-Tools
+description: Verbinden Sie Claude, ChatGPT und andere KI-Assistenten mit Ihrer EmDash-Website.
+---
+
+import { Aside, Steps, Tabs, TabItem, LinkCard } from "@astrojs/starlight/components";
+
+EmDash verfügt über einen integrierten [MCP-Server](https://modelcontextprotocol.io), der KI-Assistenten ermöglicht, direkt mit den Inhalten Ihrer Website zu arbeiten. Sie können Claude, ChatGPT oder andere Tools bitten, Beiträge zu verfassen, Seiten zu aktualisieren, Medien zu verwalten, Ihre Inhalte zu durchsuchen und mehr – alles über natürliche Konversation.
+
+## MCP-Server aktivieren
+
+Der MCP-Server ist standardmäßig deaktiviert. Aktivieren Sie ihn in Ihrer Astro-Konfiguration:
+
+```js title="astro.config.mjs"
+emdash({
+  mcp: true,
+})
+```
+
+## Einrichtung
+
+Die MCP-Server-URL Ihrer Website lautet:
+
+```
+https://example.com/_emdash/api/mcp
+```
+
+Ersetzen Sie `example.com` durch Ihre Domain. Für die lokale Entwicklung verwenden Sie `http://localhost:4321/_emdash/api/mcp`.
+
+<Tabs>
+<TabItem label="Claude">
+
+In [claude.ai](https://claude.ai) hinzugefügte Connectors funktionieren sowohl in der Web-App als auch in Claude Desktop.
+
+<Steps>
+
+1. Gehen Sie zu [Einstellungen > Connectors](https://claude.ai/settings/connectors)
+
+2. Klicken Sie auf **Benutzerdefinierten Connector hinzufügen**
+
+3. Geben Sie die MCP-Server-URL Ihrer Website ein
+
+4. Klicken Sie auf **Hinzufügen** – Ihr Browser öffnet sich, damit Sie sich anmelden und den Zugriff genehmigen können
+
+5. Starten Sie eine neue Unterhaltung, klicken Sie im Chat-Eingabefeld auf **+**, dann auf **Connectors** und schalten Sie Ihre Website ein
+
+</Steps>
+
+Für Team- und Enterprise-Pläne fügt zunächst ein Besitzer den Connector über [Admin-Einstellungen > Connectors](https://claude.ai/admin-settings/connectors) hinzu. Mitglieder verbinden sich dann individuell über ihre eigenen Einstellungen.
+
+</TabItem>
+<TabItem label="ChatGPT">
+
+ChatGPT unterstützt MCP-Server auf Pro-, Business- und Enterprise-Plänen.
+
+<Steps>
+
+1. Gehen Sie zu **Einstellungen > Apps & Connectors > Erweiterte Einstellungen** und aktivieren Sie **Entwicklermodus**
+
+2. Gehen Sie zu **Einstellungen > Connectors > Erstellen**
+
+3. Geben Sie einen Namen, eine Beschreibung und die MCP-Server-URL Ihrer Website ein
+
+4. Klicken Sie auf **Erstellen**
+
+5. Klicken Sie in einer Unterhaltung in der Nähe des Composers auf **+**, dann auf **Mehr** und wählen Sie Ihren Connector aus
+
+</Steps>
+
+</TabItem>
+</Tabs>
+
+<Aside>
+	Verwenden Sie ein Codierungstool wie VS Code, Cursor oder Windsurf? Details zur Konfiguration finden Sie in der [MCP-Server-Referenz](/de/reference/mcp-server).
+</Aside>
+
+## Was Sie tun können
+
+Sobald verbunden, können Sie den KI-Assistenten bitten, jede dieser Operationen in natürlicher Sprache auszuführen. Sie müssen die Tool-Namen nicht kennen – beschreiben Sie einfach, was Sie möchten.
+
+### Inhalte
+
+- **Inhalte durchsuchen** – „Zeigen Sie mir die letzten 10 Blogbeiträge“ oder „Finden Sie alle Entwurfsseiten“
+- **Inhalte lesen** – „Holen Sie den Beitrag namens 'hello-world' und fassen Sie ihn zusammen“
+- **Inhalte erstellen** – „Schreiben Sie einen neuen Blogbeitrag über unseren Sommersale“ oder „Erstellen Sie eine Entwurfsseite für den Abschnitt 'Über uns'“
+- **Inhalte bearbeiten** – „Aktualisieren Sie die Preisgestaltungsseite, um den neuen Plan zu erwähnen“ oder „Korrigieren Sie den Tippfehler im FAQ-Beitrag“
+- **Veröffentlichen und planen** – „Veröffentlichen Sie den Sommersale-Beitrag“ oder „Planen Sie die Ankündigung für den 1. Juni um 9 Uhr morgens“
+- **Versionen vergleichen** – „Zeigen Sie mir, was sich auf der Startseite geändert hat, seit sie zuletzt veröffentlicht wurde“
+- **Entwürfe verwalten** – „Verwerfen Sie die Entwurfsänderungen auf der Über-uns-Seite“ oder „Duplizieren Sie die Newsletter-Vorlage“
+- **Übersetzungen** – „Welche Übersetzungen existieren für den Willkommensbeitrag?“ (wenn i18n aktiviert ist)
+
+### Medien
+
+- **Medien durchsuchen** – „Listen Sie alle hochgeladenen Bilder auf“ oder „Zeigen Sie mir PDFs in der Mediathek“
+- **Details prüfen** – „Holen Sie die Details für dieses Medienelement“
+- **Metadaten aktualisieren** – „Setzen Sie den Alt-Text auf dem Hero-Bild auf 'Bergsonnenuntergang'“
+- **Dateien entfernen** – „Löschen Sie das alte Bannerbild“
+
+### Suche
+
+- **Inhalte finden** – „Suchen Sie nach Beiträgen, die 'Barrierefreiheit' erwähnen“ oder „Finden Sie alles über TypeScript in allen Sammlungen“
+
+### Taxonomien
+
+- **Durchsuchen** – „Listen Sie alle Kategorien auf“ oder „Zeigen Sie mir die Schlagwörter“
+- **Begriffe erstellen** – „Fügen Sie ein 'Tutorials'-Schlagwort hinzu“ oder „Erstellen Sie eine 'Frontend'-Unterkategorie unter 'Engineering'“
+
+### Menüs
+
+- **Menüs anzeigen** – „Zeigen Sie mir das Hauptnavigationsmenü“ oder „Was ist im Fußzeilenmenü?“
+
+### Schema (nur Admin)
+
+- **Inspizieren** – „Welche Sammlungen existieren?“ oder „Zeigen Sie mir die Felder in der Beitrags-Sammlung“
+- **Sammlungen erstellen** – „Erstellen Sie eine neue 'Testimonials'-Sammlung mit Namens- und Zitatfeldern“
+- **Schema ändern** – „Fügen Sie ein 'featured'-Boolesches Feld zu Beiträgen hinzu“
+
+<Aside type="caution">
+	Schemaänderungen (Erstellen/Löschen von Sammlungen und Feldern) ändern Ihre Datenbankstruktur und erfordern Admin-Berechtigungen. Die KI wird Ihnen mitteilen, wenn Sie nicht über ausreichende Zugriffsrechte verfügen.
+</Aside>
+
+### Revisionen
+
+- **Verlauf anzeigen** – „Zeigen Sie den Revisionsverlauf für diesen Beitrag“
+- **Wiederherstellen** – „Stellen Sie den Beitrag auf seine vorherige Version wieder her“
+
+## Berechtigungen
+
+Was Sie über ein KI-Tool tun können, hängt von Ihrer EmDash-Rolle ab. Der KI-Assistent arbeitet mit denselben Berechtigungen, die Sie im Admin-Bereich haben:
+
+| Rolle | Was die KI tun kann |
+| --- | --- |
+| **Admin** | Alles, einschließlich Schemaänderungen |
+| **Editor** | Alle Inhalte, Medien, Taxonomien und Menüs. Kann Schema einsehen. |
+| **Autor** | Eigene Inhalte und Medien |
+| **Mitwirkender** | Eigene Inhalte (kein Veröffentlichen) und Medien |
+
+Wenn Sie etwas versuchen, auf das Sie keinen Zugriff haben, wird die KI Sie informieren.
+
+## Tipps
+
+- **Seien Sie spezifisch bezüglich Sammlungen.** Sagen Sie „Erstellen Sie einen Blogbeitrag“ anstelle von „Erstellen Sie einen Beitrag“, wenn Sie mehrere Sammlungen haben.
+- **Fragen Sie zuerst nach dem Schema.** Wenn Sie unsicher sind, welche Felder eine Sammlung hat, fragen Sie „Welche Felder hat die Beitrags-Sammlung?“, bevor Sie Inhalte erstellen oder bearbeiten.
+- **Vor dem Veröffentlichen überprüfen.** Bitten Sie die KI, Inhalte als Entwurf zu erstellen, überprüfen Sie sie im Admin-Bereich und bitten Sie dann die KI, sie zu veröffentlichen – oder veröffentlichen Sie sie selbst.
+- **Verwenden Sie 'Vergleichen' zur Überprüfung.** Fragen Sie vor dem Veröffentlichen „Vergleichen Sie die Live- und Entwurfsversionen dieses Beitrags“, um genau zu sehen, was sich ändern wird.
+- **Rich-Text-Felder verwenden Portable Text.** Die KI kann Inhalte für Rich-Text-Felder schreiben, aber komplexe Formatierungen sind am besten im Admin-Editor durchzuführen.
+
+## Für Entwickler
+
+Der MCP-Server-Endpunkt, Authentifizierungsmethoden, OAuth-Discovery, Tool-Parameter und Fehlerbehandlung sind in der [MCP-Server-Referenz](/de/reference/mcp-server) dokumentiert.

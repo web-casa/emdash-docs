@@ -1,0 +1,49 @@
+---
+title: WordPress a Astro con EmDash
+description: Comprende el proceso de migración de WordPress a Astro con EmDash, incluyendo por qué los equipos lo consideran, qué cambia y cómo abordar el traslado de manera segura.
+lastUpdated: 2026-04-07
+sidebar:
+  label: WordPress a Astro
+---
+
+
+Pasar de WordPress a Astro suele abrir dos preguntas distintas:
+
+1. ¿Cómo modernizamos el frontend?
+2. ¿Cómo mantenemos un CMS utilizable para los editores?
+
+EmDash resulta interesante porque responde a ambas a la vez. Astro pasa a ser la capa de aplicación y renderizado, mientras que EmDash mantiene un flujo editorial reconocible para equipos acostumbrados a WordPress.
+
+## Por qué los equipos consideran este cambio
+
+- Mejor control sobre la arquitectura del frontend
+- Un flujo de trabajo de desarrollo más moderno basado en TypeScript
+- La capacidad de mantener conceptos de publicación amigables para editores
+- Menos fricción que combinar Astro con un CMS completamente separado
+
+## Qué cambia en la práctica
+
+- Los temas se convierten en diseños y componentes de Astro
+- `WP_Query` se convierte en funciones de consulta de contenido de EmDash
+- Los tipos de contenido y taxonomías de WordPress se trasladan a colecciones y taxonomías de EmDash
+- La importación de contenido ocurre a través de las herramientas de migración de EmDash en lugar de copiar y pegar manualmente
+
+## Lo que normalmente sigue siendo familiar
+
+- Los editores siguen trabajando con una interfaz de usuario de CMS
+- Las entradas, páginas, taxonomías, medios y navegación siguen siendo conceptos reconocibles
+- La planificación de la migración aún gira en torno al contenido, redirecciones, medios e integridad de taxonomías
+
+## Orden recomendado para la migración
+
+1. Evaluar EmDash con un proyecto piloto de Astro
+2. Revisar [EmDash vs WordPress](/es/emdash-vs-wordpress/) y [¿Qué es EmDash?](/es/what-is-emdash/)
+3. Probar la importación de contenido con una exportación representativa de WordPress
+4. Validar redirecciones, manejo de medios y mapeo de campos personalizados
+5. Mover un sitio o sección más pequeño antes de comprometerse con una migración grande
+
+## Continuar con
+
+- [Migrar de WordPress a EmDash](/es/migration/from-wordpress/)
+- [EmDash para desarrolladores de WordPress](/es/coming-from/wordpress/)
+- [Preguntas frecuentes](/es/faq/)

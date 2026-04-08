@@ -1,0 +1,329 @@
+---
+title: サイト設定
+description: サイトタイトル、ロゴ、ソーシャルリンクなどのグローバル設定を構成します。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+サイト設定は、サイトのタイトル、タグライン、ロゴ、ソーシャルリンク、表示設定など、サイト全体の構成値です。管理者は管理インターフェースを通じてこれらを管理し、テンプレート内でアクセスします。
+
+## 設定のクエリ
+
+`getSiteSettings()` を使用してすべてのサイト設定を取得します：
+
+```astro title="src/layouts/Base.astro"
+---
+import { getSiteSettings } from "emdash";
+
+const settings = await getSiteSettings();
+---
+
+<html lang="en">
+  <head>
+    <title>{settings.title}</title>
+    {settings.favicon && (
+      <link rel="icon" href={settings.favicon.url} />
+    )}
+  </head>
+  <body>
+    <header>
+      {settings.logo ? (
+        <img src={settings.logo.url} alt={settings.logo.alt || settings.title} />
+      ) : (
+        <span class="site-title">{settings.title}</span>
+      )}
+      {settings.tagline && <p class="tagline">{settings.tagline}</p>
+}
+    </header>
+    <slot />
+  </body>
+</html>
+```
+
+## 利用可能な設定
+
+EmDashは以下のコア設定を提供します：
+
+```ts
+interface SiteSettings {
+	// Identity
+	title: string;
+	tagline?: string;
+	logo?: MediaReference;
+	favicon?: MediaReference;
+
+	// URLs
+	url?: string;
+
+	// Display
+	postsPerPage: number;
+	dateFormat: string;
+	timezone: string;
+
+	// Social
+	social?: {
+		twitter?: string;
+		github?: string;
+		facebook?: string;
+		instagram?: string;
+		linkedin?: string;
+		youtube?: string;
+	};
+}
+
+interface MediaReference {
+	mediaId: string;
+	alt?: string;
+	url?: string; // 解決済みURL（読み取り専用）
+}
+```
+
+## 個別設定の取得
+
+`getSiteSetting()` を使用して、キーで単一の設定を取得します：
+
+```ts
+import { getSiteSetting } from "emdash";
+
+const title = await getSiteSetting("title");
+// 戻り値: "私のサイト" または undefined
+
+const logo = await getSiteSetting("logo");
+// 戻り値: { mediaId: "...", url: "/_emdash/api/media/file/..." }
+```
+
+これは、すべてを取得せずに1つまたは2つの値のみが必要な場合に便利です。
+
+## コンポーネントでの設定の使用
+
+### サイトヘッダー
+
+```
+astro title="src/components/Header.astro"
+---
+import { getSiteSettings, getMenu } from "emdash";
+
+const settings = await getSiteSettings();
+const menu = await getMenu("primary");
+---
+
+<header class="header">
+  <a href="/" class="logo">
+    {settings.logo ? (
+      <img
+        src={settings.logo.url}
+        alt={settings.logo.alt || settings.title}
+        width="150"
+        height="50"
+      />
+    ) : (
+      <span class="site-name">{settings.title}</span>
+    )}
+  </a>
+
+  {menu && (
+    <nav>
+      {menu.items.map(item => (
+        <a href={item.url}>{item.label}</a>
+      ))}
+    </nav>
+  )}
+</header>
+```
+
+### ソーシャルリンク
+
+```
+astro title="src/components/SocialLinks.astro"
+---
+import { getSiteSetting } from "emdash";
+
+const social = await getSiteSetting("social");
+
+const platforms = [
+  { key: "twitter", label: "Twitter", baseUrl: "https://twitter.com/" },
+  { key: "github", label: "GitHub", baseUrl: "https://github.com/" },
+  { key: "facebook", label: "Facebook", baseUrl: "https://facebook.com/" },
+  { key: "instagram", label: "Instagram", baseUrl: "https://instagram.com/" },
+  { key: "linkedin", label: "LinkedIn", baseUrl: "https://linkedin.com/in/" },
+  { key: "youtube", label: "YouTube", baseUrl: "https://youtube.com/@" },
+] as const;
+---
+
+{social && (
+  <div class="social-links">
+    {platforms.map(({ key, label, baseUrl }) => (
+      social[key] && (
+        <a
+          href={baseUrl + social[key]}
+          rel="noopener noreferrer"
+          target="_blank"
+          aria-label={label}
+        >
+          {label}
+        </a>
+      )
+    ))}
+  </div>
+)}
+```
+
+### SEOメタタグ
+
+```
+astro title="src/components/SEO.astro"
+---
+import { getSiteSettings } from "emdash";
+
+interface Props {
+  title?: string;
+  description?: string;
+  image?: string;
+}
+
+const settings = await getSiteSettings();
+const {
+  title,
+  description = settings.tagline,
+  image,
+} = Astro.props;
+
+const pageTitle = title
+  ? `${title} | ${settings.title}`
+  : settings.title;
+---
+
+<title>{pageTitle}</title>
+{description && <meta name="description" content={description} />}
+
+<!-- Open Graph -->
+<meta property="og:title" content={pageTitle} />
+{description && <meta property="og:description" content={description} />}
+{image && <meta property="og:image" content={image} />}
+{settings.url && <meta property="og:url" content={settings.url + Astro.url.pathname} />}
+
+<!-- Twitter -->
+{settings.social?.twitter && (
+  <meta name="twitter:site" content={settings.social.twitter} />
+)}
+<meta name="twitter:card" content={image ? "summary_large_image" : "summary"} />
+```
+
+## 日付フォーマット
+
+一貫した日付表示のために、`dateFormat` と `timezone` 設定を使用します：
+
+```
+astro title="src/components/PostDate.astro"
+---
+import { getSiteSetting } from "emdash";
+
+interface Props {
+  date: string;
+}
+
+const { date } = Astro.props;
+const dateFormat = await getSiteSetting("dateFormat") || "MMMM d, yyyy";
+const timezone = await getSiteSetting("timezone") || "UTC";
+
+// Intl.DateTimeFormat または date-fns のようなライブラリを使用してフォーマット
+const formatted = new Intl.DateTimeFormat("en-US", {
+  timeZone: timezone,
+  dateStyle: "long",
+}).format(new Date(date));
+---
+
+<time datetime={date}>{formatted}</time>
+```
+
+<Aside>
+	`dateFormat` 設定はパターン文字列（例: "MMMM d, yyyy"）を使用します。これらのパターンを解析して適用するには、`date-fns` のようなライブラリが必要になる場合があります。
+</Aside>
+
+## 管理API
+
+プログラムで設定を取得します：
+
+```http
+GET /_emdash/api/settings
+```
+
+レスポンス：
+
+```json
+{
+	"title": "My EmDash Site",
+	"tagline": "モダンなCMS",
+	"logo": {
+		"mediaId": "med_123",
+		"url": "/_emdash/api/media/file/abc123"
+	},
+	"postsPerPage": 10,
+	"dateFormat": "MMMM d, yyyy",
+	"timezone": "America/New_York",
+	"social": {
+		"twitter": "@handle",
+		"github": "username"
+	}
+}
+```
+
+設定を更新します（部分的な更新がサポートされています）：
+
+```http
+POST /_emdash/api/settings
+Content-Type: application/json
+
+{
+  "title": "新しいサイトタイトル",
+  "tagline": "更新されたタグライン"
+}
+```
+
+提供されたフィールドのみが変更されます。省略されたフィールドは現在の値を保持します。
+
+## メディア参照
+
+`logo` と `favicon` 設定はメディア参照を保存します。読み取る際、EmDashは自動的に `url` プロパティを解決します：
+
+```ts
+const logo = await getSiteSetting("logo");
+// {
+//   mediaId: "med_123",
+//   alt: "Site logo",
+//   url: "/_emdash/api/media/file/abc123"
+// }
+```
+
+API経由で更新する場合は、`mediaId` のみを提供します：
+
+```json
+{
+	"logo": {
+		"mediaId": "med_456",
+		"alt": "New logo"
+	}
+}
+```
+
+## APIリファレンス
+
+### `getSiteSettings()`
+
+解決済みのメディアURLを含むすべてのサイト設定を取得します。
+
+**戻り値:** `Promise<Partial<SiteSettings>>`
+
+部分的なオブジェクトを返します。設定されていない値は `undefined` です。
+
+### `getSiteSetting(key)`
+
+キーで単一の設定を取得します。
+
+**パラメータ:**
+
+- `key` — 設定キー（例: `"title"`, `"logo"`, `"social"`）
+
+**戻り値:** `Promise<SiteSettings[K] | undefined>`
+
+タイプセーフ: 戻り値の型はリクエストしたキーと一致します。

@@ -1,0 +1,1024 @@
+---
+title: REST-API-Referenz
+description: HTTP-Endpunkte für Inhalts-, Medien- und Schemaverwaltung.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash stellt eine REST-API unter `/_emdash/api/` für Inhaltsverwaltung, Medien-Uploads und Schema-Operationen bereit.
+
+## Authentifizierung
+
+API-Anfragen erfordern eine Authentifizierung über einen Bearer-Token:
+
+```http
+Authorization: Bearer <token>
+```
+
+Generieren Sie Token über die Admin-Oberfläche oder programmatisch.
+
+## Antwortformat
+
+Alle Antworten folgen einem einheitlichen Format:
+
+```json
+// Erfolg
+{
+  "success": true,
+  "data": { ... }
+}
+
+// Fehler
+{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Menschenlesbare Nachricht",
+    "details": { ... }
+  }
+}
+```
+
+## Inhalts-Endpunkte
+
+### Inhalte auflisten
+
+```http
+GET /_emdash/api/content/:collection
+```
+
+#### Parameter
+
+| Parameter    | Typ       | Beschreibung                             |
+| ------------ | -------- | --------------------------------------- |
+| `collection` | `string` | Collection-Slug (Pfad)                  |
+| `cursor`     | `string` | Paginierungs-Cursor (Query)               |
+| `limit`      | `number` | Elemente pro Seite (Query, Standard: 50)     |
+| `status`     | `string` | Nach Status filtern (Query)                |
+| `orderBy`    | `string` | Feld zum Sortieren (Query)                |
+| `order`      | `string` | Sortierrichtung: `asc` oder `desc` (Query) |
+
+#### Antwort
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "01HXK5MZSN...",
+        "type": "posts",
+        "slug": "hello-world",
+        "data": { "title": "Hallo Welt", ... },
+        "status": "published",
+        "createdAt": "2025-01-24T12:00:00Z",
+        "updatedAt": "2025-01-24T12:00:00Z"
+      }
+    ],
+    "nextCursor": "eyJpZCI6..."
+  }
+}
+```
+
+### Inhalt abrufen
+
+```http
+GET /_emdash/api/content/:collection/:id
+```
+
+#### Antwort
+
+```json
+{
+  "success": true,
+  "data": {
+    "item": {
+      "id": "01HXK5MZSN...",
+      "type": "posts",
+      "slug": "hello-world",
+      "data": { "title": "Hallo Welt", ... },
+      "status": "published",
+      "createdAt": "2025-01-24T12:00:00Z",
+      "updatedAt": "2025-01-24T12:00:00Z"
+    }
+  }
+}
+```
+
+### Inhalt erstellen
+
+```http
+POST /_emdash/api/content/:collection
+Content-Type: application/json
+```
+
+#### Anfrage-Body
+
+```json
+{
+  "data": {
+    "title": "Neuer Beitrag",
+    "content": [...]
+  },
+  "slug": "new-post",
+  "status": "draft"
+}
+```
+
+#### Antwort
+
+```json
+{
+  "success": true,
+  "data": {
+    "item": { ... }
+  }
+}
+```
+
+### Inhalt aktualisieren
+
+```http
+PUT /_emdash/api/content/:collection/:id
+Content-Type: application/json
+```
+
+#### Anfrage-Body
+
+```json
+{
+	"data": {
+			"title": "Aktualisierter Titel"
+	},
+	"status": "published"
+}
+```
+
+### Inhalt löschen
+
+```http
+DELETE /_emdash/api/content/:collection/:id
+```
+
+#### Antwort
+
+```json
+{
+	"success": true,
+	"data": {
+		"success": true
+	}
+}
+```
+
+## Medien-Endpunkte
+
+### Medien auflisten
+
+```http
+GET /_emdash/api/media
+```
+
+#### Parameter
+
+| Parameter  | Typ       | Beschreibung                  |
+| ---------- | -------- | ---------------------------- |
+| `cursor`   | `string` | Paginierungs-Cursor            |
+| `limit`    | `number` | Elemente pro Seite (Standard: 20) |
+| `mimeType` | `string` | Nach MIME-Typ-Präfix filtern   |
+
+#### Antwort
+
+```json
+{
+	"success": true,
+	"data": {
+		"items": [
+			{
+				"id": "01HXK5MZSN...",
+				"filename": "photo.jpg",
+				"mimeType": "image/jpeg",
+				"size": 102400,
+				"width": 1920,
+				"height": 1080,
+				"url": "https://cdn.example.com/photo.jpg",
+				"createdAt": "2025-01-24T12:00:00Z"
+			}
+		],
+		"nextCursor": "eyJpZCI6..."
+	}
+}
+```
+
+### Medium abrufen
+
+```http
+GET /_emdash/api/media/:id
+```
+
+### Medium erstellen
+
+```http
+POST /_emdash/api/media
+Content-Type: application/json
+```
+
+#### Anfrage-Body
+
+```json
+{
+	"filename": "photo.jpg",
+	"mimeType": "image/jpeg",
+	"size": 102400,
+	"width": 1920,
+	"height": 1080,
+	"storageKey": "uploads/photo.jpg"
+}
+```
+
+<Aside>
+	Dieser Endpunkt erfasst Medien-Metadaten nach dem Upload. Verwenden Sie den Upload-Endpunkt oder signierte URLs, um
+	die eigentliche Datei hochzuladen.
+</Aside>
+
+### Medium aktualisieren
+
+```http
+PUT /_emdash/api/media/:id
+Content-Type: application/json
+```
+
+#### Anfrage-Body
+
+```json
+{
+	"alt": "Bildbeschreibung",
+	"caption": "Bildunterschrift"
+}
+```
+
+### Medium löschen
+
+```http
+DELETE /_emdash/api/media/:id
+```
+
+### Mediendatei abrufen
+
+```http
+GET /_emdash/api/media/file/:key
+```
+
+Liefert den eigentlichen Dateiinhalt. Nur für lokalen Speicher.
+
+## Revisions-Endpunkte
+
+### Revisionen auflisten
+
+```http
+GET /_emdash/api/content/:collection/:entryId/revisions
+```
+
+#### Parameter
+
+| Parameter | Typ       | Beschreibung                           |
+| --------- | -------- | ------------------------------------- |
+| `limit`   | `number` | Maximale zurückzugebende Revisionen (Standard: 50) |
+
+#### Antwort
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "01HXK5MZSN...",
+        "collection": "posts",
+        "entryId": "01HXK5MZSN...",
+        "data": { ... },
+        "createdAt": "2025-01-24T12:00:00Z"
+      }
+    ],
+    "total": 5
+  }
+}
+```
+
+### Revision abrufen
+
+```http
+GET /_emdash/api/revisions/:revisionId
+```
+
+### Revision wiederherstellen
+
+```http
+POST /_emdash/api/revisions/:revisionId/restore
+```
+
+Stellt den Inhalt auf den Zustand dieser Revision wieder her und erstellt eine neue Revision.
+
+## Schema-Endpunkte
+
+### Collections auflisten
+
+```http
+GET /_emdash/api/schema/collections
+```
+
+#### Antwort
+
+```json
+{
+	"success": true,
+	"data": {
+		"items": [
+			{
+				"id": "01HXK5MZSN...",
+				"slug": "posts",
+				"label": "Beiträge",
+				"labelSingular": "Beitrag",
+				"supports": ["drafts", "revisions", "preview"]
+			}
+		]
+	}
+}
+```
+
+### Collection abrufen
+
+```http
+GET /_emdash/api/schema/collections/:slug
+```
+
+#### Parameter
+
+| Parameter       | Typ        | Beschreibung                       |
+| --------------- | --------- | --------------------------------- |
+| `includeFields` | `boolean` | Felddefinitionen einbeziehen (Query) |
+
+### Collection erstellen
+
+```http
+POST /_emdash/api/schema/collections
+Content-Type: application/json
+```
+
+#### Anfrage-Body
+
+```json
+{
+	"slug": "products",
+	"label": "Products",
+	"labelSingular": "Product",
+	"description": "Product catalog",
+	"supports": ["drafts", "revisions"]
+}
+```
+
+### Collection aktualisieren
+
+```http
+PATCH /_emdash/api/schema/collections/:slug
+Content-Type: application/json
+```
+
+### Collection löschen
+
+```http
+DELETE /_emdash/api/schema/collections/:slug
+```
+
+#### Parameter
+
+| Parameter | Typ        | Beschreibung                                   |
+| --------- | --------- | --------------------------------------------- |
+| `force`   | `boolean` | Löschen auch wenn Collection Inhalte hat (Query) |
+
+### Felder auflisten
+
+```http
+GET /_emdash/api/schema/collections/:slug/fields
+```
+
+### Feld erstellen
+
+```http
+POST /_emdash/api/schema/collections/:slug/fields
+Content-Type: application/json
+```
+
+#### Anfrage-Body
+
+```json
+{
+	"slug": "price",
+	"label": "Price",
+	"type": "number",
+	"required": true,
+	"validation": {
+		"min": 0
+	}
+}
+```
+
+### Feld aktualisieren
+
+```http
+PATCH /_emdash/api/schema/collections/:collectionSlug/fields/:fieldSlug
+Content-Type: application/json
+```
+
+### Feld löschen
+
+```http
+DELETE /_emdash/api/schema/collections/:collectionSlug/fields/:fieldSlug
+```
+
+### Felder neu anordnen
+
+```http
+POST /_emdash/api/schema/collections/:slug/fields/reorder
+Content-Type: application/json
+```
+
+#### Anfrage-Body
+
+```json
+{
+	"fieldSlugs": ["title", "content", "author", "publishedAt"]
+}
+```
+
+## Schema-Export
+
+### Schema exportieren (JSON)
+
+```http
+GET /_emdash/api/schema
+Accept: application/json
+```
+
+### Schema exportieren (TypeScript)
+
+```http
+GET /_emdash/api/schema?format=typescript
+Accept: text/typescript
+```
+
+Gibt TypeScript-Interfaces für alle Collections zurück.
+
+## Plugin-Endpunkte
+
+### Plugins auflisten
+
+```http
+GET /_emdash/api/plugins
+```
+
+### Plugin abrufen
+
+```http
+GET /_emdash/api/plugins/:pluginId
+```
+
+### Plugin aktivieren
+
+```http
+POST /_emdash/api/plugins/:pluginId/enable
+```
+
+### Plugin deaktivieren
+
+```http
+POST /_emdash/api/plugins/:pluginId/disable
+```
+
+## Fehlercodes
+
+| Code                   | HTTP-Status | Beschreibung              |
+| ---------------------- | ----------- | ------------------------ |
+| `NOT_FOUND`            | 404         | Ressource nicht gefunden       |
+| `VALIDATION_ERROR`     | 400         | Ungültige Eingabedaten       |
+| `UNAUTHORIZED`         | 401         | Fehlender oder ungültiger Token |
+| `FORBIDDEN`            | 403         | Unzureichende Berechtigungen |
+| `CONTENT_LIST_ERROR`   | 500         | Inhaltsauflistung fehlgeschlagen   |
+| `CONTENT_CREATE_ERROR` | 500         | Inhaltserstellung fehlgeschlagen |
+| `CONTENT_UPDATE_ERROR` | 500         | Inhaltsaktualisierung fehlgeschlagen |
+| `CONTENT_DELETE_ERROR` | 500         | Inhaltslöschung fehlgeschlagen |
+| `MEDIA_LIST_ERROR`     | 500         | Medienauflistung fehlgeschlagen     |
+| `MEDIA_CREATE_ERROR`   | 500         | Medienerstellung fehlgeschlagen   |
+| `SCHEMA_ERROR`         | 400         | Schema-Operation fehlgeschlagen  |
+| `DUPLICATE_SLUG`       | 409         | Slug existiert bereits      |
+| `RESERVED_SLUG`        | 400         | Slug ist reserviert         |
+
+## Such-Endpunkte
+
+### Globale Suche
+
+```http
+GET /_emdash/api/search?q=hello+world
+```
+
+#### Parameter
+
+| Parameter     | Typ       | Beschreibung                      |
+| ------------- | -------- | -------------------------------- |
+| `q`           | `string` | Suchanfrage (erforderlich)          |
+| `collections` | `string` | Kommagetrennte Collection-Slugs |
+| `status`      | `string` | Nach Status filtern (Standard: published) |
+| `limit`       | `number` | Maximale Ergebnisse (Standard: 20)        |
+| `cursor`      | `string` | Paginierungs-Cursor                |
+
+#### Antwort
+
+```json
+{
+  "results": [
+    {
+      "collection": "posts",
+      "id": "01HXK5MZSN...",
+      "slug": "hello-world",
+      "title": "Hallo Welt",
+      "snippet": "...this is a <mark>hello</mark>
+ <mark>world</mark>
+ example...",
+      "score": 0.95
+    }
+  ],
+  "nextCursor": "eyJvZmZzZXQiOjIwfQ"
+}
+```
+
+### Suchvorschläge
+
+```http
+GET /_emdash/api/search/suggest?q=hel&limit=5
+```
+
+Gibt präfix-gematchte Titel für die Autovervollständigung zurück.
+
+### Suchindex neu aufbauen
+
+```http
+POST /_emdash/api/search/rebuild
+```
+
+Baut den FTS-Index für alle oder bestimmte Collections neu auf.
+
+### Suchstatistiken
+
+```http
+GET /_emdash/api/search/stats
+```
+
+Gibt die Anzahl der indizierten Dokumente pro Collection zurück.
+
+## Abschnitts-Endpunkte
+
+### Abschnitte auflisten
+
+```http
+GET /_emdash/api/sections
+GET /_emdash/api/sections?source=theme
+GET /_emdash/api/sections?search=newsletter
+```
+
+### Abschnitt abrufen
+
+```http
+GET /_emdash/api/sections/:slug
+```
+
+### Abschnitt erstellen
+
+```http
+POST /_emdash/api/sections
+Content-Type: application/json
+
+{
+  "slug": "my-section",
+  "title": "My Section",
+  "keywords": ["keyword1"],
+  "content": [...]
+}
+```
+
+### Abschnitt aktualisieren
+
+```http
+PUT /_emdash/api/sections/:slug
+```
+
+### Abschnitt löschen
+
+```http
+DELETE /_emdash/api/sections/:slug
+```
+
+## Einstellungs-Endpunkte
+
+### Alle Einstellungen abrufen
+
+```http
+GET /_emdash/api/settings
+```
+
+### Einstellungen aktualisieren
+
+```http
+POST /_emdash/api/settings
+Content-Type: application/json
+
+{
+  "siteTitle": "Meine Website",
+  "tagline": "Eine grossartige Website",
+  "postsPerPage": 10
+}
+```
+
+## Menü-Endpunkte
+
+### Menüs auflisten
+
+```http
+GET /_emdash/api/menus
+```
+
+### Menü abrufen
+
+```http
+GET /_emdash/api/menus/:name
+```
+
+### Menü erstellen
+
+```http
+POST /_emdash/api/menus
+Content-Type: application/json
+
+{
+  "name": "footer",
+  "label": "Footer Navigation"
+}
+```
+
+### Menü aktualisieren
+
+```http
+PUT /_emdash/api/menus/:name
+```
+
+### Menü löschen
+
+```http
+DELETE /_emdash/api/menus/:name
+```
+
+### Menüpunkt hinzufügen
+
+```http
+POST /_emdash/api/menus/:name/items
+Content-Type: application/json
+
+{
+  "type": "page",
+  "referenceCollection": "pages",
+  "referenceId": "page_about",
+  "label": "About Us"
+}
+```
+
+### Menüpunkte neu anordnen
+
+```http
+POST /_emdash/api/menus/:name/reorder
+Content-Type: application/json
+
+{
+  "items": [
+    { "id": "item_1", "parentId": null, "sortOrder": 0 },
+    { "id": "item_2", "parentId": null, "sortOrder": 1 },
+    { "id": "item_3", "parentId": "item_2", "sortOrder": 0 }
+  ]
+}
+```
+
+## Taxonomie-Endpunkte
+
+### Taxonomie-Definitionen auflisten
+
+```http
+GET /_emdash/api/taxonomies
+```
+
+### Taxonomie erstellen
+
+```http
+POST /_emdash/api/taxonomies
+Content-Type: application/json
+
+{
+  "name": "genre",
+  "label": "Genres",
+  "labelSingular": "Genre",
+  "hierarchical": true,
+  "collections": ["books", "movies"]
+}
+```
+
+### Begriffe auflisten
+
+```http
+GET /_emdash/api/taxonomies/:name/terms
+```
+
+### Begriff erstellen
+
+```http
+POST /_emdash/api/taxonomies/:name/terms
+Content-Type: application/json
+
+{
+  "slug": "tutorials",
+  "label": "Tutorials",
+  "parentId": "term_abc",
+  "description": "How-to guides"
+}
+```
+
+### Begriff aktualisieren
+
+```http
+PUT /_emdash/api/taxonomies/:name/terms/:slug
+```
+
+### Begriff löschen
+
+```http
+DELETE /_emdash/api/taxonomies/:name/terms/:slug
+```
+
+### Eintragsbegriffe setzen
+
+```http
+POST /_emdash/api/content/:collection/:id/terms/:taxonomy
+Content-Type: application/json
+
+{
+  "termIds": ["term_news", "term_featured"]
+}
+```
+
+## Widget-Bereichs-Endpunkte
+
+### Widget-Bereiche auflisten
+
+```http
+GET /_emdash/api/widget-areas
+```
+
+### Widget-Bereich abrufen
+
+```http
+GET /_emdash/api/widget-areas/:name
+```
+
+### Widget-Bereich erstellen
+
+```http
+POST /_emdash/api/widget-areas
+Content-Type: application/json
+
+{
+  "name": "sidebar",
+  "label": "Hauptseitenleiste",
+  "description": "Appears on posts"
+}
+```
+
+### Widget-Bereich löschen
+
+```http
+DELETE /_emdash/api/widget-areas/:name
+```
+
+### Widget hinzufügen
+
+```http
+POST /_emdash/api/widget-areas/:name/widgets
+Content-Type: application/json
+
+{
+  "type": "content",
+  "title": "Ueber",
+  "content": [...]
+}
+```
+
+### Widget aktualisieren
+
+```http
+PUT /_emdash/api/widget-areas/:name/widgets/:id
+```
+
+### Widget löschen
+
+```http
+DELETE /_emdash/api/widget-areas/:name/widgets/:id
+```
+
+### Widgets neu anordnen
+
+```http
+POST /_emdash/api/widget-areas/:name/reorder
+Content-Type: application/json
+
+{
+  "widgetIds": ["widget_1", "widget_2", "widget_3"]
+}
+```
+
+## Benutzerverwaltungs-Endpunkte
+
+### Benutzer auflisten
+
+```http
+GET /_emdash/api/admin/users
+GET /_emdash/api/admin/users?role=40
+GET /_emdash/api/admin/users?search=john
+```
+
+### Benutzer abrufen
+
+```http
+GET /_emdash/api/admin/users/:id
+```
+
+### Benutzer aktualisieren
+
+```http
+PATCH /_emdash/api/admin/users/:id
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "role": 40
+}
+```
+
+### Benutzer aktivieren
+
+```http
+POST /_emdash/api/admin/users/:id/enable
+```
+
+### Benutzer deaktivieren
+
+```http
+POST /_emdash/api/admin/users/:id/disable
+```
+
+## Authentifizierungs-Endpunkte
+
+### Einrichtungsstatus
+
+```http
+GET /_emdash/api/setup/status
+```
+
+Gibt zurück, ob die Einrichtung abgeschlossen ist und ob Benutzer existieren.
+
+### Passkey-Login
+
+```http
+POST /_emdash/api/auth/passkey/options
+```
+
+WebAuthn-Authentifizierungsoptionen abrufen.
+
+```http
+POST /_emdash/api/auth/passkey/verify
+Content-Type: application/json
+
+{
+  "id": "credential-id",
+  "rawId": "...",
+  "response": {...},
+  "type": "public-key"
+}
+```
+
+Passkey verifizieren und Sitzung erstellen.
+
+### Magic Link
+
+```http
+POST /_emdash/api/auth/magic-link/send
+Content-Type: application/json
+
+{
+  "email": "user@example.com"
+}
+```
+
+```http
+GET /_emdash/api/auth/magic-link/verify?token=xxx
+```
+
+### Abmelden
+
+```http
+POST /_emdash/api/auth/logout
+```
+
+### Aktueller Benutzer
+
+```http
+GET /_emdash/api/auth/me
+```
+
+### Benutzer einladen
+
+```http
+POST /_emdash/api/auth/invite
+Content-Type: application/json
+
+{
+  "email": "newuser@example.com",
+  "role": 30
+}
+```
+
+### Passkey-Verwaltung
+
+```http
+GET /_emdash/api/auth/passkey
+```
+
+Passkeys des Benutzers auflisten.
+
+```http
+POST /_emdash/api/auth/passkey/register/options
+POST /_emdash/api/auth/passkey/register/verify
+```
+
+Neuen Passkey registrieren.
+
+```http
+PATCH /_emdash/api/auth/passkey/:id
+Content-Type: application/json
+
+{
+  "name": "MacBook Pro"
+}
+```
+
+Passkey umbenennen.
+
+```http
+DELETE /_emdash/api/auth/passkey/:id
+```
+
+Passkey löschen.
+
+## Import-Endpunkte
+
+### WordPress-Export analysieren
+
+```http
+POST /_emdash/api/import/wordpress/analyze
+Content-Type: multipart/form-data
+
+file: <WXR-Datei>
+```
+
+### WordPress-Import ausführen
+
+```http
+POST /_emdash/api/import/wordpress/execute
+Content-Type: application/json
+
+{
+  "analysisId": "...",
+  "options": {
+    "includeMedia": true,
+    "includeTaxonomies": true,
+    "includeMenus": true
+  }
+}
+```
+
+## Ratenbegrenzung
+
+API-Endpunkte können je nach Bereitstellungskonfiguration ratenbeschränkt sein. Bei Ratenbegrenzung enthalten Antworten:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 60
+```
+
+## CORS
+
+Die API unterstützt CORS für Browseranfragen. Konfigurieren Sie erlaubte Ursprünge in Ihrer Bereitstellung.

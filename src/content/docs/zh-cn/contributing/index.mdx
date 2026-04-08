@@ -1,0 +1,459 @@
+---
+title: 为 EmDash 贡献代码
+description: 架构概览、本地开发设置和贡献指南。
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+本指南涵盖如何设置本地开发环境、理解代码库架构以及为 EmDash 贡献代码。
+
+## 仓库结构
+
+EmDash 是一个 **pnpm monorepo**，包含多个包：
+
+```
+emdash/
+├── packages/
+│   ├── core/              # emdash — Astro integration, APIs, admin (main package)
+│   ├── auth/              # @emdash-cms/auth — Authentication (passkeys, OAuth, magic links)
+│   ├── cloudflare/        # @emdash-cms/cloudflare — Cloudflare adapter + sandbox runner
+│   ├── admin/             # @emdash-cms/admin — Admin React SPA
+│   ├── create-emdash/   # create-emdash — project scaffolder
+│   ├── gutenberg-to-portable-text/ # WordPress block → Portable Text converter
+│   └── plugins/           # First-party plugins (each subdirectory is its own package)
+├── demos/
+│   ├── simple/            # emdash-demo — primary dev/test demo (Node.js)
+│   ├── cloudflare/        # Cloudflare Workers demo
+│   └── ...                # plugins-demo, showcase, wordpress-import
+└── docs/                  # Documentation site (Starlight)
+```
+
+主包是 `packages/core`。它包含：
+
+```
+packages/core/src/
+├── astro/
+│   ├── integration/       # Astro integration entry point + virtual module generation
+│   ├── middleware/        # Auth, setup check, request context (ALS)
+│   └── routes/
+│       ├── api/           # REST API route handlers
+│       └── admin-shell.astro # Admin SPA shell
+├── database/
+│   ├── migrations/        # Numbered migration files (001_initial.ts, ...)
+│   │   └── runner.ts      # StaticMigrationProvider — register migrations here
+│   ├── repositories/      # Data access layer (content, media, settings, ...)
+│   └── types.ts           # Kysely Database type
+├── plugins/
+│   ├── types.ts           # Plugin API types
+│   ├── define-plugin.ts   # definePlugin()
+│   ├── context.ts         # PluginContext factory
+│   ├── hooks.ts           # HookPipeline
+│   ├── manager.ts         # PluginManager (trusted plugins)
+│   └── sandbox/           # Sandbox interface + no-op runner
+├── schema/
+│   └── registry.ts        # SchemaRegistry — manages ec_* tables
+├── media/                 # Media providers (local, types)
+├── auth/                  # Challenge store, OAuth state store
+├── query.ts               # getEmDashCollection, getEmDashEntry
+├── loader.ts              # Astro LiveLoader implementation
+└── emdash-runtime.ts    # EmDashRuntime — central orchestrator
+```
+
+## 先决条件
+
+- **Node.js** 22 或更高版本
+- **pnpm** 10 或更高版本
+- **Git**
+
+```bash
+# Install pnpm if you don't have it
+npm install -g pnpm
+```
+
+## 本地设置
+
+<Steps>
+
+1. **克隆仓库**
+
+    ```bash
+   git clone <repository-url>
+   cd emdash
+   ```
+
+2. **安装依赖**
+
+    ```bash
+   pnpm install
+   ```
+
+3. **构建包**（运行演示前必需）
+
+    ```bash
+   pnpm build
+   ```
+
+4. **填充演示数据库** (`demos/simple/`)
+
+    ```bash
+   pnpm --filter emdash-demo seed
+   ```
+
+5. **启动开发服务器**
+
+    ```bash
+   pnpm --filter emdash-demo dev
+   ```
+
+6. **打开管理界面**
+
+    访问 [http://localhost:4321/_emdash/admin](http://localhost:4321/_emdash/admin)
+
+    在开发模式下，使用开发绕过端点来跳过通行密钥认证：
+
+    ```
+   http://localhost:4321/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin
+   ```
+
+</Steps>
+
+## 开发工作流
+
+### 监视模式
+
+对于包开发，请与演示一起使用监视模式：
+
+```bash
+# Terminal 1: Watch packages/core for changes
+pnpm --filter emdash dev
+
+# Terminal 2: Run the demo (demos/simple/)
+pnpm --filter emdash-demo dev
+```
+
+### 运行测试
+
+<Tabs>
+<TabItem label="所有测试">
+```bash
+pnpm test
+```
+</TabItem>
+<TabItem label="仅核心包">
+```bash
+pnpm --filter emdash test
+```
+</TabItem>
+<TabItem label="监视模式">
+```bash
+pnpm --filter emdash test --watch
+```
+</TabItem>
+<TabItem label="E2E 测试">
+```bash
+pnpm test:e2e
+```
+</TabItem>
+</Tabs>
+
+### 类型检查和代码检查
+
+```bash
+# Type check TypeScript packages
+pnpm typecheck
+
+# Type check Astro demos
+pnpm typecheck:demos
+
+# Fast lint (< 1s) — run after every edit
+pnpm lint:quick
+
+# Full lint with type-aware rules (~10s) — run before commits
+pnpm lint:json
+```
+
+<Aside type="caution">
+  每次编辑后，类型检查必须通过。提交前请运行 `pnpm typecheck`。
+</Aside>
+
+### 代码格式化
+
+```bash
+pnpm format
+```
+
+EmDash 使用 **oxfmt**（Oxc 格式化器）。配置位于 `.oxfmtrc.json` 中。使用制表符，而非空格。
+
+## 架构概览
+
+### 核心概念
+
+**D1 是唯一可信源。** 模式存在于两个系统表中：
+- `_emdash_collections` — 集合元数据
+- `_emdash_fields` — 字段定义
+
+当你创建一个集合时，EmDash 会运行 `ALTER TABLE` 来创建一个具有类型化列的真实 `ec_*` 表。这里没有采用 EAV（实体-属性-值）方法。
+
+**中间件链**（每个请求按顺序执行）：
+
+1. **运行时初始化** — 创建数据库连接，初始化 `EmDashRuntime`
+2. **设置检查** — 如果未配置，则重定向到设置向导
+3. **认证** — 验证会话，填充 `locals.user`
+4. **请求上下文** — 为预览/编辑模式设置 AsyncLocalStorage
+
+**处理程序层：** 业务逻辑位于 `api/handlers/*.ts` 中。路由文件是薄包装器，负责解析输入、调用处理程序并格式化响应。处理程序返回 `ApiResponse<T> = { success: boolean; data?: T; error?: { code, message } }`。
+
+### 关键文件
+
+| 文件 | 用途 |
+|------|---------|
+| `src/astro/integration/index.ts` | Astro 集成入口点；生成虚拟模块 |
+| `src/emdash-runtime.ts` | 核心运行时；协调数据库、插件、存储 |
+| `src/schema/registry.ts` | 管理 `ec_*` 表的创建/修改 |
+| `src/database/migrations/runner.ts` | StaticMigrationProvider；在此注册新迁移 |
+| `src/plugins/manager.ts` | 加载并协调受信任的插件 |
+
+### 数据库模式
+
+EmDash 使用 **Kysely** 处理所有查询。关键规则：
+
+```ts
+// CORRECT: parameterized values
+const post = await db
+  .selectFrom("ec_posts")
+  .selectAll()
+  .where("slug", "=", slug)  // parameterized
+  .executeTakeFirst();
+
+// CORRECT: validated identifier in raw SQL
+validateIdentifier(tableName);
+const result = await sql.raw(`SELECT * FROM ${tableName}`).execute(db);
+
+// WRONG: never interpolate unvalidated values into SQL
+const result = await sql.raw(`SELECT * FROM ${userInput}`).execute(db);
+```
+
+切勿将 `sql.raw()` 与字符串插值一起用于值。对标识符使用 `sql.ref()`，其他所有操作都使用 Kysely 流畅 API。
+
+### 添加迁移
+
+<Steps>
+
+1. 创建 `packages/core/src/database/migrations/NNN_description.ts`：
+
+    ```ts
+   import type { Kysely } from "kysely";
+
+   export async function up(db: Kysely<unknown>): Promise<void> {
+     await db.schema
+       .createTable("my_table")
+       .addColumn("id", "text", (col) => col.primaryKey())
+       .addColumn("name", "text", (col) => col.notNull())
+       .execute();
+   }
+
+   export async function down(db: Kysely<unknown>): Promise<void> {
+     await db.schema.dropTable("my_table").execute();
+   }
+   ```
+
+2. 在 `packages/core/src/database/migrations/runner.ts` 中注册它：
+
+    ```ts
+   import * as m018 from "./018_my_migration.js";
+
+   // Add to getMigrations() return value:
+   "018_my_migration": m018,
+   ```
+
+</Steps>
+
+<Aside>
+  迁移是静态导入的（非自动发现），以兼容 Workers 打包器。始终在 `runner.ts` 中注册新迁移。
+</Aside>
+
+### 添加 API 路由
+
+路由文件位于 `packages/core/src/astro/routes/api/` 中。遵循以下约定：
+
+```ts
+// packages/core/src/astro/routes/api/my-resource.ts
+import type { APIRoute } from "astro";
+import type { User } from "@emdash-cms/auth";
+import { apiError, handleError } from "#api/error.js";
+import { requirePerm } from "#api/authorize.js";
+import { parseBody } from "#api/parse.js";
+import { z } from "zod";
+
+export const prerender = false;
+
+const createInput = z.object({
+  name: z.string().min(1),
+});
+
+export const POST: APIRoute = async ({ request, locals }) => {
+  const { emdash } = locals;
+  const user = (locals as { user?: User }).user;
+
+  if (!emdash) return apiError("NOT_CONFIGURED", "EmDash is not initialized", 500);
+
+  // requirePerm returns a 403 Response if denied, or null if authorized
+  const denied = requirePerm(user, "content:edit_any");
+  if (denied) return denied;
+
+  const body = await parseBody(request, createInput);
+  if (body instanceof Response) return body;
+
+  try {
+    // business logic here
+    return Response.json({ success: true });
+  } catch (error) {
+    return handleError(error, "Failed to create resource", "CREATE_ERROR");
+  }
+};
+```
+
+然后在 `packages/core/src/astro/integration/routes.ts` 中注册该路由。
+
+### 插件开发
+
+插件使用 `definePlugin()` 定义，并在 Astro 配置中注册。完整 API 请参阅[插件系统文档](/zh-cn/plugins/overview/)。
+
+对于本地插件开发：
+
+```bash
+# Create a local plugin in packages/
+pnpm --filter emdash dev  # Watch mode
+```
+
+在演示的 `astro.config.mjs` 中链接你的插件：
+
+```ts
+import myPlugin from "../../packages/my-plugin/src/index.ts";
+
+emdash({
+  plugins: [myPlugin()],
+});
+```
+
+## 测试模式
+
+测试位于 `packages/core/tests/` 中。结构与源代码镜像对应：
+
+```
+tests/
+├── unit/          # Pure function tests
+├── integration/   # Real DB tests (in-memory SQLite)
+└── e2e/           # Playwright browser tests
+```
+
+**数据库测试使用真实的 SQLite**，而非模拟：
+
+```ts
+import { describe, it, beforeEach, afterEach } from "vitest";
+import { setupTestDatabase } from "../utils/test-db.js";
+import type { Kysely } from "kysely";
+import type { Database } from "../../src/database/types.js";
+
+describe("ContentRepository", () => {
+  let db: Kysely<Database>;
+
+  beforeEach(async () => {
+    db = await setupTestDatabase();
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  it("creates a content entry", async () => {
+    // test with real DB
+  });
+});
+```
+
+**E2E 测试** 使用 Playwright 并借助开发绕过进行认证：
+
+```ts
+await page.goto(
+  "http://localhost:4321/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin"
+);
+```
+
+## 代码约定
+
+### 导入
+
+始终对内部导入使用 `.js` 扩展名（ESM 要求）：
+
+```ts
+// Correct
+import { ContentRepository } from "../../database/repositories/content.js";
+
+// Wrong
+import { ContentRepository } from "../../database/repositories/content";
+```
+
+对仅类型导入使用 `import type`：
+
+```ts
+import type { Kysely } from "kysely";
+import type { User } from "@emdash-cms/auth";
+```
+
+### 错误处理
+
+在 API 路由中使用共享的错误工具：
+
+```ts
+// Error responses
+return apiError("NOT_FOUND", "Content not found", 404);
+
+// Catch blocks
+catch (error) {
+  return handleError(error, "Failed to update content", "CONTENT_UPDATE_ERROR");
+}
+```
+
+### 授权
+
+每个更改状态的路由都必须检查授权。使用 `#api/authorize.js` 中的 `requirePerm()` — 如果被拒绝，它返回一个 `Response`（403）；如果授权通过，则返回 `null`：
+
+```ts
+import { requirePerm } from "#api/authorize.js";
+
+const denied = requirePerm(user, "content:edit_any");
+if (denied) return denied;
+```
+
+对于所有权范围内的操作，使用 `requireOwnerPerm()`：
+
+```ts
+import { requireOwnerPerm } from "#api/authorize.js";
+
+const denied = requireOwnerPerm(user, item.authorId, "content:edit_own", "content:edit_any");
+if (denied) return denied;
+```
+
+## 提交和 PR 流程
+
+1. 从 `main` 创建功能分支
+2. 进行更改，确保 `pnpm typecheck` 和 `pnpm lint:json` 通过
+3. 运行相关测试
+4. 提交带有描述性信息的提交消息
+5. 打开一个以 `main` 为目标的 PR
+
+提交消息应描述*原因*，而不仅仅是*内容*：
+
+```
+# Good
+fix: prevent media MIME sniffing with X-Content-Type-Options header
+
+# Less good  
+fix: add header to media endpoint
+```
+
+## 获取帮助
+
+-   阅读 `AGENTS.md` 了解架构决策和代码模式
+-   查看[文档网站](https://docs.emdashcms.com)获取指南和 API 参考

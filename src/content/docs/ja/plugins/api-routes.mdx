@@ -1,0 +1,470 @@
+---
+title: プラグインAPIルート
+description: 管理UIや外部連携のために、プラグインからRESTエンドポイントを公開します。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+プラグインは、管理UIコンポーネントや外部統合用にAPIルートを公開できます。ルートはプラグインコンテキスト全体を受け取り、ストレージ、KV、コンテンツ、メディアにアクセスできます。
+
+<Aside type="note">
+	APIルートは**信頼済みプラグイン専用**の機能です。サンドボックス化されたプラグインはカスタムRESTエンドポイントを定義できません。代わりにBlock Kit管理ページとフックを使用してください。
+</Aside>
+
+## ルートの定義
+
+`routes`オブジェクト内でルートを定義します:
+
+```typescript
+import { definePlugin } from "emdash";
+import { z } from "astro/zod";
+
+export default definePlugin({
+	id: "forms",
+	version: "1.0.0",
+
+	storage: {
+		submissions: {
+			indexes: ["formId", "status", "createdAt"],
+		},
+	},
+
+	routes: {
+		// シンプルなルート
+		status: {
+			handler: async (ctx) => {
+				return { ok: true, plugin: ctx.plugin.id };
+			},
+		},
+
+		// 入力検証付きルート
+		submissions: {
+			input: z.object({
+				formId: z.string().optional(),
+				limit: z.number().default(50),
+				cursor: z.string().optional(),
+			}),
+			handler: async (ctx) => {
+				const { formId, limit, cursor } = ctx.input;
+
+				const result = await ctx.storage.submissions!.query({
+					where: formId ? { formId } : undefined,
+					orderBy: { createdAt: "desc" },
+					limit,
+					cursor,
+				});
+
+				return {
+					items: result.items,
+					cursor: result.cursor,
+					hasMore: result.hasMore,
+				};
+			},
+		},
+	},
+});
+```
+
+## ルートURL
+
+ルートは `/_emdash/api/plugins/<plugin-id>/<route-name>` にマウントされます:
+
+| プラグインID | ルート名          | URL                                        |
+| --------- | --------------- | ------------------------------------------ |
+| `forms`   | `status`        | `/_emdash/api/plugins/forms/status`      |
+| `forms`   | `submissions`   | `/_emdash/api/plugins/forms/submissions` |
+| `seo`     | `settings/save` | `/_emdash/api/plugins/seo/settings/save` |
+
+ルート名にはスラッシュを含めてネストされたパスを指定できます。
+
+## ルートハンドラー
+
+ハンドラーは、プラグインコンテキストに加えてリクエスト固有のデータを含む `RouteContext` を受け取ります:
+
+```typescript
+interface RouteContext extends PluginContext {
+	input: TInput; // Validated input (from body or query params)
+	request: Request; // Original Request object
+}
+```
+
+### 戻り値
+
+JSONシリアライズ可能な任意の値を返します:
+
+```typescript
+// Object
+return { success: true, data: items };
+
+// 配列
+return items;
+
+// プリミティブ
+return 42;
+```
+
+<Aside type="note">
+	ルートは常にJSONを返します。レスポンスの `Content-Type` は `application/json` です。
+</Aside>
+
+### エラー
+
+エラーレスポンスを返すには例外をスローします:
+
+```typescript
+handler: async (ctx) => {
+	const item = await ctx.storage.items!.get(ctx.input.id);
+
+	if (!item) {
+		throw new Error("Item not found");
+		// 戻り値: { "error": "Item not found" } ステータス500
+	}
+
+	return item;
+};
+```
+
+カスタムステータスコードの場合は、`Response` をスローします:
+
+```typescript
+handler: async (ctx) => {
+	const item = await ctx.storage.items!.get(ctx.input.id);
+
+	if (!item) {
+		throw new Response(JSON.stringify({ error: "Not found" }), {
+			status: 404,
+			headers: { "Content-Type": "application/json" },
+		});
+	}
+
+	return item;
+};
+```
+
+## 入力検証
+
+Zodスキーマを使用して入力を検証および解析します:
+
+```typescript
+import { z } from "astro/zod";
+
+routes: {
+  create: {
+    input: z.object({
+      title: z.string().min(1).max(200),
+      email: z.string().email(),
+      priority: z.enum(["low", "medium", "high"]).default("medium"),
+      tags: z.array(z.string()).optional()
+    }),
+    handler: async (ctx) => {
+      // ctx.inputは型付けされ検証済み
+      const { title, email, priority, tags } = ctx.input;
+
+      await ctx.storage.items!.put(`item_${Date.now()}`, {
+        title,
+        email,
+        priority,
+        tags: tags ?? [],
+        createdAt: new Date().toISOString()
+      });
+
+      return { success: true };
+    }
+  }
+}
+```
+
+無効な入力は、検証の詳細を含む400エラーを返します。
+
+### 入力ソース
+
+入力は以下から解析されます:
+
+1. **POST/PUT/PATCH** — リクエストボディ（JSON）
+2. **GET/DELETE** — URLクエリパラメータ
+
+```typescript
+// POST /plugins/forms/create
+// Body: { "title": "Hello", "email": "user@example.com" }
+
+// GET /plugins/forms/list?limit=20&status=pending
+```
+
+## HTTPメソッド
+
+ルートはすべてのHTTPメソッドに応答します。`ctx.request.method` をチェックして異なる処理を行います:
+
+```typescript
+routes: {
+  item: {
+    input: z.object({
+      id: z.string()
+    }),
+    handler: async (ctx) => {
+      const { id } = ctx.input;
+
+      switch (ctx.request.method) {
+        case "GET":
+          return await ctx.storage.items!.get(id);
+
+        case "DELETE":
+          await ctx.storage.items!.delete(id);
+          return { deleted: true };
+
+        default:
+          throw new Response("Method not allowed", { status: 405 });
+      }
+    }
+  }
+}
+```
+
+## リクエストへのアクセス
+
+高度なユースケースでは完全な `Request` オブジェクトが利用可能です:
+
+```typescript
+handler: async (ctx) => {
+	const { request } = ctx;
+
+	// ヘッダー
+	const auth = request.headers.get("Authorization");
+
+	// URLパラメータ
+	const url = new URL(request.url);
+	const page = url.searchParams.get("page");
+
+	// メソッド
+	if (request.method !== "POST") {
+		throw new Response("POST required", { status: 405 });
+	}
+
+	// ボディ（入力スキーマを使用しない場合）
+	const body = await request.json();
+};
+```
+
+## 一般的なパターン
+
+### 設定ルート
+
+プラグイン設定を公開および更新します:
+
+```typescript
+routes: {
+  settings: {
+    handler: async (ctx) => {
+      const settings = await ctx.kv.list("settings:");
+      const result: Record<string, unknown> = {};
+
+      for (const entry of settings) {
+        result[entry.key.replace("settings:", "")] = entry.value;
+      }
+
+      return result;
+    }
+  },
+
+  "settings/save": {
+    input: z.object({
+      enabled: z.boolean().optional(),
+      apiKey: z.string().optional(),
+      maxItems: z.number().optional()
+    }),
+    handler: async (ctx) => {
+      const input = ctx.input;
+
+      for (const [key, value] of Object.entries(input)) {
+        if (value !== undefined) {
+          await ctx.kv.set(`settings:${key}`, value);
+        }
+      }
+
+      return { success: true };
+    }
+  }
+}
+```
+
+### ページネーション付きリスト
+
+カーソルベースのナビゲーションでページネーションされた結果を返します:
+
+```typescript
+routes: {
+  list: {
+    input: z.object({
+      limit: z.number().min(1).max(100).default(50),
+      cursor: z.string().optional(),
+      status: z.string().optional()
+    }),
+    handler: async (ctx) => {
+      const { limit, cursor, status } = ctx.input;
+
+      const result = await ctx.storage.items!.query({
+        where: status ? { status } : undefined,
+        orderBy: { createdAt: "desc" },
+        limit,
+        cursor
+      });
+
+      return {
+        items: result.items.map(item => ({
+          id: item.id,
+          ...item.data
+        })),
+        cursor: result.cursor,
+        hasMore: result.hasMore
+      };
+    }
+  }
+}
+```
+
+### 外部APIプロキシ
+
+外部サービスへのリクエストをプロキシします（`network:fetch` 機能が必要）:
+
+```typescript
+definePlugin({
+	id: "weather",
+	version: "1.0.0",
+
+	capabilities: ["network:fetch"],
+	allowedHosts: ["api.weather.example.com"],
+
+	routes: {
+		forecast: {
+			input: z.object({
+				city: z.string(),
+			}),
+			handler: async (ctx) => {
+				const apiKey = await ctx.kv.get<string>("settings:apiKey");
+
+				if (!apiKey) {
+					throw new Error("API key not configured");
+				}
+
+const response = await ctx.http!.fetch(
+  `https://api.weather.example.com/forecast?city=${ctx.input.city}`,
+  {
+    headers: { "X-API-Key": apiKey },
+  },
+);
+
+				if (!response.ok) {
+					throw new Error(`Weather API error: ${response.status}`);
+				}
+
+				return response.json();
+			},
+		},
+	},
+});
+```
+
+### アクションエンドポイント
+
+ワンオフアクションをトリガーします:
+
+```typescript
+routes: {
+	sync: {
+		handler: async (ctx) => {
+			ctx.log.info("Starting sync...");
+
+			const startTime = Date.now();
+			let synced = 0;
+
+			// 処理を実行...
+			const items = await fetchExternalItems(ctx);
+			for (const item of items) {
+				await ctx.storage.items!.put(item.id, item);
+				synced++;
+			}
+
+			const duration = Date.now() - startTime;
+			ctx.log.info("Sync complete", { synced, duration });
+
+			return {
+				success: true,
+				synced,
+				duration,
+			};
+		};
+	}
+}
+```
+
+## 管理UIからのルート呼び出し
+
+管理コンポーネントで `usePluginAPI()` フックを使用します:
+
+```typescript
+import { usePluginAPI } from "@emdash-cms/admin";
+
+function SettingsPage() {
+	const api = usePluginAPI();
+
+	const handleSave = async (settings) => {
+		await api.post("settings/save", settings);
+	};
+
+	const loadSettings = async () => {
+		return api.get("settings");
+	};
+}
+```
+
+このフックは自動的にプラグインIDをルートURLにプレフィックスとして追加します。
+
+## 外部からのルート呼び出し
+
+ルートは完全なURLでアクセス可能です:
+
+```bash
+# GET request
+curl https://your-site.com/_emdash/api/plugins/forms/submissions?limit=10
+
+# POSTリクエスト
+curl -X POST https://your-site.com/_emdash/api/plugins/forms/create \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Hello", "email": "user@example.com"}'
+```
+
+<Aside type="caution">
+	プラグインルートには組み込みの認証機能がありません。公開エンドポイントでは、独自の認証チェックを実装してください。管理者専用ルートの場合、管理者セッションミドルウェアが保護を提供します。
+</Aside>
+
+## ルートコンテキストリファレンス
+
+```typescript
+interface RouteContext<TInput = unknown> extends PluginContext {
+	/** Validated input from request body or query params */
+	input: TInput;
+
+	/** 元のリクエストオブジェクト */
+	request: Request;
+
+	/** プラグインメタデータ */
+	plugin: { id: string; version: string };
+
+	/** プラグインストレージコレクション */
+	storage: Record<string, StorageCollection>;
+
+	/** キーバリューストア */
+	kv: KVAccess;
+
+	/** コンテンツアクセス（機能が宣言されている場合） */
+	content?: ContentAccess;
+
+	/** メディアアクセス（機能が宣言されている場合） */
+	media?: MediaAccess;
+
+	/** HTTPクライアント（機能が宣言されている場合） */
+	http?: HttpAccess;
+
+	/** 構造化ロガー */
+	log: LogAccess;
+}
+```

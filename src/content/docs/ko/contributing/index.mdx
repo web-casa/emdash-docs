@@ -1,0 +1,459 @@
+---
+title: EmDash에 기여하기
+description: 아키텍처 개요, 로컬 개발 환경 설정 및 기여 가이드라인.
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+이 가이드는 로컬 개발 환경 설정 방법, 코드베이스 아키텍처 이해, 그리고 EmDash에 기여하는 방법을 다룹니다.
+
+## 저장소 구조
+
+EmDash는 **pnpm 모노레포**로 여러 패키지로 구성됩니다:
+
+```
+emdash/
+├── packages/
+│   ├── core/              # emdash — Astro integration, APIs, admin (main package)
+│   ├── auth/              # @emdash-cms/auth — Authentication (passkeys, OAuth, magic links)
+│   ├── cloudflare/        # @emdash-cms/cloudflare — Cloudflare adapter + sandbox runner
+│   ├── admin/             # @emdash-cms/admin — Admin React SPA
+│   ├── create-emdash/   # create-emdash — project scaffolder
+│   ├── gutenberg-to-portable-text/ # WordPress block → Portable Text converter
+│   └── plugins/           # First-party plugins (each subdirectory is its own package)
+├── demos/
+│   ├── simple/            # emdash-demo — primary dev/test demo (Node.js)
+│   ├── cloudflare/        # Cloudflare Workers demo
+│   └── ...                # plugins-demo, showcase, wordpress-import
+└── docs/                  # Documentation site (Starlight)
+```
+
+주요 패키지는 `packages/core`입니다. 여기에는 다음이 포함됩니다:
+
+```
+packages/core/src/
+├── astro/
+│   ├── integration/       # Astro integration entry point + virtual module generation
+│   ├── middleware/        # Auth, setup check, request context (ALS)
+│   └── routes/
+│       ├── api/           # REST API route handlers
+│       └── admin-shell.astro # Admin SPA shell
+├── database/
+│   ├── migrations/        # Numbered migration files (001_initial.ts, ...)
+│   │   └── runner.ts      # StaticMigrationProvider — register migrations here
+│   ├── repositories/      # Data access layer (content, media, settings, ...)
+│   └── types.ts           # Kysely Database type
+├── plugins/
+│   ├── types.ts           # Plugin API types
+│   ├── define-plugin.ts   # definePlugin()
+│   ├── context.ts         # PluginContext factory
+│   ├── hooks.ts           # HookPipeline
+│   ├── manager.ts         # PluginManager (trusted plugins)
+│   └── sandbox/           # Sandbox interface + no-op runner
+├── schema/
+│   └── registry.ts        # SchemaRegistry — manages ec_* tables
+├── media/                 # Media providers (local, types)
+├── auth/                  # Challenge store, OAuth state store
+├── query.ts               # getEmDashCollection, getEmDashEntry
+├── loader.ts              # Astro LiveLoader implementation
+└── emdash-runtime.ts    # EmDashRuntime — central orchestrator
+```
+
+## 필수 조건
+
+- **Node.js** 22 이상
+- **pnpm** 10 이상
+- **Git**
+
+```bash
+# Install pnpm if you don't have it
+npm install -g pnpm
+```
+
+## 로컬 설정
+
+<Steps>
+
+1. **저장소 클론하기**
+
+   ```bash
+   git clone <repository-url>
+   cd emdash
+   ```
+
+2. **의존성 설치하기**
+
+   ```bash
+   pnpm install
+   ```
+
+3. **패키지 빌드하기** (데모 실행 전 필수)
+
+   ```bash
+   pnpm build
+   ```
+
+4. **데모 데이터베이스 시드하기** (`demos/simple/`)
+
+   ```bash
+   pnpm --filter emdash-demo seed
+   ```
+
+5. **개발 서버 시작하기**
+
+   ```bash
+   pnpm --filter emdash-demo dev
+   ```
+
+6. **관리자 페이지 열기**
+
+   방문 [http://localhost:4321/_emdash/admin](http://localhost:4321/_emdash/admin)
+
+   개발 모드에서는 패스키 인증을 건너뛰기 위해 개발 우회 엔드포인트를 사용하세요:
+
+   ```
+   http://localhost:4321/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin
+   ```
+
+</Steps>
+
+## 개발 워크플로우
+
+### 감시 모드
+
+패키지 개발 시 데모와 함께 감시 모드를 사용하세요:
+
+```bash
+# Terminal 1: Watch packages/core for changes
+pnpm --filter emdash dev
+
+# 터미널 2: 데모 실행 (demos/simple/)
+pnpm --filter emdash-demo dev
+```
+
+### 테스트 실행
+
+<Tabs>
+<TabItem label="모든 테스트">
+```bash
+pnpm test
+```
+</TabItem>
+<TabItem label="코어 패키지만">
+```bash
+pnpm --filter emdash test
+```
+</TabItem>
+<TabItem label="감시 모드">
+```bash
+pnpm --filter emdash test --watch
+```
+</TabItem>
+<TabItem label="E2E 테스트">
+```bash
+pnpm test:e2e
+```
+</TabItem>
+</Tabs>
+
+### 타입 체크 및 린팅
+
+```bash
+# Type check TypeScript packages
+pnpm typecheck
+
+# Astro 데모 타입 체크
+pnpm typecheck:demos
+
+# 빠른 린트 (< 1초) — 매번 편집 후 실행
+pnpm lint:quick
+
+# 타입 인식 규칙을 포함한 전체 린트 (~10초) — 커밋 전 실행
+pnpm lint:json
+```
+
+<Aside type="caution">
+  모든 편집 라운드 후 타입 체크가 통과되어야 합니다. 커밋 전 `pnpm typecheck`를 실행하세요.
+</Aside>
+
+### 포맷팅
+
+```bash
+pnpm format
+```
+
+EmDash는 **oxfmt** (Oxc 포맷터)를 사용합니다. 설정은 `.oxfmtrc.json`에 있습니다. 탭을 사용하며, 공백은 사용하지 않습니다.
+
+## 아키텍처 개요
+
+### 핵심 개념
+
+**D1은 진리의 원천입니다.** 스키마는 두 개의 시스템 테이블에 존재합니다:
+- `_emdash_collections` — 컬렉션 메타데이터
+- `_emdash_fields` — 필드 정의
+
+컬렉션을 생성할 때, EmDash는 타입이 지정된 열을 가진 실제 `ec_*` 테이블을 생성하기 위해 `ALTER TABLE`을 실행합니다. EAV(Entity-Attribute-Value) 접근 방식은 사용하지 않습니다.
+
+**미들웨어 체인** (모든 요청에 대해 순서대로):
+
+1. **런타임 초기화** — 데이터베이스 연결 생성, `EmDashRuntime` 초기화
+2. **설정 확인** — 구성되지 않은 경우 설정 마법사로 리디렉션
+3. **인증** — 세션 검증, `locals.user` 채우기
+4. **요청 컨텍스트** — 미리보기/편집 모드를 위한 AsyncLocalStorage 설정
+
+**핸들러 계층:** 비즈니스 로직은 `api/handlers/*.ts`에 있습니다. 라우트 파일은 입력을 파싱하고, 핸들러를 호출하며, 응답을 형식화하는 얇은 래퍼입니다. 핸들러는 `ApiResponse<T> = { success: boolean; data?: T; error?: { code, message } }`를 반환합니다.
+
+### 주요 파일
+
+| 파일 | 목적 |
+|------|---------|
+| `src/astro/integration/index.ts` | Astro 통합 진입점; 가상 모듈 생성 |
+| `src/emdash-runtime.ts` | 중앙 런타임; DB, 플러그인, 스토리지 조정 |
+| `src/schema/registry.ts` | `ec_*` 테이블 생성/수정 관리 |
+| `src/database/migrations/runner.ts` | StaticMigrationProvider; 새로운 마이그레이션을 여기에 등록 |
+| `src/plugins/manager.ts` | 신뢰할 수 있는 플러그인 로드 및 조정 |
+
+### 데이터베이스 패턴
+
+EmDash는 모든 쿼리에 **Kysely**를 사용합니다. 주요 규칙:
+
+```ts
+// CORRECT: parameterized values
+const post = await db
+  .selectFrom("ec_posts")
+  .selectAll()
+  .where("slug", "=", slug)  // parameterized
+  .executeTakeFirst();
+
+// 올바름: raw SQL에서 검증된 식별자 사용
+validateIdentifier(tableName);
+const result = await sql.raw(`SELECT * FROM ${tableName}`).execute(db);
+
+// 잘못됨: 검증되지 않은 값을 SQL에 삽입하지 마세요
+const result = await sql.raw(`SELECT * FROM ${userInput}`).execute(db);
+```
+
+값에 대해 문자열 보간과 함께 `sql.raw()`를 사용하지 마세요. 식별자에는 `sql.ref()`를, 그 외 모든 것에는 Kysely 플루언트 API를 사용하세요.
+
+### 마이그레이션 추가
+
+<Steps>
+
+1. `packages/core/src/database/migrations/NNN_description.ts` 생성:
+
+   ```ts
+   import type { Kysely } from "kysely";
+
+   export async function up(db: Kysely<unknown>): Promise<void> {
+     await db.schema
+       .createTable("my_table")
+       .addColumn("id", "text", (col) => col.primaryKey())
+       .addColumn("name", "text", (col) => col.notNull())
+       .execute();
+   }
+
+   export async function down(db: Kysely<unknown>): Promise<void> {
+     await db.schema.dropTable("my_table").execute();
+   }
+   ```
+
+2. `packages/core/src/database/migrations/runner.ts`에 등록:
+
+   ```ts
+   import * as m018 from "./018_my_migration.js";
+
+   // getMigrations() 반환 값에 추가:
+   "018_my_migration": m018,
+   ```
+
+</Steps>
+
+<Aside>
+  마이그레이션은 Workers 번들러 호환성을 위해 정적으로 임포트됩니다(자동 검색 아님). 항상 새로운 마이그레이션을 `runner.ts`에 등록하세요.
+</Aside>
+
+### API 라우트 추가
+
+라우트 파일은 `packages/core/src/astro/routes/api/`에 있습니다. 다음 규칙을 따르세요:
+
+```ts
+// packages/core/src/astro/routes/api/my-resource.ts
+import type { APIRoute } from "astro";
+import type { User } from "@emdash-cms/auth";
+import { apiError, handleError } from "#api/error.js";
+import { requirePerm } from "#api/authorize.js";
+import { parseBody } from "#api/parse.js";
+import { z } from "zod";
+
+export const prerender = false;
+
+const createInput = z.object({
+  name: z.string().min(1),
+});
+
+export const POST: APIRoute = async ({ request, locals }) => {
+  const { emdash } = locals;
+  const user = (locals as { user?: User }).user;
+
+  if (!emdash) return apiError("NOT_CONFIGURED", "EmDash가 초기화되지 않았습니다", 500);
+
+  // requirePerm은 거부된 경우 403 Response를, 승인된 경우 null을 반환합니다
+  const denied = requirePerm(user, "content:edit_any");
+  if (denied) return denied;
+
+  const body = await parseBody(request, createInput);
+  if (body instanceof Response) return body;
+
+  try {
+    // 비즈니스 로직 작성
+    return Response.json({ success: true });
+  } catch (error) {
+    return handleError(error, "Failed to create resource", "CREATE_ERROR");
+  }
+};
+```
+
+그런 다음 `packages/core/src/astro/integration/routes.ts`에서 라우트를 등록하세요.
+
+### 플러그인 개발
+
+플러그인은 `definePlugin()`으로 정의되며 Astro 설정에 등록됩니다. 전체 API는 [플러그인 시스템 문서](/ko/plugins/overview/)를 참조하세요.
+
+로컬 플러그인 개발을 위해:
+
+```bash
+# Create a local plugin in packages/
+pnpm --filter emdash dev  # Watch mode
+```
+
+데모의 `astro.config.mjs`에서 플러그인을 링크하세요:
+
+```ts
+import myPlugin from "../../../packages/my-plugin/src/index.ts";
+
+emdash({
+  plugins: [myPlugin()],
+});
+```
+
+## 테스트 패턴
+
+테스트는 `packages/core/tests/`에 있습니다. 구조는 소스와 동일합니다:
+
+```
+tests/
+├── unit/          # Pure function tests
+├── integration/   # Real DB tests (in-memory SQLite)
+└── e2e/           # Playwright browser tests
+```
+
+**데이터베이스 테스트는 모의 객체가 아닌 실제 SQLite를 사용합니다**:
+
+```ts
+import { describe, it, beforeEach, afterEach } from "vitest";
+import { setupTestDatabase } from "../../utils/test-db.js";
+import type { Kysely } from "kysely";
+import type { Database } from "../../../src/database/types.js";
+
+describe("ContentRepository", () => {
+  let db: Kysely<Database>;
+
+  beforeEach(async () => {
+    db = await setupTestDatabase();
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  it("콘텐츠 항목을 생성합니다", async () => {
+    // test with real DB
+  });
+});
+```
+
+**E2E 테스트**는 인증을 위해 개발 우회 기능과 함께 Playwright를 사용합니다:
+
+```ts
+await page.goto(
+  "http://localhost:4321/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin"
+);
+```
+
+## 코드 규칙
+
+### 임포트
+
+내부 임포트에는 항상 `.js` 확장자를 사용하세요(ESM 요구사항):
+
+```ts
+// Correct
+import { ContentRepository } from "../../../database/repositories/content.js";
+
+// Wrong
+import { ContentRepository } from "../../../database/repositories/content";
+```
+
+타입 전용 임포트에는 `import type`을 사용하세요:
+
+```ts
+import type { Kysely } from "kysely";
+import type { User } from "@emdash-cms/auth";
+```
+
+### 오류 처리
+
+API 라우트에서 공유 오류 유틸리티를 사용하세요:
+
+```ts
+// Error responses
+return apiError("NOT_FOUND", "Content not found", 404);
+
+// Catch 블록
+catch (error) {
+  return handleError(error, "Failed to update content", "CONTENT_UPDATE_ERROR");
+}
+```
+
+### 권한 부여
+
+상태를 변경하는 모든 라우트는 권한 부여를 확인해야 합니다. `#api/authorize.js`의 `requirePerm()`을 사용하세요 — 거부된 경우 `Response`(403)를, 승인된 경우 `null`을 반환합니다:
+
+```ts
+import { requirePerm } from "#api/authorize.js";
+
+const denied = requirePerm(user, "content:edit_any");
+if (denied) return denied;
+```
+
+소유권 범위가 지정된 작업의 경우 `requireOwnerPerm()`을 사용하세요:
+
+```ts
+import { requireOwnerPerm } from "#api/authorize.js";
+
+const denied = requireOwnerPerm(user, item.authorId, "content:edit_own", "content:edit_any");
+if (denied) return denied;
+```
+
+## 커밋 및 PR 프로세스
+
+1. `main` 브랜치에서 기능 브랜치 생성
+2. 변경 사항 적용 후 `pnpm typecheck` 및 `pnpm lint:json` 통과 확인
+3. 관련 테스트 실행
+4. 설명이 포함된 메시지로 커밋
+5. `main`을 대상으로 PR 생성
+
+커밋 메시지는 *무엇을* 했는지뿐만 아니라 *왜* 했는지 설명해야 합니다:
+
+```
+# Good
+fix: prevent media MIME sniffing with X-Content-Type-Options header
+
+# 덜 좋은 예  
+fix: 미디어 엔드포인트에 헤더 추가
+```
+
+## 도움 받기
+
+- 아키텍처 결정 및 코드 패턴은 `AGENTS.md` 참조
+- 가이드 및 API 참조는 [문서 사이트](https://docs.emdashcms.com) 확인

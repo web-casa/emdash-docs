@@ -1,0 +1,264 @@
+---
+title: EmDash 入門
+description: EmDash をインストールし、セットアップウィザードを実行し、最初の投稿を公開し、基本的な Astro と EmDash のプロジェクト構造を学びます。
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+import dashboardImg from "../../../assets/screenshots/admin-dashboard.png";
+import postEditorImg from "../../../assets/screenshots/admin-post-editor.png";
+
+このガイドでは、インストールから最初の投稿を公開するまで、初めてのEmDashサイトを作成する手順を説明します。
+
+EmDashが適切なAstro CMSかどうかまだ検討中の場合は、まず[EmDashとは？](/ja/what-is-emdash/)または[最適なAstro CMS](/ja/best-astro-cms/)をお読みいただき、その後このセットアップガイドに戻ってください。
+
+## 前提条件
+
+- **Node.js** v22.12.0 以上（奇数バージョンはサポートされていません）
+- **npm**、**pnpm**、または **yarn**
+- コードエディタ（VS Code推奨）
+
+## 新規プロジェクトの作成
+
+<Tabs>
+<TabItem label="npm">
+```bash 
+npm create emdash@latest
+```
+</TabItem>
+<TabItem label="pnpm">
+```
+bash 
+pnpm create emdash@latest
+```
+</TabItem>
+<TabItem label="yarn">
+```
+bash 
+yarn create emdash
+```
+</TabItem>
+</Tabs>
+
+プロンプトに従ってプロジェクト名を付け、設定を行ってください。
+
+## 開発サーバーの起動
+
+<Steps>
+
+1. プロジェクトディレクトリに移動します：
+
+   ```bash
+   cd my-emdash-site
+   ```
+
+2. 依存関係をインストールします：
+
+   ```bash
+   npm install
+   ```
+
+3. 開発サーバーを起動します：
+
+   ```bash
+   npm run dev
+   ```
+
+4. ブラウザで `http://localhost:4321`` を開きます
+
+</Steps>
+
+## セットアップウィザードの完了
+
+管理パネルに初めてアクセスすると、EmDashのセットアップウィザードが初期設定を案内します：
+
+<Steps>
+
+1. `http://localhost:4321/_emdash/admin`` に移動します
+
+2. セットアップウィザードにリダイレクトされます。以下を入力してください：
+   - **サイトタイトル** — サイトの名前
+   - **タグライン** — 短い説明
+   - **管理者メールアドレス** — あなたのメールアドレス
+
+3. **サイト作成**をクリックしてパスキーを登録します
+
+4. ブラウザがTouch ID、Face ID、Windows Hello、またはセキュリティキーを使用したパスキーの作成を促します
+
+</Steps>
+
+パスキーが登録されると、ログイン状態になり管理ダッシュボードにリダイレクトされます。
+
+<img src={dashboardImg.src} alt="EmDash admin dashboard showing content overview, recent activity, and navigation sidebar" />
+
+<Aside>
+	EmDashはパスワードの代わりにパスキー認証を使用します。パスキーはより安全で、ブラウザの組み込みパスワードマネージャーと連携します。詳細は[認証ガイド](/ja/guides/authentication/)をご覧ください。
+</Aside>
+
+## 最初の投稿
+
+<Steps>
+
+1. 管理サイドバーで、コンテンツの下の**投稿**をクリックします。
+
+2. **新規投稿**をクリックします。
+
+3. タイトルを入力し、リッチテキストエディターを使用してコンテンツを記述します。
+
+   <img src={postEditorImg.src} alt="EmDash post editor with rich text toolbar and publish sidebar" />
+
+4. ステータスを**公開**に設定し、**保存**をクリックします。
+
+5. サイトのホームページにアクセスして、投稿がライブで表示されていることを確認します—再ビルドは不要です！
+
+</Steps>
+
+<Aside type="tip">
+	EmDashはライブコンテンツコレクションを使用します。変更はサイトを再ビルドすることなく即座に反映されます。
+</Aside>
+
+## プロジェクト構造
+
+EmDashプロジェクトは、いくつかの追加要素を含む標準的なAstro構造に従います：
+
+```
+my-emdash-site/
+├── astro.config.mjs      # Astro + EmDash configuration
+├── src/
+│   ├── live.config.ts    # Live Collections configuration
+│   ├── pages/
+│   │   ├── index.astro   # Homepage
+│   │   └── posts/
+│   │       └── [...slug].astro  # Dynamic post pages
+│   ├── layouts/
+│   │   └── Base.astro    # Base layout
+│   └── components/       # Your Astro components
+├── .emdash/
+│   ├── seed.json         # Template seed file
+│   └── types.ts          # Generated TypeScript types
+└── package.json
+```
+
+## 設定ファイル
+
+### astro.config.mjs
+
+ここでEmDashをAstro統合として設定します：
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+### src/live.config.ts
+
+ここでEmDashをAstroのコンテンツシステムに接続します：
+
+```
+ts title="src/live.config.ts"
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({ loader: emdashLoader() }),
+};
+```
+
+<Aside>
+	EmDashは単一の `_emdash` コレクションを使用し、内部的にコンテンツタイプ（投稿、ページ、商品など）にルーティングします。これにより `live.config.ts` を最小限に保ちます。
+</Aside>
+
+### 環境変数
+
+本番環境へのデプロイには、以下を設定する必要があります：
+
+```bash
+# Required for authentication
+EMDASH_AUTH_SECRET=your-secret-here
+
+# オプション: コンテンツプレビュー用
+EMDASH_PREVIEW_SECRET=your-preview-secret
+```
+
+安全な認証シークレットを生成するには：
+
+```bash
+npx emdash auth secret
+```
+
+## ページでのコンテンツクエリ
+
+AstroページでEmDashのクエリ関数を使用します。これらはAstroのライブコレクションパターンに従い、コレクションには `{ entries, error }` を、単一エントリーには `{ entry, error }` を返します：
+
+```
+astro title="src/pages/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import Base from "../../layouts/Base.astro";
+
+const { entries: posts } = await getEmDashCollection("posts");
+---
+
+<Base title="ホーム">
+  <h1>最新の投稿</h1>
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/posts/${post.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+単一エントリーの場合：
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+
+if (!post) {
+  return Astro.redirect("/404");
+}
+---
+
+<h1>{post.data.title}</h1>
+```
+
+## TypeScript型の生成
+
+完全な型安全性のために、データベーススキーマから型を生成します：
+
+```bash
+npx emdash types
+```
+
+これにより、すべてのコレクションのインターフェースを含む `.emdash/types.ts` が作成されます。エディタがフィールド名を自動補完し、型エラーを検出するようになります。
+
+## 次のステップ
+
+これで動作するEmDashサイトができました！次に進むべき場所は以下の通りです：
+
+- **[コアコンセプト](/ja/concepts/architecture/)** — EmDashの内部動作を理解する
+- **[コンテンツの操作](/ja/guides/working-with-content/)** — コンテンツのクエリとレンダリングを学ぶ
+- **[メディアライブラリ](/ja/guides/media-library/)** — 画像やファイルのアップロードと管理
+- **[ブログの作成](/ja/guides/create-a-blog/)** — カテゴリとタグを含む完全なブログを構築する
+- **[Cloudflareへのデプロイ](/ja/deployment/cloudflare/)** — サイトを本番環境に移行する

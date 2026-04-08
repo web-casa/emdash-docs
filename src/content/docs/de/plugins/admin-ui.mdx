@@ -1,0 +1,401 @@
+---
+title: Admin-Benutzeroberfläche
+description: Fügen Sie Admin-Seiten und Widgets für die Übersicht zum EmDash-Admin-Oberfläche hinzu.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Plugins können das Admin-Oberfläche mit benutzerdefinierten Seiten und Widgets für die Übersicht erweitern. Dabei handelt es sich um React-Komponenten, die zusammen mit der Kern-Admin-Funktionalität gerendert werden.
+
+## Admin-Einstiegspunkt
+
+Plugins mit Admin-UI exportieren Komponenten über einen `admin`-Einstiegspunkt:
+
+```typescript title="src/admin.tsx"
+import { SEOSettingsPage } from "../../plugins/components/SEOSettingsPage";
+import { SEODashboardWidget } from "../../plugins/components/SEODashboardWidget";
+
+// Widgets für die Übersicht
+export const widgets = {
+	"seo-overview": SEODashboardWidget,
+};
+
+// Admin-Seiten
+export const pages = {
+	"/settings": SEOSettingsPage,
+};
+```
+
+Konfigurieren Sie den Einstiegspunkt in `package.json`:
+
+```json title="package.json"
+{
+	"exports": {
+		".": "./dist/index.js",
+		"./admin": "./dist/admin.js"
+	}
+}
+```
+
+Verweisen Sie darauf in Ihrer Plugin-Definition:
+
+```typescript title="src/index.ts"
+definePlugin({
+	id: "seo",
+	version: "1.0.0",
+
+	admin: {
+		entry: "@my-org/plugin-seo/admin",
+		pages: [{ path: "/settings", label: "SEO-Einstellungen", icon: "settings" }],
+		widgets: [{ id: "seo-overview", title: "SEO-Überblick", size: "half" }],
+	},
+});
+```
+
+## Admin-Seiten
+
+Admin-Seiten sind React-Komponenten, die den Plugin-Kontext über Hooks erhalten.
+
+### Seiten-Definition
+
+Definieren Sie Seiten in `admin.pages`:
+
+```typescript
+admin: {
+	pages: [
+		{
+			path: "/settings", // URL-Pfad relativ zur Plugin-Basis
+			label: "Einstellungen", // Beschriftung in der Seitenleiste
+			icon: "settings", // Symbolname (optional)
+		},
+		{
+			path: "/reports",
+			label: "Berichte",
+			icon: "chart",
+		},
+	];
+}
+```
+
+Seiten werden unter `/_emdash/admin/plugins/<plugin-id>/<path>` eingebunden.
+
+### Seiten-Komponente
+
+```typescript title="src/components/SettingsPage.tsx"
+import { useState, useEffect } from "react";
+import { usePluginAPI } from "@emdash-cms/admin";
+
+export function SettingsPage() {
+  const api = usePluginAPI();
+  const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get("settings").then(setSettings);
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    await api.post("settings/save", settings);
+    setSaving(false);
+  };
+
+  return (
+    <div>
+      <h1>Plugin-Einstellungen</h1>
+
+      <label>
+        Seitentitel
+        <input
+          type="text"
+          value={settings.siteTitle || ""}
+          onChange={(e) => setSettings({ ...settings, siteTitle: e.target.value })}
+        />
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={settings.enabled ?? true}
+          onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
+        />
+        Aktiviert
+      </label>
+
+      <button onClick={handleSave} disabled={saving}>
+        {saving ? "Speichert..." : "Einstellungen speichern"}
+      </button>
+    </div>
+  );
+}
+```
+
+### Plugin-API-Hook
+
+Verwenden Sie `usePluginAPI()`, um die Routen Ihres Plugins aufzurufen:
+
+```typescript
+import { usePluginAPI } from "@emdash-cms/admin";
+
+function MyComponent() {
+	const api = usePluginAPI();
+
+	// GET-Anfrage an Plugin-Route
+	const data = await api.get("status");
+
+	// POST-Anfrage mit Body
+	await api.post("settings/save", { enabled: true });
+
+	// Mit URL-Parametern
+	const result = await api.get("history?limit=50");
+}
+```
+
+Der Hook fügt automatisch das Plugin-ID-Präfix zu den Routen-URLs hinzu.
+
+## Widgets für die Übersicht
+
+Widgets erscheinen in der Admin-Übersicht und liefern Informationen auf einen Blick.
+
+### Widget-Definition
+
+Definieren Sie Widgets in `admin.widgets`:
+
+```typescript
+admin: {
+	widgets: [
+		{
+				id: "seo-overview", // Eindeutige Widget-ID
+				title: "SEO-Überblick", // Widget-Titel (optional)
+			size: "half", // "full" | "half" | "third"
+		},
+	];
+}
+```
+
+### Widget-Komponente
+
+```typescript title="src/components/SEOWidget.tsx"
+import { useState, useEffect } from "react";
+import { usePluginAPI } from "@emdash-cms/admin";
+
+export function SEOWidget() {
+  const api = usePluginAPI();
+  const [data, setData] = useState({ score: 0, issues: [] });
+
+  useEffect(() => {
+    api.get("analyze").then(setData);
+  }, []);
+
+  return (
+    <div className="widget-content">
+      <div className="score">{data.score}%</div>
+      <ul>
+        {data.issues.map((issue, i) => (
+          <li key={i}>{issue.message}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### Widget-Größen
+
+| Größe   | Beschreibung               |
+| ------- | ------------------------- |
+| `full`  | Volle Breite der Übersicht    |
+| `half`  | Halbe Breite der Übersicht    |
+| `third` | Ein Drittel der Übersichtsbreite |
+
+Widgets werden basierend auf der Bildschirmbreite automatisch umbrochen.
+
+## Export-Struktur
+
+Der Admin-Einstiegspunkt exportiert zwei Objekte:
+
+```typescript title="src/admin.tsx"
+import { SettingsPage } from "../../plugins/components/SettingsPage";
+import { ReportsPage } from "../../plugins/components/ReportsPage";
+import { StatusWidget } from "../../plugins/components/StatusWidget";
+import { OverviewWidget } from "../../plugins/components/OverviewWidget";
+
+// Seiten nach Pfad
+export const pages = {
+	"/settings": SettingsPage,
+	"/reports": ReportsPage,
+};
+
+// Widgets nach ID
+export const widgets = {
+	status: StatusWidget,
+	overview: OverviewWidget,
+};
+```
+
+<Aside type="caution">
+	Seitenpfade in `pages` müssen mit den `path`-Werten in `admin.pages` übereinstimmen. Widget-Schlüssel müssen mit den
+	`id`-Werten in `admin.widgets` übereinstimmen.
+</Aside>
+
+## Verwenden von Admin-Komponenten
+
+EmDash bietet vorgefertigte Komponenten für gängige Muster:
+
+```typescript
+import {
+  Card,
+  Button,
+  Input,
+  Select,
+  Toggle,
+  Table,
+  Pagination,
+  Alert,
+  Loading
+} from "@emdash-cms/admin";
+
+function SettingsPage() {
+  return (
+    <Card title="Einstellungen">
+      <Input label="API-Schlüssel" type="password" />
+      <Toggle label="Aktiviert" defaultChecked />
+      <Button variant="primary">Speichern</Button>
+    </Card>
+  );
+}
+```
+
+## Automatisch generierte Einstellungs-UI
+
+Wenn Ihr Plugin nur ein Einstellungsformular benötigt, verwenden Sie `admin.settingsSchema` ohne benutzerdefinierte Komponenten:
+
+```typescript
+admin: {
+  settingsSchema: {
+	    apiKey: { type: "secret", label: "API-Schlüssel" },
+	    enabled: { type: "boolean", label: "Aktiviert", default: true }
+  }
+}
+```
+
+EmDash generiert automatisch eine Einstellungsseite. Fügen Sie nur dann benutzerdefinierte Seiten hinzu, wenn Sie Funktionalität über grundlegende Einstellungen hinaus benötigen.
+
+## Navigation
+
+Plugin-Seiten erscheinen in der Admin-Seitenleiste unter dem Plugin-Namen. Die Reihenfolge entspricht dem `admin.pages`-Array.
+
+```typescript
+admin: {
+	pages: [
+		{ path: "/settings", label: "Einstellungen", icon: "settings" }, // Erste
+		{ path: "/history", label: "Verlauf", icon: "history" }, // Zweite
+		{ path: "/reports", label: "Berichte", icon: "chart" }, // Dritte
+	];
+}
+```
+
+## Build-Konfiguration
+
+Admin-Komponenten benötigen einen separaten Build-Einstiegspunkt. Konfigurieren Sie Ihren Bundler:
+
+<Tabs>
+  <TabItem label="tsdown">
+```typescript title="tsdown.config.ts"
+export default {
+  entry: {
+    index: "src/index.ts",
+    admin: "src/admin.tsx"
+  },
+  format: "esm",
+  dts: true,
+  external: ["react", "react-dom", "emdash", "@emdash-cms/admin"]
+};
+```
+  </TabItem>
+  <TabItem label="tsup">
+```typescript title="tsup.config.ts"
+export default {
+  entry: ["src/index.ts", "src/admin.tsx"],
+  format: "esm",
+  dts: true,
+  external: ["react", "react-dom", "emdash", "@emdash-cms/admin"]
+};
+```
+  </TabItem>
+</Tabs>
+
+Behalten Sie React und `@emdash-cms/admin` als externe Abhängigkeiten, um doppelte Bundles zu vermeiden.
+
+## Plugin aktivieren/deaktivieren
+
+Wenn ein Plugin im Admin deaktiviert ist:
+
+- Seitenleisten-Links werden ausgeblendet
+- Widgets der Übersicht werden nicht gerendert
+- Admin-Seiten geben 404 zurück
+- Backend-Hooks werden weiterhin ausgeführt (aus Datensicherheitsgründen)
+
+Plugins können ihren Aktivierungsstatus überprüfen:
+
+```typescript
+const enabled = await ctx.kv.get<boolean>("_emdash:enabled");
+```
+
+## Beispiel: Vollständige Admin-UI
+
+```typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+
+	capabilities: ["network:fetch"],
+	allowedHosts: ["api.analytics.example.com"],
+
+	storage: {
+		events: { indexes: ["type", "createdAt"] },
+	},
+
+	admin: {
+		entry: "@my-org/plugin-analytics/admin",
+		settingsSchema: {
+			trackingId: { type: "string", label: "Tracking-ID" },
+			enabled: { type: "boolean", label: "Aktiviert", default: true },
+		},
+		pages: [
+				{ path: "/dashboard", label: "Übersicht", icon: "chart" },
+			{ path: "/settings", label: "Einstellungen", icon: "settings" },
+		],
+		widgets: [{ id: "events-today", title: "Ereignisse heute", size: "third" }],
+	},
+
+	routes: {
+		stats: {
+			handler: async (ctx) => {
+				const today = new Date().toISOString().split("T")[0];
+				const count = await ctx.storage.events!.count({
+					createdAt: { gte: today },
+				});
+				return { today: count };
+			},
+		},
+	},
+});
+```
+
+```typescript title="src/admin.tsx"
+import { EventsWidget } from "../../plugins/components/EventsWidget";
+import { DashboardPage } from "../../plugins/components/DashboardPage";
+import { SettingsPage } from "../../plugins/components/SettingsPage";
+
+export const widgets = {
+	"events-today": EventsWidget,
+};
+
+export const pages = {
+	"/dashboard": DashboardPage,
+	"/settings": SettingsPage,
+};
+```

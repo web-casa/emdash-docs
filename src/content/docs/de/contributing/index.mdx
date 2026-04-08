@@ -1,0 +1,459 @@
+---
+title: Beiträge zu EmDash
+description: Architekturübersicht, lokale Entwicklungsumgebung und Richtlinien für Beiträge.
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Diese Anleitung behandelt die Einrichtung einer lokalen Entwicklungsumgebung, das Verständnis der Codebasis-Architektur und das Beitragen zu EmDash.
+
+## Repository-Struktur
+
+EmDash ist ein **pnpm-Monorepo** mit mehreren Paketen:
+
+```
+emdash/
+├── packages/
+│   ├── core/              # emdash — Astro-Integration, APIs und Admin-Oberfläche (Hauptpaket)
+│   ├── auth/              # @emdash-cms/auth — Authentifizierung (Passkeys, OAuth, Magic Links)
+│   ├── cloudflare/        # @emdash-cms/cloudflare — Cloudflare-Adapter und Sandbox-Runner
+│   ├── admin/             # @emdash-cms/admin — React-SPA für die Administration
+│   ├── create-emdash/     # create-emdash — Projekt-Scaffolder
+│   ├── gutenberg-to-portable-text/ # Konverter von WordPress-Blöcken zu Portable Text
+│   └── plugins/           # Plugins der ersten Partei; jedes Unterverzeichnis ist ein eigenes Paket
+├── demos/
+│   ├── simple/            # emdash-demo — wichtigste Demo für Entwicklung und Tests (Node.js)
+│   ├── cloudflare/        # Demo für Cloudflare Workers
+│   └── ...                # plugins-demo, showcase, wordpress-import
+└── docs/                  # Dokumentationsseite (Starlight)
+```
+
+Das Hauptpaket ist `packages/core`. Es enthält:
+
+```
+packages/core/src/
+├── astro/
+│   ├── integration/       # Einstiegspunkt der Astro-Integration und Generierung virtueller Module
+│   ├── middleware/        # Auth, Setup-Prüfung und Anfragekontext (ALS)
+│   └── routes/
+│       ├── api/           # Handler für REST-API-Routen
+│       └── admin-shell.astro # Shell der Admin-SPA
+├── database/
+│   ├── migrations/        # nummerierte Migrationsdateien (001_initial.ts, ...)
+│   │   └── runner.ts      # StaticMigrationProvider — hier werden Migrationen registriert
+│   ├── repositories/      # Datenzugriffsschicht (content, media, settings, ...)
+│   └── types.ts           # Kysely-Datenbanktyp
+├── plugins/
+│   ├── types.ts           # Typen der Plugin-API
+│   ├── define-plugin.ts   # definePlugin()
+│   ├── context.ts         # Factory für PluginContext
+│   ├── hooks.ts           # HookPipeline
+│   ├── manager.ts         # PluginManager (vertrauenswürdige Plugins)
+│   └── sandbox/           # Sandbox-Schnittstelle und No-op-Runner
+├── schema/
+│   └── registry.ts        # SchemaRegistry — verwaltet ec_*-Tabellen
+├── media/                 # Medienanbieter (local, types)
+├── auth/                  # Challenge-Store und OAuth-State-Store
+├── query.ts               # getEmDashCollection, getEmDashEntry
+├── loader.ts              # Implementierung von Astro LiveLoader
+└── emdash-runtime.ts      # EmDashRuntime — zentraler Orchestrator
+```
+
+## Voraussetzungen
+
+- **Node.js** 22 oder höher
+- **pnpm** 10 oder höher
+- **Git**
+
+```bash
+# Installieren Sie pnpm, falls es noch nicht vorhanden ist
+npm install -g pnpm
+```
+
+## Lokale Einrichtung
+
+<Steps>
+
+1. **Repository klonen**
+
+   ```bash
+   git clone <repository-url>
+   cd emdash
+   ```
+
+2. **Abhängigkeiten installieren**
+
+   ```bash
+   pnpm install
+   ```
+
+3. **Pakete bauen** (erforderlich vor dem Starten der Demo)
+
+   ```bash
+   pnpm build
+   ```
+
+4. **Demo-Datenbank befüllen** (`demos/simple/`)
+
+   ```bash
+   pnpm --filter emdash-demo seed
+   ```
+
+5. **Entwicklungsserver starten**
+
+   ```bash
+   pnpm --filter emdash-demo dev
+   ```
+
+6. **Admin öffnen**
+
+   Besuchen Sie [http://localhost:4321/_emdash/admin](http://localhost:4321/_emdash/admin)
+
+   Im Entwicklungsmodus können Sie den Dev-Bypass-Endpunkt nutzen, um die Passkey-Authentifizierung zu umgehen:
+
+   ```
+   http://localhost:4321/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin
+   ```
+
+</Steps>
+
+## Entwicklungs-Workflow
+
+### Watch-Modus
+
+Für die Paketentwicklung verwenden Sie den Watch-Modus parallel zur Demo:
+
+```bash
+# Terminal 1: packages/core auf Änderungen beobachten
+pnpm --filter emdash dev
+
+# Terminal 2: Demo ausführen (demos/simple/)
+pnpm --filter emdash-demo dev
+```
+
+### Tests ausführen
+
+<Tabs>
+<TabItem label="Alle Tests">
+```bash
+pnpm test
+```
+</TabItem>
+<TabItem label="Nur Core-Paket">
+```bash
+pnpm --filter emdash test
+```
+</TabItem>
+<TabItem label="Watch-Modus">
+```bash
+pnpm --filter emdash test --watch
+```
+</TabItem>
+<TabItem label="E2E-Tests">
+```bash
+pnpm test:e2e
+```
+</TabItem>
+</Tabs>
+
+### Typüberprüfung und Linting
+
+```bash
+# TypeScript-Pakete typprüfen
+pnpm typecheck
+
+# Astro-Demos typüberprüfen
+pnpm typecheck:demos
+
+# Schnelles Linting (< 1s) — nach jeder Bearbeitung ausführen
+pnpm lint:quick
+
+# Vollständiges Linting mit typbewussten Regeln (~10s) — vor Commits ausführen
+pnpm lint:json
+```
+
+<Aside type="caution">
+  Die Typüberprüfung muss nach jeder Bearbeitungsrunde bestehen. Führen Sie `pnpm typecheck` vor dem Committen aus.
+</Aside>
+
+### Formatierung
+
+```bash
+pnpm format
+```
+
+EmDash verwendet **oxfmt** (Oxc-Formatter). Die Konfiguration befindet sich in `.oxfmtrc.json`. Tabulatoren, keine Leerzeichen.
+
+## Architektur-Überblick
+
+### Kernkonzepte
+
+**D1 ist die Quelle der Wahrheit.** Das Schema lebt in zwei Systemtabellen:
+- `_emdash_collections` — Metadaten der Sammlungen
+- `_emdash_fields` — Felddefinitionen
+
+Wenn Sie eine Sammlung erstellen, führt EmDash `ALTER TABLE` aus, um eine echte `ec_*`-Tabelle mit typisierten Spalten zu erstellen. Es wird kein EAV-Ansatz (Entity-Attribute-Value) verwendet.
+
+**Middleware-Kette** (in dieser Reihenfolge für jede Anfrage):
+
+1. **Runtime-Initialisierung** — erstellt Datenbankverbindung, initialisiert `EmDashRuntime`
+2. **Setup-Prüfung** — leitet zum Setup-Assistenten weiter, falls nicht konfiguriert
+3. **Authentifizierung** — validiert die Sitzung, füllt `locals.user`
+4. **Anfragekontext** — richtet AsyncLocalStorage für Vorschau-/Bearbeitungsmodus ein
+
+**Handler-Schicht:** Die Geschäftslogik befindet sich in `api/handlers/*.ts`. Routendateien sind dünne Wrapper, die Eingaben parsen, Handler aufrufen und Antworten formatieren. Handler geben `ApiResponse<T> = { success: boolean; data?: T; error?: { code, message } }` zurück.
+
+### Wichtige Dateien
+
+| Datei | Zweck |
+|------|---------|
+| `src/astro/integration/index.ts` | Astro-Integration-Einstiegspunkt; generiert virtuelle Module |
+| `src/emdash-runtime.ts` | Zentrale Runtime; orchestriert DB, Plugins, Storage |
+| `src/schema/registry.ts` | Verwaltet die Erstellung/Modifikation von `ec_*`-Tabellen |
+| `src/database/migrations/runner.ts` | StaticMigrationProvider; neue Migrationen hier registrieren |
+| `src/plugins/manager.ts` | Lädt und orchestriert vertrauenswürdige Plugins |
+
+### Datenbank-Muster
+
+EmDash verwendet **Kysely** für alle Abfragen. Wichtige Regeln:
+
+```ts
+// KORREKT: parametrisierte Werte
+const post = await db
+  .selectFrom("ec_posts")
+  .selectAll()
+  .where("slug", "=", slug)  // parametrisiert
+  .executeTakeFirst();
+
+// KORREKT: validierter Bezeichner in Raw-SQL
+validateIdentifier(tableName);
+const result = await sql.raw(`SELECT * FROM ${tableName}`).execute(db);
+
+// FALSCH: niemals unvalidierte Werte in SQL interpolieren
+const result = await sql.raw(`SELECT * FROM ${userInput}`).execute(db);
+```
+
+Verwenden Sie niemals `sql.raw()` mit String-Interpolation für Werte. Verwenden Sie `sql.ref()` für Bezeichner und die Kysely-Fluent-API für alles andere.
+
+### Eine Migration hinzufügen
+
+<Steps>
+
+1. Erstellen Sie `packages/core/src/database/migrations/NNN_beschreibung.ts`:
+
+   ```ts
+   import type { Kysely } from "kysely";
+
+   export async function up(db: Kysely<unknown>): Promise<void> {
+     await db.schema
+       .createTable("my_table")
+       .addColumn("id", "text", (col) => col.primaryKey())
+       .addColumn("name", "text", (col) => col.notNull())
+       .execute();
+   }
+
+   export async function down(db: Kysely<unknown>): Promise<void> {
+     await db.schema.dropTable("my_table").execute();
+   }
+   ```
+
+2. Registrieren Sie sie in `packages/core/src/database/migrations/runner.ts`:
+
+   ```ts
+   import * as m018 from "./018_my_migration.js";
+
+   // Zum Rückgabewert von getMigrations() hinzufügen:
+   "018_meine_migration": m018,
+   ```
+
+</Steps>
+
+<Aside>
+  Migrationen werden statisch importiert (nicht automatisch erkannt) für die Kompatibilität mit dem Workers-Bundler. Registrieren Sie neue Migrationen immer in `runner.ts`.
+</Aside>
+
+### Eine API-Route hinzufügen
+
+Routendateien befinden sich in `packages/core/src/astro/routes/api/`. Befolgen Sie diese Konventionen:
+
+```ts
+// packages/core/src/astro/routes/api/my-resource.ts
+import type { APIRoute } from "astro";
+import type { User } from "@emdash-cms/auth";
+import { apiError, handleError } from "#api/error.js";
+import { requirePerm } from "#api/authorize.js";
+import { parseBody } from "#api/parse.js";
+import { z } from "zod";
+
+export const prerender = false;
+
+const createInput = z.object({
+  name: z.string().min(1),
+});
+
+export const POST: APIRoute = async ({ request, locals }) => {
+  const { emdash } = locals;
+  const user = (locals as { user?: User }).user;
+
+  if (!emdash) return apiError("NOT_CONFIGURED", "EmDash ist nicht initialisiert", 500);
+
+  // requirePerm gibt eine 403 Response zurück, wenn verweigert, oder null, wenn autorisiert
+  const denied = requirePerm(user, "content:edit_any");
+  if (denied) return denied;
+
+  const body = await parseBody(request, createInput);
+  if (body instanceof Response) return body;
+
+  try {
+    // Geschäftslogik hier
+    return Response.json({ success: true });
+  } catch (error) {
+    return handleError(error, "Ressource konnte nicht erstellt werden", "CREATE_ERROR");
+  }
+};
+```
+
+Registrieren Sie die Route dann in `packages/core/src/astro/integration/routes.ts`.
+
+### Plugin-Entwicklung
+
+Plugins werden mit `definePlugin()` definiert und in der Astro-Konfiguration registriert. Siehe die [Plugin-System-Dokumentation](/de/plugins/overview/) für die vollständige API.
+
+Für die lokale Plugin-Entwicklung:
+
+```bash
+# Lokales Plugin in packages/ anlegen
+pnpm --filter emdash dev  # Watch-Modus
+```
+
+Verknüpfen Sie Ihr Plugin in der `astro.config.mjs` der Demo:
+
+```ts
+import myPlugin from "../../../packages/my-plugin/src/index.ts";
+
+emdash({
+  plugins: [myPlugin()],
+});
+```
+
+## Test-Muster
+
+Tests befinden sich in `packages/core/tests/`. Die Struktur spiegelt die Quelle wider:
+
+```
+tests/
+├── unit/          # Tests für reine Funktionen
+├── integration/   # Tests mit echter Datenbank (SQLite im Speicher)
+└── e2e/           # Browser-Tests mit Playwright
+```
+
+**Datenbanktests verwenden echte SQLite**, keine Mocks:
+
+```ts
+import { describe, it, beforeEach, afterEach } from "vitest";
+import { setupTestDatabase } from "../../utils/test-db.js";
+import type { Kysely } from "kysely";
+import type { Database } from "../../../src/database/types.js";
+
+describe("ContentRepository", () => {
+  let db: Kysely<Database>;
+
+  beforeEach(async () => {
+    db = await setupTestDatabase();
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  it("erstellt einen Content-Eintrag", async () => {
+    // mit echter Datenbank testen
+  });
+});
+```
+
+**E2E-Tests** verwenden Playwright mit dem Dev-Bypass für die Authentifizierung:
+
+```ts
+await page.goto(
+  "http://localhost:4321/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin"
+);
+```
+
+## Code-Konventionen
+
+### Imports
+
+Verwenden Sie immer `.js`-Erweiterungen für interne Imports (ESM-Anforderung):
+
+```ts
+// Korrekt
+import { ContentRepository } from "../../../database/repositories/content.js";
+
+// Falsch
+import { ContentRepository } from "../../../database/repositories/content";
+```
+
+Verwenden Sie `import type` für rein typbasierte Imports:
+
+```ts
+import type { Kysely } from "kysely";
+import type { User } from "@emdash-cms/auth";
+```
+
+### Fehlerbehandlung
+
+Verwenden Sie die gemeinsamen Fehler-Hilfsfunktionen in API-Routen:
+
+```ts
+// Fehlerantworten
+return apiError("NOT_FOUND", "Inhalt nicht gefunden", 404);
+
+// Catch-Blöcke
+catch (error) {
+  return handleError(error, "Inhalt konnte nicht aktualisiert werden", "CONTENT_UPDATE_ERROR");
+}
+```
+
+### Autorisierung
+
+Jede zustandsändernde Route muss die Autorisierung prüfen. Verwenden Sie `requirePerm()` aus `#api/authorize.js` — es gibt eine `Response` (403) zurück, wenn verweigert, oder `null`, wenn autorisiert:
+
+```ts
+import { requirePerm } from "#api/authorize.js";
+
+const denied = requirePerm(user, "content:edit_any");
+if (denied) return denied;
+```
+
+Für eigentümerbezogene Aktionen verwenden Sie `requireOwnerPerm()`:
+
+```ts
+import { requireOwnerPerm } from "#api/authorize.js";
+
+const denied = requireOwnerPerm(user, item.authorId, "content:edit_own", "content:edit_any");
+if (denied) return denied;
+```
+
+## Commit- und PR-Prozess
+
+1. Erstellen Sie einen Feature-Branch von `main`
+2. Nehmen Sie Änderungen vor und stellen Sie sicher, dass `pnpm typecheck` und `pnpm lint:json` erfolgreich sind
+3. Führen Sie relevante Tests aus
+4. Committen Sie mit einer beschreibenden Nachricht
+5. Öffnen Sie einen PR, der auf `main` abzielt
+
+Commit-Nachrichten sollten das *Warum* beschreiben, nicht nur das *Was*:
+
+```
+# Gut
+fix: prevent media MIME sniffing with X-Content-Type-Options header
+
+# Weniger gut  
+fix: add header to media endpoint
+```
+
+## Hilfe erhalten
+
+- Lesen Sie `AGENTS.md` für Architekturentscheidungen und Codemuster
+- Besuchen Sie die [Dokumentationsseite](https://docs.emdashcms.com) für Anleitungen und API-Referenz

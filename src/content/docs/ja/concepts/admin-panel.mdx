@@ -1,0 +1,369 @@
+---
+title: 管理パネル
+description: EmDash管理パネル—TanStack Router、TanStack Query、Kumoコンポーネントを使用したReact SPAです。
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDash 管理パネルは、Astro サイトに埋め込まれた React シングルページアプリケーションです。編集者と管理者のための完全なコンテンツ管理インターフェースを提供します。
+
+## アーキテクチャ概要
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                    Astro Shell                                 │
+│  /_emdash/admin/[...path].astro                              │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                    React SPA                             │  │
+│  │                                                          │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐   │  │
+│  │  │  TanStack   │  │  TanStack   │  │     Kumo        │   │  │
+│  │  │   Router    │  │   Query     │  │   Components    │   │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────────┘   │  │
+│  │                                                          │  │
+│  │  ┌────────────────────────────────────────────────────┐  │  │
+│  │  │              REST API Client                       │  │  │
+│  │  │           /_emdash/api/*                         │  │  │
+│  │  └────────────────────────────────────────────────────┘  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────┘
+```
+
+管理パネルは「大きな島」の React アプリです。Astro がシェルと認証を処理し、管理パネル内のすべてのナビゲーションとレンダリングはクライアントサイドで行われます。
+
+## 技術スタック
+
+| レイヤー       | 技術            | 目的                                  |
+| ----------- | --------------------- | ---------------------------------------- |
+| **ルーティング** | TanStack Router       | 型安全なクライアントサイドルーティング            |
+| **データ**    | TanStack Query        | サーバー状態、キャッシュ、ミューテーション         |
+| **UI**      | Kumo                  | アクセシブルなコンポーネント (Base UI + Tailwind) |
+| **テーブル**  | TanStack Table        | ソート、フィルタリング、ページネーション             |
+| **フォーム**   | React Hook Form + Zod | サーバースキーマと一致するバリデーション          |
+| **アイコン**   | Phosphor              | 一貫性のあるアイコン体系                     |
+| **エディター**  | TipTap                | リッチテキスト編集 (Portable Text)        |
+
+<Aside type="note">
+	Kumo は Cloudflare のデザインシステムで、Base UI プリミティブと Tailwind スタイリングで構築されています。管理パッケージの依存関係としてインストールされます。
+</Aside>
+
+## ルート構造
+
+管理パネルは `/_emdash/admin/` にマウントされ、クライアントサイドルーティングを使用します:
+
+| パス                       | 画面                      |
+| -------------------------- | --------------------------- |
+| `/`                        | ダッシュボード                   |
+| `/content/:collection`     | コンテンツ一覧                |
+| `/content/:collection/:id` | コンテンツエディター              |
+| `/content/:collection/new` | 新規エントリー                   |
+| `/media`                   | メディアライブラリ               |
+| `/content-types`           | スキーマビルダー (管理者のみ) |
+| `/menus`                   | ナビゲーションメニュー            |
+| `/widgets`                 | ウィジェットエリア                |
+| `/taxonomies`              | カテゴリー/タグ管理     |
+| `/settings`                | サイト設定               |
+| `/plugins/:pluginId/*`     | プラグインページ                |
+
+<Aside type="tip">
+	`/content-types` ルートは管理者のみに表示されます。編集者は管理権限のあるコンテンツのみを閲覧できます。
+</Aside>
+
+## マニフェスト駆動型 UI
+
+管理パネルは、コレクションやプラグインの知識をハードコードしません。代わりに、サーバーからマニフェストを取得します:
+
+```
+GET /_emdash/api/manifest
+```
+
+レスポンス:
+
+```json
+{
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Blog Posts",
+			"labelSingular": "Post",
+			"icon": "file-text",
+			"supports": ["drafts", "revisions", "preview"],
+			"fields": [
+				{ "slug": "title", "type": "string", "required": true },
+				{ "slug": "content", "type": "portableText" }
+			]
+		}
+	],
+	"plugins": [
+		{
+			"id": "audit-log",
+				"label": "監査ログ",
+				"adminPages": [{ "path": "history", "label": "監査履歴" }],
+				"widgets": [{ "id": "recent-activity", "title": "最近のアクティビティ" }]
+		}
+	],
+		"taxonomies": [{ "name": "category", "label": "カテゴリー", "hierarchical": true }],
+	"version": "abc123"
+}
+```
+
+管理パネルは、このマニフェストから完全にナビゲーション、フォーム、エディターを構築します。利点:
+
+- **スキーマ変更が即時反映** — 管理パネルの再ビルドは不要
+- **プラグイン UI が自動統合** — マニフェストからのページとウィジェット
+- **境界での型安全性** — Zod スキーマはサーバー側に保持
+
+## データフロー
+
+<Steps>
+	1. **管理 SPA の読み込み** — TanStack Router の初期化 2. **マニフェストの取得** — TanStack Query によるコレクション/プラグインメタデータのキャッシュ 3. **ナビゲーションの構築** — マニフェストからサイドバーを生成 4. **ユーザーのナビゲート** — クライアントサイドルーティング、ページ再読み込みなし 5. **データの取得** — TanStack Query が REST API からコンテンツをリクエスト 6. **フォームのレンダリング** — マニフェストのフィールド記述子からフィールドエディターを生成 7. **変更の送信** — TanStack Query によるミューテーション、楽観的更新 8. **サーバーでの検証** — サーバー側の Zod スキーマ、エラーは JSON として返却
+</Steps>
+
+## REST API エンドポイント
+
+管理パネルは REST API を通じてのみ通信します:
+
+### コンテンツ API
+
+| メソッド   | エンドポイント                                   | 目的              |
+| -------- | ------------------------------------------ | -------------------- |
+| `GET`    | `/api/content/:collection`                 | エントリー一覧         |
+| `POST`   | `/api/content/:collection`                 | エントリー作成         |
+| `GET`    | `/api/content/:collection/:id`             | エントリー取得            |
+| `PUT`    | `/api/content/:collection/:id`             | エントリー更新         |
+| `DELETE` | `/api/content/:collection/:id`             | エントリーの論理削除    |
+| `GET`    | `/api/content/:collection/:id/revisions`   | リビジョン一覧       |
+| `POST`   | `/api/content/:collection/:id/preview-url` | プレビュー URL 生成 |
+
+### スキーマ API
+
+| メソッド   | エンドポイント                                      | 目的            |
+| -------- | --------------------------------------------- | ------------------ |
+| `GET`    | `/api/schema`                                 | 完全なスキーマのエクスポート |
+| `GET`    | `/api/schema/collections`                     | コレクション一覧   |
+| `POST`   | `/api/schema/collections`                     | コレクション作成  |
+| `PUT`    | `/api/schema/collections/:slug`               | コレクション更新  |
+| `DELETE` | `/api/schema/collections/:slug`               | コレクション削除  |
+| `POST`   | `/api/schema/collections/:slug/fields`        | フィールド追加          |
+| `PUT`    | `/api/schema/collections/:slug/fields/:field` | フィールド更新       |
+| `DELETE` | `/api/schema/collections/:slug/fields/:field` | フィールド削除       |
+
+### メディア API
+
+| メソッド   | エンドポイント                 | 目的                 |
+| -------- | ------------------------ | ----------------------- |
+| `GET`    | `/api/media`             | メディアアイテム一覧        |
+| `POST`   | `/api/media/upload-url`  | 署名付きアップロード URL 取得   |
+| `POST`   | `/api/media/:id/confirm` | アップロード完了の確認 |
+| `DELETE` | `/api/media/:id`         | メディアアイテム削除       |
+| `GET`    | `/api/media/file/:key`   | メディアファイルの提供        |
+
+### その他の API
+
+| エンドポイント               | 目的                  |
+| ---------------------- | ------------------------ |
+| `/api/settings`        | サイト設定 (GET/POST) |
+| `/api/menus/*`         | ナビゲーションメニュー         |
+| `/api/widget-areas/*`  | ウィジェット管理        |
+| `/api/taxonomies/*`    | タクソノミーターム           |
+| `/api/admin/plugins/*` | プラグイン状態             |
+
+## ページネーション
+
+すべての一覧エンドポイントはカーソルベースのページネーションを使用します:
+
+```json
+{
+  "items": [...],
+  "nextCursor": "eyJpZCI6IjAxSjEyMzQ1NiJ9"
+}
+```
+
+次のページを取得:
+
+```
+GET /api/content/posts?cursor=eyJpZCI6IjAxSjEyMzQ1NiJ9
+```
+
+<Aside type="note">
+	カーソルページネーションは、リクエスト間でコンテンツが追加または削除された場合でも、一貫した結果を提供します。
+</Aside>
+
+## プラグイン管理UI
+
+プラグインは、ページとダッシュボードウィジェットを使用して管理パネルを拡張できます。この統合により、静的インポートを含む仮想モジュールが生成されます：
+
+```ts
+// virtual:emdash/plugin-admins (generated)
+import * as pluginAdmin0 from "@emdash-cms/plugin-seo/admin";
+import * as pluginAdmin1 from "@emdash-cms/plugin-analytics/admin";
+
+export const pluginAdmins = {
+	seo: pluginAdmin0,
+	analytics: pluginAdmin1,
+};
+```
+
+### プラグインページ
+
+プラグインページは `/_emdash/admin/plugins/:pluginId/*` の下にマウントされます：
+
+```tsx
+// @emdash-cms/plugin-seo/src/admin.tsx
+export const pages = [
+	{
+		path: "settings",
+		component: SEOSettingsPage,
+		label: "SEO Settings",
+	},
+];
+```
+
+レンダリング先： `/_emdash/admin/plugins/seo/settings`
+
+### ダッシュボードウィジェット
+
+プラグインはダッシュボードにウィジェットを追加できます：
+
+```tsx
+export const widgets = [
+	{
+		id: "seo-overview",
+		component: SEOWidget,
+		title: "SEO Overview",
+		size: "half", // "full" | "half" | "third"
+	},
+];
+```
+
+<Aside type="caution">
+	プラグインは、自身の名前空間（`/plugins/:pluginId/*`）の下にのみページをマウントできます。
+	コアの管理ルートを上書きすることはできません。
+</Aside>
+
+## 認証
+
+管理シェルルートは、Astroミドルウェアを介して認証を強制します：
+
+```ts
+// Simplified middleware logic
+export async function onRequest({ request, locals }, next) {
+	const session = await getSession(request);
+
+	if (request.url.includes("/_emdash/admin")) {
+		if (!session?.user) {
+			return redirect("/_emdash/admin/login");
+		}
+		locals.user = session.user;
+	}
+
+	return next();
+}
+```
+
+管理SPA自体はログインを処理しません。それはセッションクッキーを設定するAstroページです。
+
+## ロールベースアクセス
+
+異なるロールは管理パネルの異なる部分を閲覧できます：
+
+| ロール          | 表示されるセクション                           |
+| ------------- | ------------------------------------------ |
+| **編集者**    | ダッシュボード、割り当てられたコレクション、メディア     |
+| **管理者**     | + コンテンツタイプ、すべてのコレクション、設定 |
+| **開発者** | + CLIアクセス、生成されたタイプ              |
+
+マニフェストエンドポイントは、リクエストユーザーのロールに基づいてコレクションと機能をフィルタリングします。
+
+## コンテンツエディター
+
+コンテンツエディターは、フィールド定義に基づいて動的にフォームを生成します：
+
+```tsx
+// Simplified editor rendering
+function ContentEditor({ collection, fields }) {
+	return (
+		<form>
+			{fields.map((field) => (
+				<FieldWidget
+					key={field.slug}
+					type={field.type}
+					label={field.label}
+					required={field.required}
+					options={field.options}
+				/>
+			))}
+		</form>
+	);
+}
+```
+
+各フィールドタイプには対応するウィジェットがあります：
+
+| フィールドタイプ     | ウィジェット           |
+| -------------- | ---------------- |
+| `string`       | テキスト入力       |
+| `text`         | テキストエリア         |
+| `number`       | 数値入力     |
+| `boolean`      | トグルスイッチ    |
+| `datetime`     | 日付/時刻ピッカー |
+| `select`       | ドロップダウン         |
+| `multiSelect`  | マルチセレクト     |
+| `portableText` | TipTapエディター    |
+| `image`        | メディアピッカー     |
+| `reference`    | エントリーピッカー     |
+
+## リッチテキストエディター
+
+Portable Textフィールドは編集にTipTap（ProseMirror）を使用します：
+
+```
+User types → TipTap (ProseMirror JSON) → Save → Portable Text (DB)
+Load → Portable Text (DB) → TipTap (ProseMirror JSON) → Display
+```
+
+変換は、`portableTextToProsemirror()` および `prosemirrorToPortableText()` を介して、読み込み/保存の境界で行われます。
+
+サポートされているブロック：
+
+- 段落、見出し（H1-H6）
+- 箇条書きリストと番号付きリスト
+- ブロッククォート、コードブロック
+- 画像（メディアライブラリから）
+- リンク
+
+プラグインやインポートからの不明なブロックは、読み取り専用のプレースホルダーとして保持されます。
+
+## メディアライブラリ
+
+メディアライブラリは以下を提供します：
+
+- グリッドビューとリストビュー
+- タイプ、日付による検索とフィルタリング
+- ドラッグアンドドロップアップロード
+- メタデータ付き画像プレビュー
+- 一括選択と削除
+
+アップロードは、クライアントからストレージへの直接アップロードのために署名付きURLを使用します：
+
+<Steps>
+	1. **アップロードURLをリクエスト** — `POST /api/media/upload-url` 2. **直接アップロード** — クライアントがファイルを
+	署名付きURL（R2/S3）にPUTします 3. **アップロードを確認** — `POST /api/media/:id/confirm` 4. **サーバーがメタデータを抽出** — 寸法、MIMEタイプなど
+</Steps>
+
+このアプローチは、Workersのボディサイズ制限を回避し、リアルタイムのアップロード進捗を提供します。
+
+## 次のステップ
+
+<CardGrid>
+	<Card title="はじめに" icon="rocket">
+		[最初のEmDashサイトをセットアップする](/ja/getting-started/)。
+	</Card>
+	<Card title="プラグイン開発" icon="puzzle">
+		[管理UI拡張機能を構築する](/ja/plugins/admin-ui/)。
+	</Card>
+	<Card title="アーキテクチャ" icon="open-book">
+		完全な[システムアーキテクチャ](/ja/concepts/architecture/)を確認する。
+	</Card>
+</CardGrid>

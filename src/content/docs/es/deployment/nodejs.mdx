@@ -1,0 +1,169 @@
+---
+title: Desplegar en Node.js
+description: Despliega EmDash en cualquier plataforma de hosting compatible con Node.js.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash puede ejecutarse en cualquier plataforma de hosting con Node.js 22 o superior. Esta guía cubre un despliegue típico con SQLite y almacenamiento local o compatible con S3.
+
+## Requisitos previos
+
+- Node.js v22.12.0 o superior
+- Un proveedor de alojamiento Node.js o VPS
+
+## Configuración
+
+Configura EmDash para la implementación en Node.js:
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import node from "@astrojs/node";
+import emdash, { local, s3 } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	output: "server",
+	adapter: node({ mode: "standalone" }),
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data/emdash.db" }),
+			storage: local({
+				directory: "./data/uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+## Construir y ejecutar
+
+1. Construye el proyecto:
+
+```bash
+npm run build
+```
+
+2. Inicializa la base de datos:
+
+   ```bash
+   npx emdash init --database ./data/emdash.db
+   ```
+
+3. Inicia el servidor:
+
+   ```bash
+   node ./dist/server/entry.mjs
+   ```
+
+El servidor se ejecuta por defecto en `http://localhost:4321`.
+
+## Almacenamiento en Producción
+
+Para producción, usa almacenamiento compatible con S3 en lugar del sistema de archivos local:
+
+```js title="astro.config.mjs"
+import emdash, { s3 } from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: `file:${process.env.DATABASE_PATH}` }),
+			storage: s3({
+				endpoint: process.env.S3_ENDPOINT,
+				bucket: process.env.S3_BUCKET,
+				accessKeyId: process.env.S3_ACCESS_KEY_ID,
+				secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+				publicUrl: process.env.S3_PUBLIC_URL, // Optional CDN URL
+			}),
+		}),
+	],
+});
+```
+
+<Aside>
+	El almacenamiento compatible con S3 funciona con Cloudflare R2 (a través de la API S3), MinIO y otros servicios compatibles con S3.
+</Aside>
+
+## Docker
+
+Crea un `Dockerfile`:
+
+```dockerfile title="Dockerfile"
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+
+ENV HOST=0.0.0.0
+ENV PORT=4321
+
+EXPOSE 4321
+CMD ["node", "./dist/server/entry.mjs"]
+```
+
+Construye y ejecuta:
+
+```bash
+docker build -t my-emdash-site .
+docker run -p 4321:4321 -v emdash-data:/app/data my-emdash-site
+```
+
+## Variables de Entorno
+
+### Requeridas para producción
+
+| Variable | Descripción |
+| -------- | ----------- |
+| `EMDASH_AUTH_SECRET` | Firma cookies de sesión y tokens de autenticación. Genera con `npx emdash auth secret`. |
+| `EMDASH_PREVIEW_SECRET` | Firma URLs de vista previa para contenido en borrador. Genera con `npx emdash auth secret`. |
+
+### Base de Datos y Almacenamiento
+
+| Variable               | Descripción             | Ejemplo                    |
+| ---------------------- | ----------------------- | -------------------------- |
+| `DATABASE_PATH`        | Ruta a la base de datos SQLite | `/data/emdash.db`        |
+| `HOST`                 | Host del servidor       | `0.0.0.0`                  |
+| `PORT`                 | Puerto del servidor     | `4321`                     |
+| `S3_ENDPOINT`          | URL del endpoint S3     | `https://xxx.r2.cloudflarestorage.com` |
+| `S3_BUCKET`            | Nombre del bucket S3    | `my-media-bucket`          |
+| `S3_ACCESS_KEY_ID`     | Clave de acceso S3      | `AKIA...`                  |
+| `S3_SECRET_ACCESS_KEY` | Clave secreta S3        | `...`                      |
+| `S3_PUBLIC_URL`        | URL pública para medios | `https://cdn.example.com`  |
+
+<Aside type="caution">
+Nunca guardes secretos en tu repositorio. Usa la gestión de secretos de tu plataforma (variables de entorno, almacenes de secretos, etc.) para producción.
+</Aside>
+
+## Almacenamiento persistente
+
+SQLite requiere almacenamiento en disco persistente. Asegúrate de que tu plataforma de alojamiento proporcione:
+
+- Un volumen montado o disco persistente
+- Acceso de escritura al directorio de la base de datos
+- Mecanismos de respaldo para el archivo de base de datos
+
+<Aside type="caution">
+	Los sistemas de archivos efímeros perderán tu base de datos al reiniciar. Usa libSQL con una base de datos remota o almacenamiento persistente.
+</Aside>
+
+## Comprobaciones de salud
+
+Añade un endpoint de comprobación de salud para balanceadores de carga:
+
+```astro title="src/pages/health.ts"
+export const GET = () => {
+  return new Response("OK", { status: 200 });
+};
+```
+
+Configura tu plataforma para verificar `/health` para sondas de actividad.

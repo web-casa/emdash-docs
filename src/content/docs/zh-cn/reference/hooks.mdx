@@ -1,0 +1,713 @@
+---
+title: 钩子参考
+description: 用于扩展 EmDash 功能的插件钩子。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+钩子允许插件在内容、媒体、电子邮件、评论和页面生命周期的特定节点拦截并修改 EmDash 的行为。
+
+## 钩子概览
+
+| 钩子                     | 触发时机                               | 可修改内容        | 独占性     |
+| ------------------------ | ------------------------------------- | ----------------- | ---------- |
+| `content:beforeSave`     | 内容保存前                             | 内容数据          | 否         |
+| `content:afterSave`      | 内容保存后                             | 无                | 否         |
+| `content:beforeDelete`   | 内容删除前                             | 可取消            | 否         |
+| `content:afterDelete`    | 内容删除后                             | 无                | 否         |
+| `media:beforeUpload`     | 文件上传前                             | 文件元数据        | 否         |
+| `media:afterUpload`      | 文件上传后                             | 无                | 否         |
+| `cron`                   | 计划任务触发时                         | 无                | 否         |
+| `email:beforeSend`       | 邮件发送前                             | 消息，可取消      | 否         |
+| `email:deliver`          | 通过传输方式发送邮件                   | 无                | 是         |
+| `email:afterSend`        | 邮件成功发送后                         | 无                | 否         |
+| `comment:beforeCreate`   | 评论存储前                             | 评论，可取消      | 否         |
+| `comment:moderate`       | 决定评论审核状态                       | 状态              | 是         |
+| `comment:afterCreate`    | 评论存储后                             | 无                | 否         |
+| `comment:afterModerate`  | 管理员更改评论状态后                   | 无                | 否         |
+| `page:metadata`          | 渲染公共页面头部时                     | 贡献标签          | 否         |
+| `page:fragments`         | 渲染公共页面主体时                     | 注入脚本          | 否         |
+| `plugin:install`         | 插件首次安装时                         | 无                | 否         |
+| `plugin:activate`        | 插件启用时（安装后或重新启用）         | 无                | 否         |
+| `plugin:deactivate`      | 插件禁用时                             | 无                | 否         |
+| `plugin:uninstall`       | 插件移除时                             | 无                | 否         |
+
+## 内容钩子
+
+### `content:beforeSave`
+
+在内容保存到数据库前运行。用于验证、转换或丰富内容。
+
+```ts
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "my-plugin",
+	version: "1.0.0",
+	hooks: {
+		"content:beforeSave": async (event, ctx) => {
+			const { content, collection, isNew } = event;
+
+			// Add timestamps
+			if (isNew) {
+				content.createdBy = "system";
+			}
+			content.modifiedAt = new Date().toISOString();
+
+			// Return modified content
+			return content;
+		},
+	},
+});
+```
+
+#### 事件
+
+```ts
+interface ContentHookEvent {
+	content: Record<string, unknown>; // Content data
+	collection: string; // Collection slug
+	isNew: boolean; // True for creates, false for updates
+}
+```
+
+#### 返回值
+
+- 返回修改后的内容对象以应用更改
+- 返回 `void` 以保持原样通过
+
+### `content:afterSave`
+
+在内容保存后运行。用于副作用操作，如通知、缓存失效或外部同步。
+
+```ts
+hooks: {
+  "content:afterSave": async (event, ctx) => {
+    const { content, collection, isNew } = event;
+
+    if (collection === "posts" && content.status === "published") {
+      // Notify external service
+      await ctx.http?.fetch("https://api.example.com/notify", {
+        method: "POST",
+        body: JSON.stringify({ postId: content.id }),
+      });
+    }
+  },
+}
+```
+
+#### 返回值
+
+无需返回值。
+
+### `content:beforeDelete`
+
+在内容删除前运行。用于验证删除操作或阻止删除。
+
+```ts
+hooks: {
+  "content:beforeDelete": async (event, ctx) => {
+    const { id, collection } = event;
+
+    // Prevent deletion of protected content
+    const item = await ctx.content?.get(collection, id);
+    if (item?.data.protected) {
+      return false; // Cancel deletion
+    }
+
+    // Allow deletion
+    return true;
+  },
+}
+```
+
+#### 事件
+
+```ts
+interface ContentDeleteEvent {
+	id: string; // Entry ID
+	collection: string; // Collection slug
+}
+```
+
+#### 返回值
+
+- 返回 `false` 以取消删除
+- 返回 `true` 或 `void` 以允许删除
+
+### `content:afterDelete`
+
+在内容删除后运行。用于清理任务。
+
+```ts
+hooks: {
+  "content:afterDelete": async (event, ctx) => {
+    const { id, collection } = event;
+
+    // Clean up related data
+    await ctx.storage.relatedItems.delete(`${collection}:${id}`);
+  },
+}
+```
+
+## 媒体钩子
+
+### `media:beforeUpload`
+
+在文件上传前运行。用于验证、重命名或拒绝文件。
+
+```ts
+hooks: {
+  "media:beforeUpload": async (event, ctx) => {
+    const { file } = event;
+
+    // Reject files over 10MB
+    if (file.size > 10 * 1024 * 1024) {
+      throw new Error("File too large");
+    }
+
+    // Rename file
+    return {
+      name: `${Date.now()}-${file.name}`,
+      type: file.type,
+      size: file.size,
+    };
+  },
+}
+```
+
+#### 事件
+
+```ts
+interface MediaUploadEvent {
+	file: {
+		name: string; // Original filename
+		type: string; // MIME type
+		size: number; // Size in bytes
+	};
+}
+```
+
+#### 返回值
+
+- 返回修改后的文件元数据以应用更改
+- 返回 `void` 以保持原样通过
+- 抛出错误以拒绝上传
+
+### `media:afterUpload`
+
+在文件上传后运行。用于处理、生成缩略图或提取元数据。
+
+```ts
+hooks: {
+  "media:afterUpload": async (event, ctx) => {
+    const { media } = event;
+
+    if (media.mimeType.startsWith("image/")) {
+      // Store image metadata
+      await ctx.kv.set(`media:${media.id}:analyzed`, {
+        processedAt: new Date().toISOString(),
+      });
+    }
+  },
+}
+```
+
+#### 事件
+
+```ts
+interface MediaAfterUploadEvent {
+	media: {
+		id: string;
+		filename: string;
+		mimeType: string;
+		size: number | null;
+		url: string;
+		createdAt: string;
+	};
+}
+```
+
+## 生命周期钩子
+
+### `plugin:install`
+
+在插件首次安装时运行。用于初始设置、创建存储集合或填充数据。
+
+```ts
+hooks: {
+  "plugin:install": async (event, ctx) => {
+    // Initialize default settings
+    await ctx.kv.set("settings:enabled", true);
+    await ctx.kv.set("settings:threshold", 100);
+
+    ctx.log.info("Plugin installed successfully");
+  },
+}
+```
+
+### `plugin:activate`
+
+在插件启用时运行（安装后或重新启用后）。
+
+```ts
+hooks: {
+  "plugin:activate": async (event, ctx) => {
+    ctx.log.info("Plugin activated");
+  },
+}
+```
+
+### `plugin:deactivate`
+
+在插件禁用时运行。
+
+```ts
+hooks: {
+  "plugin:deactivate": async (event, ctx) => {
+    ctx.log.info("Plugin deactivated");
+  },
+}
+```
+
+### `plugin:uninstall`
+
+在插件移除时运行。用于清理。
+
+```ts
+hooks: {
+  "plugin:uninstall": async (event, ctx) => {
+    const { deleteData } = event;
+
+    if (deleteData) {
+      // Clean up all plugin data
+      const items = await ctx.kv.list("settings:");
+      for (const { key } of items) {
+        await ctx.kv.delete(key);
+      }
+    }
+
+    ctx.log.info("Plugin uninstalled");
+  },
+}
+```
+
+#### 事件
+
+```ts
+interface UninstallEvent {
+	deleteData: boolean; // User chose to delete data
+}
+```
+
+## Cron 钩子
+
+### `cron`
+
+在计划任务执行时触发。使用 `ctx.cron.schedule()` 来调度任务。
+
+```ts
+hooks: {
+  "cron": async (event, ctx) => {
+    if (event.name === "daily-sync") {
+      const data = await ctx.http?.fetch("https://api.example.com/data");
+      ctx.log.info("Sync complete");
+    }
+  },
+}
+```
+
+#### 事件
+
+```ts
+interface CronEvent {
+	name: string;
+	data?: Record<string, unknown>;
+	scheduledAt: string;
+}
+```
+
+## 电子邮件钩子
+
+电子邮件钩子形成一个流水线：`email:beforeSend` → `email:deliver` → `email:afterSend`。
+
+### `email:beforeSend`
+
+**所需能力：** `email:intercept`
+
+在发送前运行的中间件钩子。用于转换消息或取消发送。
+
+```ts
+hooks: {
+  "email:beforeSend": async (event, ctx) => {
+    // Add footer to all emails
+    return {
+      ...event.message,
+      text: event.message.text + "\n\n—Sent from My Site",
+    };
+
+    // Or return false to cancel delivery
+  },
+}
+```
+
+#### 事件
+
+```ts
+interface EmailBeforeSendEvent {
+	message: { to: string; subject: string; text: string; html?: string };
+	source: string;
+}
+```
+
+#### 返回值
+
+- 返回修改后的消息以进行转换
+- 返回 `false` 以取消发送
+- 返回 `void` 以保持原样通过
+
+### `email:deliver`
+
+**所需能力：** `email:provide` | **独占性：** 是
+
+传输提供者。只有一个插件可以发送电子邮件。负责通过电子邮件服务实际发送消息。
+
+```ts
+hooks: {
+  "email:deliver": {
+    exclusive: true,
+    handler: async (event, ctx) => {
+      await sendViaSES(event.message);
+    },
+  },
+}
+```
+
+### `email:afterSend`
+
+**所需能力：** `email:intercept`
+
+发送成功后触发的即发即弃钩子。错误会被记录但不会传播。
+
+```ts
+hooks: {
+  "email:afterSend": async (event, ctx) => {
+    await ctx.kv.set(`email:log:${Date.now()}`, {
+      to: event.message.to,
+      subject: event.message.subject,
+    });
+  },
+}
+```
+
+## 评论钩子
+
+评论钩子形成一个流水线：`comment:beforeCreate` → `comment:moderate` → `comment:afterCreate`。`comment:afterModerate` 钩子在管理员更改评论状态时单独触发。
+
+### `comment:beforeCreate`
+
+**所需能力：** `read:users`
+
+在评论存储前运行的中间件钩子。用于丰富、验证或拒绝评论。
+
+```ts
+hooks: {
+  "comment:beforeCreate": async (event, ctx) => {
+    // Reject comments with links
+    if (event.comment.body.includes("http")) {
+      return false;
+    }
+  },
+}
+```
+
+#### 事件
+
+```ts
+interface CommentBeforeCreateEvent {
+	comment: {
+		collection: string;
+		contentId: string;
+		parentId: string | null;
+		authorName: string;
+		authorEmail: string;
+		authorUserId: string | null;
+		body: string;
+		ipHash: string | null;
+		userAgent: string | null;
+	};
+	metadata: Record<string, unknown>;
+}
+```
+
+#### 返回值
+
+- 返回修改后的事件以进行转换
+- 返回 `false` 以拒绝
+- 返回 `void` 以保持原样通过
+
+### `comment:moderate`
+
+**所需能力：** `read:users` | **独占性：** 是
+
+决定评论是批准、待审核还是垃圾评论。只有一个审核提供者处于活动状态。
+
+```ts
+hooks: {
+  "comment:moderate": {
+    exclusive: true,
+    handler: async (event, ctx) => {
+      const score = await checkSpam(event.comment);
+      return {
+        status: score > 0.8 ? "spam" : score > 0.5 ? "pending" : "approved",
+        reason: `Spam score: ${score}`,
+      };
+    },
+  },
+}
+```
+
+#### 事件
+
+```ts
+interface CommentModerateEvent {
+	comment: { /* same as beforeCreate */ };
+	metadata: Record<string, unknown>;
+	collectionSettings: {
+		commentsEnabled: boolean;
+		commentsModeration: "all" | "first_time" | "none";
+		commentsClosedAfterDays: number;
+		commentsAutoApproveUsers: boolean;
+	};
+	priorApprovedCount: number;
+}
+```
+
+#### 返回值
+
+```ts
+{ status: "approved" | "pending" | "spam"; reason?: string }
+```
+
+### `comment:afterCreate`
+
+**所需能力：** `read:users`
+
+在评论存储后触发的即发即弃钩子。用于通知。
+
+```ts
+hooks: {
+  "comment:afterCreate": async (event, ctx) => {
+    if (event.comment.status === "approved") {
+      await ctx.email?.send({
+        to: event.contentAuthor?.email,
+        subject: `New comment on "${event.content.title}"`,
+        text: `${event.comment.authorName} commented: ${event.comment.body}`,
+      });
+    }
+  },
+}
+```
+
+### `comment:afterModerate`
+
+**所需能力：** `read:users`
+
+当管理员手动更改评论状态时触发的即发即弃钩子。
+
+#### 事件
+
+```ts
+interface CommentAfterModerateEvent {
+	comment: { id: string; /* ... */ };
+	previousStatus: string;
+	newStatus: string;
+	moderator: { id: string; name: string | null };
+}
+```
+
+## 页面钩子
+
+页面钩子在渲染公共页面时运行。它们允许插件注入元数据和脚本。
+
+### `page:metadata`
+
+**所需能力：** `page:inject`
+
+向页面头部贡献元标签、Open Graph 属性、JSON-LD 结构化数据或链接标签。
+
+```ts
+hooks: {
+  "page:metadata": async (event, ctx) => {
+    return [
+      { kind: "meta", name: "generator", content: "EmDash" },
+      { kind: "property", property: "og:site_name", content: event.page.siteName },
+      { kind: "jsonld", graph: { "@type": "WebSite", name: event.page.siteName } },
+    ];
+  },
+}
+```
+
+#### 贡献类型
+
+```ts
+type PageMetadataContribution =
+	| { kind: "meta"; name: string; content: string; key?: string }
+	| { kind: "property"; property: string; content: string; key?: string }
+	| { kind: "link"; rel: string; href: string; hreflang?: string; key?: string }
+	| { kind: "jsonld"; id?: string; graph: Record<string, unknown> };
+```
+
+`key` 字段用于去重贡献——只有最后一个具有给定键的贡献会被使用。
+
+### `page:fragments`
+
+**所需能力：** `page:inject`
+
+向页面注入脚本或 HTML。仅对受信任的（原生）插件可用。
+
+```ts
+hooks: {
+  "page:fragments": async (event, ctx) => {
+    return [
+      {
+        kind: "external-script",
+        placement: "body:end",
+        src: "https://analytics.example.com/script.js",
+        async: true,
+      },
+      {
+        kind: "inline-script",
+        placement: "head",
+        code: `window.siteId = "abc123";`,
+      },
+    ];
+  },
+}
+```
+
+#### 贡献类型
+
+```ts
+type PageFragmentContribution =
+	| {
+			kind: "external-script";
+			placement: "head" | "body:start" | "body:end";
+			src: string;
+			async?: boolean;
+			defer?: boolean;
+			attributes?: Record<string, string>;
+			key?: string;
+		}
+	| {
+			kind: "inline-script";
+			placement: "head" | "body:start" | "body:end";
+			code: string;
+			attributes?: Record<string, string>;
+			key?: string;
+		}
+	| {
+			kind: "html";
+			placement: "head" | "body:start" | "body:end";
+			html: string;
+			key?: string;
+		};
+```
+
+## 钩子配置
+
+钩子接受一个处理函数或一个配置对象：
+
+```ts
+hooks: {
+  // Simple handler
+  "content:afterSave": async (event, ctx) => { ... },
+
+  // With configuration
+  "content:beforeSave": {
+    priority: 50,        // Lower runs first (default: 100)
+    timeout: 10000,      // Max execution time in ms (default: 5000)
+    dependencies: [],    // Run after these plugins
+    errorPolicy: "abort", // "continue" or "abort" (default)
+    handler: async (event, ctx) => { ... },
+  },
+}
+```
+
+### 配置选项
+
+| 选项            | 类型         | 默认值    | 描述                                                                 |
+| --------------- | ------------ | --------- | -------------------------------------------------------------------- |
+| `priority`      | `number`     | `100`     | 执行顺序（数值越小，执行越早）                                       |
+| `timeout`       | `number`     | `5000`    | 最大执行时间（毫秒）                                                 |
+| `dependencies`  | `string[]`   | `[]`      | 必须先运行的插件 ID                                                  |
+| `errorPolicy`   | `string`     | `"abort"` | `"continue"` 表示忽略错误                                            |
+| `exclusive`     | `boolean`    | `false`   | 只有一个插件可以作为活动提供者（适用于 `email:deliver`、`comment:moderate` 等提供者模式钩子） |
+
+## 插件上下文
+
+所有钩子都会收到一个上下文对象，可以访问插件 API：
+
+```ts
+interface PluginContext {
+	plugin: { id: string; version: string };
+	storage: PluginStorage;
+	kv: KVAccess;
+	content?: ContentAccess;
+	media?: MediaAccess;
+	http?: HttpAccess;
+	log: LogAccess;
+	site: { name: string; url: string; locale: string };
+	url(path: string): string;
+	users?: UserAccess;
+	cron?: CronAccess;
+	email?: EmailAccess;
+}
+```
+
+有关能力要求和方法的详细信息，请参阅[插件概览 — 插件上下文](/zh-cn/plugins/overview/#plugin-context)。
+
+<Aside>
+	上下文 API 受插件能力控制。请在插件定义中声明所需的能力。
+</Aside>
+
+## 错误处理
+
+钩子中的错误会根据 `errorPolicy` 进行记录和处理：
+
+- `"abort"`（默认）—— 停止执行，如果适用则回滚事务
+- `"continue"` —— 记录错误并继续执行下一个钩子
+
+```ts
+hooks: {
+  "content:beforeSave": {
+    errorPolicy: "continue", // Don't block save if this fails
+    handler: async (event, ctx) => {
+      try {
+        await ctx.http?.fetch("https://api.example.com/validate");
+      } catch (error) {
+        ctx.log.warn("Validation service unavailable", error);
+      }
+    },
+  },
+}
+```
+
+## 执行顺序
+
+钩子按以下顺序运行：
+
+1. 按 `priority` 排序（升序）
+2. 具有 `dependencies` 的插件在其依赖项之后运行
+3. 在同一优先级内，顺序是确定但未指定的
+
+```ts
+// This runs first (priority 10)
+{ priority: 10, handler: ... }
+
+// This runs second (priority 50)
+{ priority: 50, handler: ... }
+
+// This runs last (default priority 100)
+{ handler: ... }
+```

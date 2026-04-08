@@ -1,0 +1,543 @@
+---
+title: Astro für WordPress-Entwickler
+description: Lernen Sie die Grundlagen von Astro anhand von WordPress-Konzepten, die Sie bereits kennen.
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Astro ist ein Web-Framework zum Erstellen inhaltsorientierter Websites. Bei der Verwendung von EmDash ersetzt Astro Ihr WordPress-Theme – es übernimmt Templating, Routing und Rendering.
+
+Dieser Leitfaden vermittelt die Grundlagen von Astro, indem er sie auf WordPress-Konzepte abbildet, die Sie bereits verstehen.
+
+## Wichtige Paradigmenwechsel
+
+<CardGrid>
+	<Card title="Standardmäßig serverseitig gerendert" icon="laptop">
+		Wie PHP läuft Astro-Code auf dem Server. Im Gegensatz zu PHP gibt es standardmäßig statisches HTML ohne
+		JavaScript aus.
+	</Card>
+	<Card title="Kein JS, es sei denn, Sie fügen es hinzu" icon="rocket">
+		WordPress lädt jQuery und Theme-Skripte automatisch. Astro sendet nichts an den Browser,
+		es sei denn, Sie fügen es explizit hinzu.
+	</Card>
+	<Card title="Komponentenbasierte Architektur" icon="puzzle">
+		Anstelle von verstreuten Template-Tags und Includes wird mit komponierbaren, eigenständigen
+		Komponenten gebaut.
+	</Card>
+	<Card title="Dateibasiertes Routing" icon="document">
+		Keine Rewrite-Regeln oder `query_vars`. Die Dateistruktur in `src/pages/` definiert Ihre URLs direkt.
+	</Card>
+</CardGrid>
+
+## Projektstruktur
+
+WordPress-Themes haben eine flache Struktur mit magischen Dateinamen. Astro verwendet explizite Verzeichnisse:
+
+| WordPress                   | Astro              | Zweck              |
+| --------------------------- | ------------------ | ------------------ |
+| `index.php`, `single.php`   | `src/pages/`       | Routen (URLs)      |
+| `template-parts/`           | `src/components/`  | Wiederverwendbare UI-Teile |
+| `header.php` + `footer.php` | `src/layouts/`     | Seiten-Wrapper     |
+| `style.css`                 | `src/styles/`      | Globales CSS       |
+| `functions.php`             | `astro.config.mjs` | Seitenkonfiguration |
+
+Ein typisches Astro-Projekt könnte so aussehen:
+
+```text
+src/
+├── components/        # Reusable UI (Header, PostCard, etc.)
+├── layouts/           # Page shells (Base.astro)
+├── pages/             # Routes - files become URLs
+│   ├── index.astro    # → /
+│   ├── posts/
+│   │   ├── index.astro      # → /posts
+│   │   └── [slug].astro     # → /posts/hello-world
+│   └── [slug].astro   # → /about, /contact, etc.
+└── styles/
+    └── global.css
+```
+
+## Astro-Komponenten
+
+`.astro`-Dateien sind das Äquivalent zu PHP-Templates in Astro. Jede Datei hat zwei Teile:
+
+1. **Frontmatter** (zwischen `---`-Markierungen) – Serverseitiger Code, ähnlich wie PHP am Anfang eines Templates
+2. **Template** – HTML mit Ausdrücken, ähnlich dem Rest eines PHP-Templates
+
+```astro title="src/components/PostCard.astro"
+---
+// Frontmatter: runs on server, never sent to browser
+interface Props {
+  title: string;
+  excerpt: string;
+  url: string;
+}
+
+const { title, excerpt, url } = Astro.props;
+---
+<!-- Template: outputs HTML -->
+<article class="post-card">
+  <h2><a href={url}>{title}</a>
+</h2>
+  <p>{excerpt}</p>
+</article>
+```
+
+Wichtige Unterschiede zu PHP:
+
+- **Frontmatter ist isoliert.** Dort deklarierte Variablen sind im Template verfügbar, aber der Code selbst erreicht nie den Browser.
+- **Imports gehören ins Frontmatter.** Komponenten, Daten, Utilities – alles wird oben importiert.
+- **TypeScript funktioniert.** Definieren Sie Prop-Typen mit `interface Props` für Editor-Autovervollständigung und Validierung.
+
+## Template-Ausdrücke
+
+Astro-Templates verwenden `{curly braces}` anstelle von `<?php ?>`-Tags. Die Syntax ist JSX-ähnlich, gibt aber reines HTML aus.
+
+<Tabs>
+<TabItem label="Astro">
+
+```astro title="src/components/PostList.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts");
+const showTitle = true;
+---
+{showTitle && <h1>Neueste Beiträge</h1>}
+
+{posts.length > 0 ? (
+  <ul>
+    {posts.map(post => (
+      <li>
+        <a href={`/posts/${post.id}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+) : (
+  <p>Keine Beiträge gefunden.</p>
+)}
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php title="template-parts/post-list.php"
+<?php
+$posts = new WP_Query(['post_type' => 'post']);
+$show_title = true;
+?>
+
+<?php if ($show_title): ?>
+  <h1>Neueste Beiträge</h1>
+<?php endif; ?>
+
+<?php if ($posts->have_posts()): ?>
+  <ul>
+    <?php while ($posts->have_posts()): $posts->the_post(); ?>
+      <li>
+        <a href="<?php the_permalink(); ?>"><?php the_title(); ?></a>
+      </li>
+    <?php endwhile; wp_reset_postdata(); ?>
+  </ul>
+<?php else: ?>
+  <p>Keine Beiträge gefunden.</p>
+<?php endif; ?>
+```
+
+</TabItem>
+</Tabs>
+
+### Ausdrucksmuster
+
+| Muster                                | Zweck                |
+| -------------------------------------- | --------------------- |
+| `{variable}`                           | Einen Wert ausgeben   |
+| `{condition && <Element />}`           | Bedingtes Rendering   |
+| `{condition ? <A /> : <B />}`          | If/Else               |
+| `{items.map(item => <Li>{item}</Li>)}`   | Schleifen             |
+
+<Aside>
+	Im Gegensatz zu PHP müssen Sie die Ausgabe nicht escapen. Astro escaped Ausdrücke standardmäßig und verhindert so XSS-
+	Sicherheitslücken.
+</Aside>
+
+## Props und Slots
+
+Komponenten empfangen Daten über **Props** (wie Funktionsargumente) und **Slots** (wie `do_action`-Einfügepunkte).
+
+<Tabs>
+<TabItem label="Astro">
+
+```astro title="src/components/Card.astro"
+---
+interface Props {
+  title: string;
+  featured?: boolean;
+}
+
+const { title, featured = false } = Astro.props;
+---
+
+<article class:list={["card", { featured }]}>
+  <h2>{title}</h2>
+  <slot />
+  <slot name="footer" />
+</article>
+```
+
+Verwendung:
+
+```astro
+<Card title="Hello" featured>
+  <p>Dieser Inhalt landet im Standard-Slot.</p>
+  <footer slot="footer">Footer-Inhalt</footer>
+</Card>
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php title="template-parts/card.php"
+<?php
+// Usage: get_template_part('template-parts/card', null, [
+//   'title' => 'Hello',
+//   'featured' => true
+// ]);
+
+$title = $args['title'] ?? '';
+$featured = $args['featured'] ?? false;
+$class = $featured ? 'card featured' : 'card';
+?>
+<article class="<?php echo esc_attr($class); ?>">
+  <h2><?php echo esc_html($title); ?></h2>
+  <?php
+  // Kein direktes Äquivalent zu Slots.
+  // WordPress verwendet do_action() für ähnliche Muster:
+  do_action('card_content');
+  do_action('card_footer');
+  ?>
+</article>
+```
+
+</TabItem>
+</Tabs>
+
+### Props vs. `$args`
+
+In WordPress übergibt `get_template_part()` Daten über das `$args`-Array. Astro-Props sind typisiert und lassen sich direkt destrukturieren:
+
+```astro
+---
+// Type-safe with defaults
+interface Props {
+  title: string;
+  count?: number;
+}
+const { title, count = 10 } = Astro.props;
+---
+```
+
+### Slots vs. Hooks
+
+WordPress verwendet `do_action()`, um Einfügepunkte zu erstellen. Astro verwendet Slots:
+
+| WordPress                     | Astro                    |
+| ----------------------------- | ------------------------ |
+| `do_action('before_content')` | `<slot name="before" />` |
+| Standard-Inhaltsbereich       | `<slot />`               |
+| `do_action('after_content')`  | `<slot name="after" />`  |
+
+Der Unterschied: Slots empfangen Kindelemente an der Aufrufstelle, während WordPress-Hooks separate `add_action()`-Aufrufe an anderer Stelle erfordern.
+
+## Layouts
+
+Layouts umschließen Seiten mit gemeinsamer HTML-Struktur – dem `<head>`, Header, Footer und allem, was seitenübergreifend geteilt wird. Dies ersetzt `header.php` + `footer.php`.
+
+```astro title="src/layouts/Base.astro"
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = "Meine EmDash-Website" } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header>
+      <nav><!-- Navigation --></nav>
+    </header>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer>
+      <p>&copy; {new Date().getFullYear()}</p>
+    </footer>
+  </body>
+</html>
+```
+
+Das Layout in einer Seite verwenden:
+
+```astro title="src/pages/index.astro"
+---
+import Base from "../../layouts/Base.astro";
+---
+<Base title="Startseite">
+  <h1>Willkommen</h1>
+  <p>Der Seiteninhalt wird im Slot ausgegeben.</p>
+</Base>
+```
+
+<Aside type="tip">
+	Im Gegensatz zu `get_header()` und `get_footer()` behalten Layouts die gesamte HTML-Struktur in einer Datei. Dies
+	macht es einfacher, die vollständige Seitenstruktur zu sehen und Daten zwischen Abschnitten zu übergeben.
+</Aside>
+
+## Styling
+
+Astro bietet mehrere Ansätze für Styling. Der charakteristischste sind **scoped Styles**.
+
+### Scoped Styles
+
+Styles in einem `<style>`-Tag werden automatisch auf diese Komponente beschränkt:
+
+```astro title="src/components/Card.astro"
+<article class="card">
+  <h2>Titel</h2>
+</article>
+
+<style>
+  /* Betrifft nur .card in DIESER Komponente */
+  .card {
+    padding: 1rem;
+    border: 1px solid #ddd;
+  }
+
+  h2 {
+    color: navy;
+  }
+</style>
+```
+
+Das generierte HTML enthält eindeutige Klassennamen, um das Auslaufen von Styles zu verhindern. Keine Spezifitätskämpfe mehr.
+
+### Globale Styles
+
+Für globale Styles erstellen Sie eine CSS-Datei und importieren sie in einem Layout:
+
+```astro title="src/layouts/Base.astro"
+---
+import "../styles/global.css";
+---
+```
+
+### Bedingte Klassen
+
+Die `class:list`-Direktive ersetzt das manuelle Zusammenbauen von Klassenzeichenketten:
+
+<Tabs>
+<TabItem label="Astro">
+
+```astro
+---
+const { featured, size = "medium" } = Astro.props;
+---
+<article class:list={[
+  "card",
+  size,
+  { featured, "has-border": true }
+]}>
+```
+
+Ausgabe: `<article class="card medium featured has-border">`
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+<?php
+$classes = ['card', $size];
+if ($featured) $classes[] = 'featured';
+if (true) $classes[] = 'has-border';
+?>
+<article class="<?php echo esc_attr(implode(' ', $classes)); ?>">
+```
+
+</TabItem>
+</Tabs>
+
+## Client-seitiges JavaScript
+
+Astro liefert standardmäßig kein JavaScript aus. Dies ist die größte mentale Umstellung von WordPress.
+
+### Interaktivität hinzufügen
+
+Für einfache Interaktionen füge ein `<script>`-Tag hinzu:
+
+```astro title="src/components/MobileMenu.astro"
+<button id="menu-toggle">Menü</button>
+<nav id="mobile-menu" hidden>
+  <slot />
+</nav>
+
+<script>
+  const toggle = document.getElementById("menu-toggle");
+  const menu = document.getElementById("mobile-menu");
+
+  toggle?.addEventListener("click", () => {
+    menu?.toggleAttribute("hidden");
+  });
+</script>
+```
+
+Skripte werden automatisch gebündelt und dedupliziert. Wenn diese Komponente zweimal auf einer Seite erscheint, läuft das Skript nur einmal.
+
+### Fortgeschritten: Interaktive Komponenten
+
+Für komplexere Interaktivität kann Astro JavaScript-Komponenten (React, Vue, Svelte) bei Bedarf laden. Dies ist optional – die meisten Websites kommen gut mit nur `<script>`-Tags aus.
+
+```astro title="src/pages/index.astro"
+---
+import SearchWidget from "../../components/SearchWidget.jsx";
+---
+<!-- Only load JavaScript when the search box scrolls into view -->
+<SearchWidget client:visible />
+```
+
+| Direktive        | Wann JavaScript lädt               |
+| ---------------- | ---------------------------------- |
+| `client:load`    | Sofort beim Laden der Seite        |
+| `client:visible` | Wenn Komponente in den Viewport tritt |
+| `client:idle`    | Wenn der Browser im Leerlauf ist   |
+
+<Aside type="tip">
+Dies ist völlig optional. Du kannst vollständige EmDash-Websites erstellen, ohne React, Vue oder irgendein JavaScript-Framework zu berühren. Der `<script>`-Tag-Ansatz deckt die meisten interaktiven Anforderungen ab.
+</Aside>
+
+## Routing
+
+Astro verwendet **dateibasiertes Routing**. Dateien in `src/pages/` werden zu URLs:
+
+| Datei                           | URL                  |
+| ------------------------------ | -------------------- |
+| `src/pages/index.astro`        | `/`                  |
+| `src/pages/about.astro`        | `/about`             |
+| `src/pages/posts/index.astro`  | `/posts`             |
+| `src/pages/posts/[slug].astro` | `/posts/hello-world` |
+| `src/pages/[...slug].astro`    | Beliebiger Pfad (Catch-all) |
+
+### Dynamische Routen
+
+Für CMS-Inhalte verwende die Klammer-Syntax für dynamische Segmente:
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+import Base from "../../../layouts/Base.astro";
+import { PortableText } from "emdash/ui";
+
+// For static builds, define which pages to generate
+export async function getStaticPaths() {
+  const { entries: posts } = await getEmDashCollection("posts");
+  return posts.map(post => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+---
+<Base title={post.data.title}>
+  <article>
+    <h1>{post.data.title}</h1>
+    <PortableText value={post.data.content} />
+  </article>
+</Base>
+```
+
+### Im Vergleich zu WordPress
+
+| WordPress                              | Astro                               |
+| -------------------------------------- | ----------------------------------- |
+| Template-Hierarchie (`single-post.php`) | Explizite Datei: `posts/[slug].astro` |
+| Rewrite-Regeln + `query_vars`           | Dateistruktur                      |
+| `$wp_query` bestimmt Template          | URL weist direkt auf Datei hin     |
+| `add_rewrite_rule()`                   | Dateien oder Ordner erstellen      |
+
+<Aside type="tip">
+	Kein Rätselraten mehr, welches Template WordPress verwenden wird. Die URL `/posts/hello` lädt immer
+	`src/pages/posts/[slug].astro`.
+</Aside>
+
+## Wo WordPress-Konzepte zu finden sind
+
+Eine Referenz, um das Astro/EmDash-Äquivalent von WordPress-Funktionen zu finden:
+
+### Templating
+
+| WordPress                | Astro/EmDash                     |
+| ------------------------ | ---------------------------------- |
+| Template-Hierarchie      | Dateibasiertes Routing in `src/pages/` |
+| `get_template_part()`    | Komponenten importieren und verwenden |
+| `the_content()`          | `<PortableText value={content} />` |
+| `the_title()`, `the_*()` | Zugriff über `post.data.title`       |
+| Template-Tags            | Template-Ausdrücke `{value}`     |
+| `body_class()`           | `class:list`-Direktive             |
+
+### Daten und Abfragen
+
+| WordPress         | Astro/EmDash                         |
+| ----------------- | -------------------------------------- |
+| `WP_Query`        | `getEmDashCollection(type, filters)` |
+| `get_post()`      | `getEmDashEntry(type, id)`           |
+| `get_posts()`     | `getEmDashCollection(type)`          |
+| `get_the_terms()` | Zugriff über `entry.data.categories`     |
+| `get_post_meta()` | Zugriff über `entry.data.fieldName`      |
+| `get_option()`    | `getSiteSettings()`                    |
+| `wp_nav_menu()`   | `getMenu(location)`                    |
+
+### Erweiterbarkeit
+
+| WordPress               | Astro/EmDash                        |
+| ----------------------- | ------------------------------------- |
+| `add_action()`          | EmDash-Hooks, Astro-Middleware      |
+| `add_filter()`          | EmDash-Hooks                        |
+| `add_shortcode()`       | Portable Text benutzerdefinierte Blöcke |
+| `register_block_type()` | Portable Text benutzerdefinierte Blöcke |
+| `register_sidebar()`    | EmDash-Widget-Bereiche              |
+| Plugins                 | Astro-Integrationen + EmDash-Plugins |
+
+### Inhaltstypen
+
+| WordPress              | Astro/EmDash                        |
+| ---------------------- | ------------------------------------- |
+| `register_post_type()` | Sammlung in Admin-Oberfläche erstellen |
+| `register_taxonomy()`  | Taxonomie in Admin-Oberfläche erstellen |
+| `register_meta()`      | Feld zum Sammlungsschema hinzufügen    |
+| Beitragsstatus         | Eintragsstatus (Entwurf, veröffentlicht, etc.) |
+| Beitragsbild           | Medien-Referenzfeld                    |
+| Gutenberg-Blöcke       | Portable Text-Blöcke                  |
+
+## Zusammenfassung
+
+Der Sprung von WordPress zu Astro ist bedeutend, aber logisch:
+
+1. **PHP-Vorlagen → Astro-Komponenten** — Gleiches Prinzip (Servercode + HTML), bessere Organisation
+2. **Template-Tags → Props und Imports** — Expliziter Datenfluss statt globaler Variablen
+3. **Theme-Dateien → Seitenverzeichnis** — URLs entsprechen der Dateistruktur
+4. **Hooks → Slots und Middleware** — Vorhersehbarere Einfügepunkte
+5. **Standardmäßig jQuery → Standardmäßig kein JS** — Interaktivität gezielt hinzufügen
+
+Beginnen Sie mit dem [Erste-Schritte-Leitfaden](/de/getting-started/), um Ihre erste EmDash-Website zu erstellen, oder erkunden Sie [Arbeiten mit Inhalten](/de/guides/working-with-content/), um zu lernen, wie Sie CMS-Daten abfragen und darstellen können.

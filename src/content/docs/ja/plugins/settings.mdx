@@ -1,0 +1,334 @@
+---
+title: プラグイン設定
+description: 設定スキーマとKVストアを使用してプラグインを構成します。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+プラグインには設定が必要です。APIキー、機能フラグ、表示設定などです。EmDashでは、管理者が設定可能なオプション用の**設定スキーマ**と、プログラムによるアクセス用の**KVストア**という2つの仕組みを提供しています。
+
+## 設定スキーマ
+
+管理者UIを自動生成するには、`admin.settingsSchema`で設定スキーマを宣言します：
+
+```typescript
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "seo",
+	version: "1.0.0",
+
+	admin: {
+		settingsSchema: {
+			siteTitle: {
+				type: "string",
+					label: "サイトタイトル",
+					description: "titleタグとメタ情報で使用します",
+				default: "",
+			},
+			maxTitleLength: {
+				type: "number",
+				label: "Max Title Length",
+				description: "Characters before truncation",
+				default: 60,
+				min: 30,
+				max: 100,
+			},
+			generateSitemap: {
+				type: "boolean",
+				label: "Generate Sitemap",
+				description: "Automatically generate sitemap.xml",
+				default: true,
+			},
+			defaultRobots: {
+				type: "select",
+				label: "デフォルトのRobots設定",
+				options: [
+					{ value: "index,follow", label: "Index & Follow" },
+					{ value: "noindex,follow", label: "No Index, Follow" },
+					{ value: "noindex,nofollow", label: "No Index, No Follow" },
+				],
+				default: "index,follow",
+			},
+			apiKey: {
+				type: "secret",
+				label: "API Key",
+				description: "Encrypted at rest",
+			},
+		},
+	},
+});
+```
+
+EmDashは、プラグインの管理者セクションに設定フォームを生成します。ユーザーはコードに触れることなく設定を編集できます。
+
+<Aside type="caution">
+	2026年4月7日現在、このドキュメントに記載されている自動生成された設定UIは、まだ完全には実装されていないようです。`admin.settingsSchema`のみに依存する前に、現在の実装ギャップについては[issue #341](https://github.com/emdash-cms/emdash/issues/341)を参照してください。
+</Aside>
+
+## フィールドタイプ
+
+### 文字列
+
+単一行または複数行の文字列用のテキスト入力。
+
+```typescript
+siteTitle: {
+  type: "string",
+  label: "サイトタイトル",
+  description: "任意のヘルプテキスト",
+  default: "私のサイト",
+  multiline: false  // textarea にする場合は true
+}
+```
+
+### 数値
+
+オプションで最小値/最大値の制約を設定できる数値入力。
+
+```typescript
+maxItems: {
+  type: "number",
+  label: "Maximum Items",
+  default: 100,
+  min: 1,
+  max: 1000
+}
+```
+
+### ブール値
+
+真/偽の値用のトグルスイッチ。
+
+```typescript
+enabled: {
+  type: "boolean",
+  label: "Enabled",
+  description: "Turn this feature on or off",
+  default: true
+}
+```
+
+### セレクト
+
+事前定義されたオプション用のドロップダウン。
+
+```typescript
+theme: {
+  type: "select",
+  label: "Theme",
+  options: [
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+    { value: "auto", label: "System" }
+  ],
+  default: "auto"
+}
+```
+
+### シークレット
+
+APIキーなどの機密情報用の暗号化フィールド。保存後はクライアントに送信されません。
+
+```typescript
+apiKey: {
+  type: "secret",
+  label: "API Key",
+  description: "Stored encrypted"
+}
+```
+
+<Aside type="caution">
+	シークレットフィールドは、サイトの暗号化キーを使用して保存時に暗号化されます。初期保存後は管理者UIに公開されることはなく、マスクされたプレースホルダーのみが表示されます。
+</Aside>
+
+## 設定へのアクセス
+
+フックやルート内で`ctx.kv`を介して設定を読み取ります：
+
+```typescript
+"content:beforeSave": async (event, ctx) => {
+  // Read a setting
+  const maxLength = await ctx.kv.get<number>("settings:maxTitleLength");
+  const apiKey = await ctx.kv.get<string>("settings:apiKey");
+
+  // 設定されていない場合はデフォルト値を使用
+  const limit = maxLength ?? 60;
+
+  ctx.log.info("最大長を使用中", { limit });
+  return event.content;
+}
+```
+
+設定は慣例により`settings:`プレフィックスで保存されます。これにより、ユーザーが設定可能な値とプラグイン内部の状態が区別されます。
+
+## KVストアAPI
+
+KVストア（`ctx.kv`）は、プラグインデータ用の汎用キー・バリューストアです：
+
+```typescript
+interface KVAccess {
+	get<T>(key: string): Promise<T | null>;
+	set(key: string, value: unknown): Promise<void>;
+	delete(key: string): Promise<boolean>;
+	list(prefix?: string): Promise<Array<{ key: string; value: unknown }>>;
+}
+```
+
+### 値の読み取り
+
+```typescript
+// Get a single value
+const enabled = await ctx.kv.get<boolean>("settings:enabled");
+
+// 型を指定して取得
+const config = await ctx.kv.get<{ url: string; timeout: number }>("state:config");
+```
+
+### 値の書き込み
+
+```typescript
+// Set a value
+await ctx.kv.set("settings:lastSync", new Date().toISOString());
+
+// 複雑な値を設定
+await ctx.kv.set("state:cache", {
+	data: items,
+	expiry: Date.now() + 3600000,
+});
+```
+
+### 値の一覧表示
+
+```typescript
+// List all settings
+const settings = await ctx.kv.list("settings:");
+// Returns: [{ key: "settings:enabled", value: true }, ...]
+
+// すべてのプラグインキーを一覧表示
+const all = await ctx.kv.list();
+```
+
+### 値の削除
+
+```typescript
+const deleted = await ctx.kv.delete("state:tempData");
+// Returns true if key existed
+```
+
+## キー命名規則
+
+KVデータを整理するためにプレフィックスを使用します：
+
+| プレフィックス | 目的                           | 例                 |
+| ----------- | ----------------------------- | ----------------- |
+| `settings:` | ユーザー設定可能な設定         | `settings:apiKey` |
+| `state:`    | プラグイン内部の状態           | `state:lastSync`  |
+| `cache:`    | キャッシュされたデータ         | `cache:results`   |
+
+```typescript
+// Good: clear prefixes
+await ctx.kv.set("settings:webhookUrl", url);
+await ctx.kv.set("state:lastRun", timestamp);
+await ctx.kv.set("cache:feed", feedData);
+
+// 避けるべき例：プレフィックスなし、目的が不明確
+await ctx.kv.set("url", url);
+```
+
+<Aside type="tip">
+	`settings:`プレフィックスは、自動生成された設定UIに表示される値のための慣例です。他のプレフィックスはプラグイン内部での使用を目的としています。
+</Aside>
+
+## 設定 vs ストレージ vs KV
+
+適切なストレージメカニズムを選択します：
+
+| ユースケース                   | メカニズム                                          |
+| -------------------------- | -------------------------------------------------- |
+| 管理者編集可能な設定         | `admin.settingsSchema` + `ctx.kv`（`settings:`付き） |
+| プラグイン内部の状態         | `ctx.kv`（`state:`付き）                             |
+| ドキュメントのコレクション   | `ctx.storage`                                      |
+
+**設定**は、管理者が変更する可能性のあるユーザー設定可能な値のためのものです。自動生成されたUIが提供されます。
+
+**KV**は、タイムスタンプ、同期カーソル、キャッシュされた計算結果などの内部状態のためのものです。UIはなく、コードのみで操作します。
+
+**ストレージ**は、インデックス付きクエリが可能なドキュメントコレクション（フォーム送信、監査ログなど）のためのものです。
+
+## ルートでの設定の読み込み
+
+APIルートは、設定を管理者UIコンポーネントに公開できます：
+
+```typescript
+routes: {
+  settings: {
+    handler: async (ctx) => {
+      const settings = await ctx.kv.list("settings:");
+      const result: Record<string, unknown> = {};
+
+      for (const entry of settings) {
+        const key = entry.key.replace("settings:", "");
+        result[key] = entry.value;
+      }
+
+      return result;
+    }
+  },
+
+  "settings/save": {
+    handler: async (ctx) => {
+      const input = ctx.input as Record<string, unknown>;
+
+      for (const [key, value] of Object.entries(input)) {
+        if (value !== undefined) {
+          await ctx.kv.set(`settings:${key}`, value);
+        }
+      }
+
+      return { success: true };
+    }
+  }
+}
+```
+
+## デフォルト値
+
+`settingsSchema`からの設定は自動的には永続化されません。これらは管理者UIでのデフォルト値です。コードでは欠落した値を処理する必要があります：
+
+```typescript
+"content:afterSave": async (event, ctx) => {
+  // Always provide a fallback
+  const enabled = await ctx.kv.get<boolean>("settings:enabled") ?? true;
+  const maxItems = await ctx.kv.get<number>("settings:maxItems") ?? 100;
+
+  if (!enabled) return;
+  // ...
+}
+```
+
+または、`plugin:install`でデフォルト値を永続化します：
+
+```typescript
+hooks: {
+  "plugin:install": async (_event, ctx) => {
+    // Persist schema defaults
+    await ctx.kv.set("settings:enabled", true);
+    await ctx.kv.set("settings:maxItems", 100);
+  }
+}
+```
+
+## ストレージ実装
+
+KV値は、プラグイン名空間付きのキーで`_options`テーブルに保存されます：
+
+```sql
+INSERT INTO _options (name, value) VALUES
+  ('plugin:seo:settings:siteTitle', '"私のサイト"'),
+  ('plugin:seo:settings:maxTitleLength', '60');
+```
+
+`plugin:seo:`プレフィックスは自動的に追加されます。コードでは`settings:siteTitle`を使用し、EmDashはそれを`plugin:seo:settings:siteTitle`として保存します。
+
+これにより、プラグインが互いのデータを誤って上書きすることを防ぎます。

@@ -1,0 +1,676 @@
+---
+title: 种子文件格式
+description: EmDash 种子文件结构和语法参考。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+种子文件是用于引导 EmDash 站点的 JSON 文档。它们定义了集合、字段、分类法、菜单、重定向、小部件区域、站点设置以及可选的示例内容。
+
+## 根结构
+
+```json
+{
+	"$schema": "https://emdashcms.com/seed.schema.json",
+	"version": "1",
+	"meta": {},
+	"settings": {},
+	"collections": [],
+	"taxonomies": [],
+	"bylines": [],
+	"menus": [],
+	"redirects": [],
+	"widgetAreas": [],
+	"sections": [],
+	"content": {}
+}
+```
+
+| 字段             | 类型       | 必需     | 描述                                   |
+| ---------------- | ---------- | -------- | -------------------------------------- |
+| `$schema`        | `string`   | 否       | 用于编辑器验证的 JSON 模式 URL         |
+| `version`        | `"1"`      | 是       | 种子格式版本                           |
+| `meta`           | `object`   | 否       | 关于种子的元数据                       |
+| `settings`       | `object`   | 否       | 站点设置                               |
+| `collections`    | `array`    | 否       | 集合定义                               |
+| `taxonomies`     | `array`    | 否       | 分类法定义                             |
+| `bylines`        | `array`    | 否       | 署名作者资料定义                       |
+| `menus`          | `array`    | 否       | 导航菜单                               |
+| `redirects`      | `array`    | 否       | 重定向规则                             |
+| `widgetAreas`    | `array`    | 否       | 小部件区域定义                         |
+| `sections`       | `array`    | 否       | 可复用内容块                           |
+| `content`        | `object`   | 否       | 示例内容条目                           |
+
+## 元数据
+
+关于种子的可选元数据：
+
+```json
+{
+	"meta": {
+		"name": "Blog Starter",
+		"description": "A simple blog with posts, pages, and categories",
+		"author": "EmDash"
+	}
+}
+```
+
+## 设置
+
+站点范围的配置值：
+
+```json
+{
+	"settings": {
+		"title": "My Site",
+		"tagline": "A modern CMS",
+		"postsPerPage": 10,
+		"dateFormat": "MMMM d, yyyy"
+	}
+}
+```
+
+设置会应用到带有 `site:` 前缀的 `options` 表中。设置向导允许用户覆盖 `title` 和 `tagline`。
+
+## 集合
+
+集合定义在数据库中创建内容类型：
+
+```json
+{
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Posts",
+			"labelSingular": "Post",
+			"description": "Blog posts",
+			"icon": "file-text",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{
+					"slug": "title",
+					"label": "Title",
+					"type": "string",
+					"required": true
+				},
+				{
+					"slug": "content",
+					"label": "Content",
+					"type": "portableText"
+				},
+				{
+					"slug": "featured_image",
+					"label": "Featured Image",
+					"type": "image"
+				}
+			]
+		}
+	]
+}
+```
+
+### 集合属性
+
+| 属性              | 类型       | 必需     | 描述                                         |
+| ----------------- | ---------- | -------- | -------------------------------------------- |
+| `slug`            | `string`   | 是       | URL 安全标识符（小写，下划线）               |
+| `label`           | `string`   | 是       | 复数显示名称                                 |
+| `labelSingular`   | `string`   | 否       | 单数显示名称                                 |
+| `description`     | `string`   | 否       | 管理界面描述                                 |
+| `icon`            | `string`   | 否       | Lucide 图标名称                              |
+| `supports`        | `array`    | 否       | 支持的功能：`"drafts"`, `"revisions"`        |
+| `fields`          | `array`    | 是       | 字段定义                                     |
+
+### 字段属性
+
+| 属性            | 类型        | 必需     | 描述                                   |
+| --------------- | ----------- | -------- | -------------------------------------- |
+| `slug`          | `string`    | 是       | 列名（小写，下划线）                   |
+| `label`         | `string`    | 是       | 显示名称                               |
+| `type`          | `string`    | 是       | 字段类型                               |
+| `required`      | `boolean`   | 否       | 验证：字段必须有值                     |
+| `unique`        | `boolean`   | 否       | 验证：值必须唯一                       |
+| `defaultValue`  | `any`       | 否       | 新条目的默认值                         |
+| `validation`    | `object`    | 否       | 额外的验证规则                         |
+| `widget`        | `string`    | 否       | 管理界面小部件覆盖                     |
+| `options`       | `object`    | 否       | 小部件特定配置                         |
+
+### 字段类型
+
+| 类型              | 描述                     | 存储为             |
+| ----------------- | ------------------------ | ------------------ |
+| `string`          | 短文本                   | `TEXT`             |
+| `text`            | 长文本（文本区域）       | `TEXT`             |
+| `number`          | 数值                     | `REAL`             |
+| `integer`         | 整数                     | `INTEGER`          |
+| `boolean`         | 真/假                    | `INTEGER`          |
+| `date`            | 日期值                   | `TEXT` (ISO 8601)  |
+| `datetime`        | 日期和时间               | `TEXT` (ISO 8601)  |
+| `email`           | 电子邮件地址             | `TEXT`             |
+| `url`             | URL                      | `TEXT`             |
+| `slug`            | URL 安全字符串           | `TEXT`             |
+| `portableText`    | 富文本内容               | `JSON`             |
+| `image`           | 图片引用                 | `JSON`             |
+| `file`            | 文件引用                 | `JSON`             |
+| `json`            | 任意 JSON                | `JSON`             |
+| `reference`       | 对其他条目的引用         | `TEXT`             |
+
+## 分类法
+
+内容的分类系统：
+
+```json
+{
+	"taxonomies": [
+		{
+			"name": "category",
+			"label": "Categories",
+			"labelSingular": "Category",
+			"hierarchical": true,
+			"collections": ["posts"],
+			"terms": [
+				{ "slug": "news", "label": "News" },
+				{ "slug": "tutorials", "label": "Tutorials" },
+				{
+					"slug": "advanced",
+					"label": "Advanced Tutorials",
+					"parent": "tutorials"
+				}
+			]
+		},
+		{
+			"name": "tag",
+			"label": "Tags",
+			"labelSingular": "Tag",
+			"hierarchical": false,
+			"collections": ["posts"]
+		}
+	]
+}
+```
+
+### 分类法属性
+
+| 属性              | 类型        | 必需     | 描述                                           |
+| ----------------- | ----------- | -------- | ---------------------------------------------- |
+| `name`            | `string`    | 是       | 唯一标识符                                     |
+| `label`           | `string`    | 是       | 复数显示名称                                   |
+| `labelSingular`   | `string`    | 否       | 单数显示名称                                   |
+| `hierarchical`    | `boolean`   | 是       | 允许嵌套术语（分类）或扁平结构（标签）         |
+| `collections`     | `array`     | 是       | 此分类法适用的集合                             |
+| `terms`           | `array`     | 否       | 预定义术语                                     |
+
+### 术语属性
+
+| 属性          | 类型       | 必需     | 描述                                   |
+| ------------- | ---------- | -------- | -------------------------------------- |
+| `slug`        | `string`   | 是       | URL 安全标识符                         |
+| `label`       | `string`   | 是       | 显示名称                               |
+| `description` | `string`   | 否       | 术语描述                               |
+| `parent`      | `string`   | 否       | 父术语 slug（仅限分层分类法）          |
+
+## 菜单
+
+可从管理界面编辑的导航菜单：
+
+```json
+{
+	"menus": [
+		{
+			"name": "primary",
+			"label": "Primary Navigation",
+			"items": [
+				{ "type": "custom", "label": "Home", "url": "/" },
+				{ "type": "page", "ref": "about" },
+				{ "type": "custom", "label": "Blog", "url": "/posts" },
+				{
+					"type": "custom",
+					"label": "External",
+					"url": "https://example.com",
+					"target": "_blank"
+				}
+			]
+		}
+	]
+}
+```
+
+### 菜单项类型
+
+| 类型           | 描述                       | 必需字段             |
+| -------------- | -------------------------- | -------------------- |
+| `custom`       | 自定义 URL                 | `url`                |
+| `page`         | 链接到页面条目             | `ref`                |
+| `post`         | 链接到文章条目             | `ref`                |
+| `taxonomy`     | 链接到分类法归档页         | `ref`, `collection`  |
+| `collection`   | 链接到集合归档页           | `collection`         |
+
+### 菜单项属性
+
+| 属性          | 类型       | 描述                                           |
+| ------------- | ---------- | ---------------------------------------------- |
+| `type`        | `string`   | 项目类型（见上文）                             |
+| `label`       | `string`   | 显示文本（对于页面/文章引用会自动生成）        |
+| `url`         | `string`   | 自定义 URL（用于 `custom` 类型）               |
+| `ref`         | `string`   | 种子中的内容 ID（用于 `page`/`post` 类型）     |
+| `collection`  | `string`   | 集合 slug                                      |
+| `target`      | `string`   | `"_blank"` 表示在新窗口打开                    |
+| `titleAttr`   | `string`   | HTML title 属性                                |
+| `cssClasses`  | `string`   | 自定义 CSS 类                                  |
+| `children`    | `array`    | 嵌套菜单项                                     |
+
+## 署名作者
+
+署名作者资料独立于所有权（`author_id`）。定义一次可复用的署名作者身份，然后从内容条目中引用它们。
+
+```json
+{
+	"bylines": [
+		{
+			"id": "editorial",
+			"slug": "emdash-editorial",
+			"displayName": "EmDash Editorial"
+		},
+		{
+			"id": "guest",
+			"slug": "guest-contributor",
+			"displayName": "Guest Contributor",
+			"isGuest": true
+		}
+	]
+}
+```
+
+| 属性           | 类型        | 必需     | 描述                                     |
+| -------------- | ----------- | -------- | ---------------------------------------- |
+| `id`           | `string`    | 是       | 种子本地 ID，供 `content[].bylines` 使用 |
+| `slug`         | `string`    | 是       | URL 安全的署名作者 slug                  |
+| `displayName`  | `string`    | 是       | 在模板和 API 中显示的名称                |
+| `bio`          | `string`    | 否       | 可选的个人简介                           |
+| `websiteUrl`   | `string`    | 否       | 可选的网站 URL                           |
+| `isGuest`      | `boolean`   | 否       | 将署名作者标记为访客资料                 |
+
+## 重定向
+
+用于在迁移后保留旧 URL 的重定向规则：
+
+```json
+{
+	"redirects": [
+		{ "source": "/old-about", "destination": "/about" },
+		{ "source": "/legacy-feed", "destination": "/rss.xml", "type": 308 },
+		{
+			"source": "/category/news",
+			"destination": "/categories/news",
+			"groupName": "migration"
+		}
+	]
+}
+```
+
+### 重定向属性
+
+| 属性            | 类型        | 必需     | 描述                                             |
+| --------------- | ----------- | -------- | ------------------------------------------------ |
+| `source`        | `string`    | 是       | 源路径（必须以 `/` 开头）                        |
+| `destination`   | `string`    | 是       | 目标路径（必须以 `/` 开头）                      |
+| `type`          | `number`    | 否       | HTTP 状态码：`301`, `302`, `307`, 或 `308`       |
+| `enabled`       | `boolean`   | 否       | 重定向是否激活（默认：`true`）                   |
+| `groupName`     | `string`    | 否       | 用于管理界面过滤/搜索的可选分组标签              |
+
+<Aside type="caution">
+	`source` 和 `destination` 必须是本地路径。外部 URL、协议相对路径（`//...`）、路径遍历段（`..`）和换行符会被种子验证拒绝。
+</Aside>
+
+## 小部件区域
+
+可配置的内容区域：
+
+```json
+{
+	"widgetAreas": [
+		{
+			"name": "sidebar",
+			"label": "Main Sidebar",
+			"description": "Appears on blog posts and pages",
+			"widgets": [
+				{
+					"type": "component",
+					"title": "Recent Posts",
+					"componentId": "core:recent-posts",
+					"props": { "count": 5 }
+				},
+				{
+					"type": "menu",
+					"title": "Quick Links",
+					"menuName": "footer"
+				},
+				{
+					"type": "content",
+					"title": "About",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+							"children": [{ "_type": "span", "text": "Welcome to our site!" }]
+						}
+					]
+				}
+			]
+		}
+	]
+}
+```
+
+### 小部件类型
+
+| 类型          | 描述               | 必需字段                     |
+| ------------- | ------------------ | ---------------------------- |
+| `content`     | 富文本内容         | `content` (Portable Text)    |
+| `menu`        | 渲染一个菜单       | `menuName`                   |
+| `component`   | 已注册的组件       | `componentId`                |
+
+### 内置组件
+
+| 组件 ID              | 描述               |
+| -------------------- | ------------------ |
+| `core:recent-posts`  | 最近文章列表       |
+| `core:categories`    | 分类列表           |
+| `core:tags`          | 标签云             |
+| `core:search`        | 搜索表单           |
+| `core:archives`      | 月度归档           |
+
+## 区块
+
+可复用的内容块，编辑者可以通过 `/section` 斜杠命令将其插入到 Portable Text 字段中：
+
+```json
+{
+	"sections": [
+		{
+			"slug": "hero-centered",
+			"title": "Centered Hero",
+			"description": "Full-width hero with centered heading and CTA button",
+			"keywords": ["hero", "banner", "header", "landing"],
+			"content": [
+				{
+					"_type": "block",
+					"style": "h1",
+					"children": [{ "_type": "span", "text": "Welcome to Our Site" }]
+				},
+				{
+					"_type": "block",
+					"children": [
+						{ "_type": "span", "text": "Your compelling tagline goes here." }
+					]
+				}
+			]
+		}
+	]
+}
+```
+
+### 区块属性
+
+| 属性          | 类型       | 必需     | 描述                                           |
+| ------------- | ---------- | -------- | ---------------------------------------------- |
+| `slug`        | `string`   | 是       | URL 安全标识符                                 |
+| `title`       | `string`   | 是       | 在区块选择器中显示的显示名称                   |
+| `description` | `string`   | 否       | 说明何时使用此区块                             |
+| `keywords`    | `array`    | 否       | 用于查找区块的搜索词                           |
+| `content`     | `array`    | 是       | Portable Text 块                               |
+| `source`      | `string`   | 否       | `"theme"`（种子的默认值）或 `"import"`         |
+
+来自种子文件的区块标记为 `source: "theme"`，不能从管理界面删除。编辑者可以创建自己的区块（`source: "user"`），并在编辑内容时插入任何类型的区块。
+
+## 内容
+
+按集合组织的示例内容：
+
+```json
+{
+	"content": {
+		"posts": [
+			{
+				"id": "hello-world",
+				"slug": "hello-world",
+				"status": "published",
+				"bylines": [
+					{ "byline": "editorial" },
+					{ "byline": "guest", "roleLabel": "Guest essay" }
+				],
+				"data": {
+					"title": "Hello World",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+							"children": [{ "_type": "span", "text": "Welcome!" }]
+						}
+					],
+					"excerpt": "Your first post."
+				},
+				"taxonomies": {
+					"category": ["news"],
+					"tag": ["welcome", "first-post"]
+				}
+			}
+		],
+		"pages": [
+			{
+				"id": "about",
+				"slug": "about",
+				"status": "published",
+				"data": {
+					"title": "About Us",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+							"children": [{ "_type": "span", "text": "About page content." }]
+						}
+					]
+				}
+			}
+		]
+	}
+}
+```
+
+### 内容条目属性
+
+| 属性          | 类型       | 必需     | 描述                                                 |
+| ------------- | ---------- | -------- | ---------------------------------------------------- |
+| `id`          | `string`   | 是       | 用于引用的种子本地 ID                                |
+| `slug`        | `string`   | 是       | URL slug                                             |
+| `status`      | `string`   | 否       | `"published"` 或 `"draft"`（默认：`"published"`）    |
+| `data`        | `object`   | 是       | 字段值                                               |
+| `bylines`     | `array`    | 否       | 有序的署名作者列表（`byline`，可选的 `roleLabel`）   |
+| `taxonomies`  | `object`   | 否       | 按分类法名称分配的术语                               |
+
+## 内容引用
+
+使用 `$ref:` 前缀引用其他内容条目：
+
+```json
+{
+	"data": {
+		"related_posts": ["$ref:another-post", "$ref:third-post"]
+	}
+}
+```
+
+`$ref:` 前缀在种子应用期间将种子 ID 解析为数据库 ID。
+
+## 媒体引用
+
+从 URL 包含图片：
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"url": "https://images.unsplash.com/photo-xxx",
+				"alt": "Description of the image",
+				"filename": "hero.jpg",
+				"caption": "Photo by Someone"
+			}
+		}
+	}
+}
+```
+
+从 `.emdash/media/` 包含本地图片：
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"file": "hero.jpg",
+				"alt": "Description of the image"
+			}
+		}
+	}
+}
+```
+
+### 媒体属性
+
+| 属性        | 类型       | 必需     | 描述                                   |
+| ----------- | ---------- | -------- | -------------------------------------- |
+| `url`       | `string`   | 是\*     | 要下载的远程 URL                       |
+| `file`      | `string`   | 是\*     | `.emdash/media/` 中的本地文件名        |
+| `alt`       | `string`   | 否       | 无障碍访问的替代文本                   |
+| `filename`  | `string`   | 否       | 覆盖文件名                             |
+| `caption`   | `string`   | 否       | 媒体说明文字                           |
+
+\*`url` 或 `file` 必须提供其一，不能同时提供。
+
+<Aside>
+	媒体在种子应用期间下载。大图片可能会减慢设置向导的速度。对于示例内容，请考虑使用压缩图片或缩略图版本。
+</Aside>
+
+## 以编程方式应用种子
+
+为 CLI 工具或脚本使用种子 API：
+
+```typescript
+import { applySeed, validateSeed } from "emdash/seed";
+import seedData from "./.emdash/seed.json";
+
+// Validate first
+const validation = validateSeed(seedData);
+if (!validation.valid) {
+	console.error(validation.errors);
+	process.exit(1);
+}
+
+// Apply seed
+const result = await applySeed(db, seedData, {
+	includeContent: true,
+	onConflict: "skip",
+	storage: myStorage,
+	baseUrl: "http://localhost:4321",
+});
+
+console.log(result);
+// {
+//   collections: { created: 2, skipped: 0 },
+//   fields: { created: 8, skipped: 0 },
+//   taxonomies: { created: 2, terms: 5 },
+//   bylines: { created: 2, skipped: 0 },
+//   menus: { created: 1, items: 4 },
+//   redirects: { created: 3, skipped: 0 },
+//   widgetAreas: { created: 1, widgets: 3 },
+//   settings: { applied: 3 },
+//   content: { created: 3, skipped: 0 },
+//   media: { created: 2, skipped: 0 }
+// }
+```
+
+### 应用选项
+
+| 选项              | 类型        | 默认值   | 描述                               |
+| ----------------- | ----------- | -------- | ---------------------------------- |
+| `includeContent`  | `boolean`   | `false`  | 创建示例内容条目                   |
+| `onConflict`      | `string`    | `"skip"` | `"skip"`, `"update"`, 或 `"error"` |
+| `mediaBasePath`   | `string`    | —        | 本地媒体文件的基础路径             |
+| `storage`         | `Storage`   | —        | 用于媒体上传的存储适配器           |
+| `baseUrl`         | `string`    | —        | 媒体 URL 的基础 URL                |
+
+## 幂等性
+
+种子应用可以安全地多次运行。按实体类型的冲突行为：
+
+| 实体                  | 行为                                   |
+| --------------------- | -------------------------------------- |
+| 集合                  | 如果 slug 已存在则跳过                 |
+| 字段                  | 如果集合 + slug 已存在则跳过           |
+| 分类法定义            | 如果名称已存在则跳过                   |
+| 分类法术语            | 如果名称 + slug 已存在则跳过           |
+| 署名作者资料          | 如果 slug 已存在则跳过                 |
+| 菜单                  | 如果名称已存在则跳过                   |
+| 菜单项                | 替换所有（菜单会重新创建）             |
+| 重定向                | 如果源路径已存在则跳过                 |
+| 小部件区域            | 如果名称已存在则跳过                   |
+| 小部件                | 替换所有（区域会重新创建）             |
+| 区块                  | 如果 slug 已存在则跳过                 |
+| 设置                  | 更新（设置旨在可以更改）               |
+| 内容                  | 如果集合中 slug 已存在则跳过           |
+
+<Aside type="caution">
+	菜单项和小部件是**替换**，而不是合并。种子文件是菜单和小部件区域结构的唯一来源。
+</Aside>
+
+## 验证
+
+种子文件在应用前会进行验证：
+
+```typescript
+import { validateSeed } from "emdash/seed";
+
+const { valid, errors, warnings } = validateSeed(seedData);
+
+if (!valid) {
+	errors.forEach((e) => console.error(e));
+}
+
+warnings.forEach((w) => console.warn(w));
+```
+
+验证检查：
+
+- 必需字段存在
+- Slug 遵循命名约定（小写，下划线）
+- 字段类型有效
+- 引用指向现有内容
+- 分层术语的父级存在
+- 重定向路径是安全的本地 URL
+- 重定向源路径唯一
+- 集合内没有重复的 slug
+
+## CLI 命令
+
+```bash
+# Apply seed file
+npx emdash seed .emdash/seed.json
+
+# Apply without sample content
+npx emdash seed .emdash/seed.json --no-content
+
+# Validate only
+npx emdash seed .emdash/seed.json --validate
+
+# Export current schema as seed
+npx emdash export-seed > seed.json
+
+# Export with content
+npx emdash export-seed --with-content > seed.json
+```
+
+## 后续步骤
+
+- **[创建主题](/zh-cn/themes/creating-themes/)** — 构建一个完整的主题
+- **[主题概述](/zh-cn/themes/overview/)** — 主题如何工作

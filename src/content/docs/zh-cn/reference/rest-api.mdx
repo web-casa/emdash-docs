@@ -1,0 +1,1021 @@
+---
+title: REST API 参考
+description: 用于内容、媒体和架构管理的 HTTP 端点。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash 在 `/_emdash/api/` 处公开了一个 REST API，用于内容管理、媒体上传和架构操作。
+
+## 认证
+
+API 请求需要通过 Bearer 令牌进行认证：
+
+```http
+Authorization: Bearer <token>
+```
+
+可以通过管理界面或编程方式生成令牌。
+
+## 响应格式
+
+所有响应都遵循一致的格式：
+
+```json
+// Success
+{
+  "success": true,
+  "data": { ... }
+}
+
+// Error
+{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable message",
+    "details": { ... }
+  }
+}
+```
+
+## 内容端点
+
+### 列出内容
+
+```http
+GET /_emdash/api/content/:collection
+```
+
+#### 参数
+
+| 参数         | 类型       | 描述                                 |
+| ------------ | ---------- | ------------------------------------ |
+| `collection` | `string`   | 集合 slug（路径）                    |
+| `cursor`     | `string`   | 分页游标（查询）                     |
+| `limit`      | `number`   | 每页项目数（查询，默认：50）         |
+| `status`     | `string`   | 按状态筛选（查询）                   |
+| `orderBy`    | `string`   | 排序字段（查询）                     |
+| `order`      | `string`   | 排序方向：`asc` 或 `desc`（查询）    |
+
+#### 响应
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "01HXK5MZSN...",
+        "type": "posts",
+        "slug": "hello-world",
+        "data": { "title": "Hello World", ... },
+        "status": "published",
+        "createdAt": "2025-01-24T12:00:00Z",
+        "updatedAt": "2025-01-24T12:00:00Z"
+      }
+    ],
+    "nextCursor": "eyJpZCI6..."
+  }
+}
+```
+
+### 获取内容
+
+```http
+GET /_emdash/api/content/:collection/:id
+```
+
+#### 响应
+
+```json
+{
+  "success": true,
+  "data": {
+    "item": {
+      "id": "01HXK5MZSN...",
+      "type": "posts",
+      "slug": "hello-world",
+      "data": { "title": "Hello World", ... },
+      "status": "published",
+      "createdAt": "2025-01-24T12:00:00Z",
+      "updatedAt": "2025-01-24T12:00:00Z"
+    }
+  }
+}
+```
+
+### 创建内容
+
+```http
+POST /_emdash/api/content/:collection
+Content-Type: application/json
+```
+
+#### 请求体
+
+```json
+{
+  "data": {
+    "title": "New Post",
+    "content": [...]
+  },
+  "slug": "new-post",
+  "status": "draft"
+}
+```
+
+#### 响应
+
+```json
+{
+  "success": true,
+  "data": {
+    "item": { ... }
+  }
+}
+```
+
+### 更新内容
+
+```http
+PUT /_emdash/api/content/:collection/:id
+Content-Type: application/json
+```
+
+#### 请求体
+
+```json
+{
+	"data": {
+		"title": "Updated Title"
+	},
+	"status": "published"
+}
+```
+
+### 删除内容
+
+```http
+DELETE /_emdash/api/content/:collection/:id
+```
+
+#### 响应
+
+```json
+{
+	"success": true,
+	"data": {
+		"success": true
+	}
+}
+```
+
+## 媒体端点
+
+### 列出媒体
+
+```http
+GET /_emdash/api/media
+```
+
+#### 参数
+
+| 参数       | 类型       | 描述                           |
+| ---------- | ---------- | ------------------------------ |
+| `cursor`   | `string`   | 分页游标                       |
+| `limit`    | `number`   | 每页项目数（默认：20）         |
+| `mimeType` | `string`   | 按 MIME 类型前缀筛选           |
+
+#### 响应
+
+```json
+{
+	"success": true,
+	"data": {
+		"items": [
+			{
+				"id": "01HXK5MZSN...",
+				"filename": "photo.jpg",
+				"mimeType": "image/jpeg",
+				"size": 102400,
+				"width": 1920,
+				"height": 1080,
+				"url": "https://cdn.example.com/photo.jpg",
+				"createdAt": "2025-01-24T12:00:00Z"
+			}
+		],
+		"nextCursor": "eyJpZCI6..."
+	}
+}
+```
+
+### 获取媒体
+
+```http
+GET /_emdash/api/media/:id
+```
+
+### 创建媒体
+
+```http
+POST /_emdash/api/media
+Content-Type: application/json
+```
+
+#### 请求体
+
+```json
+{
+	"filename": "photo.jpg",
+	"mimeType": "image/jpeg",
+	"size": 102400,
+	"width": 1920,
+	"height": 1080,
+	"storageKey": "uploads/photo.jpg"
+}
+```
+
+<Aside>
+	此端点在上传后记录媒体元数据。请使用上传端点或签名 URL 来上传实际文件。
+</Aside>
+
+### 更新媒体
+
+```http
+PUT /_emdash/api/media/:id
+Content-Type: application/json
+```
+
+#### 请求体
+
+```json
+{
+	"alt": "Photo description",
+	"caption": "Photo caption"
+}
+```
+
+### 删除媒体
+
+```http
+DELETE /_emdash/api/media/:id
+```
+
+### 获取媒体文件
+
+```http
+GET /_emdash/api/media/file/:key
+```
+
+提供实际的文件内容。仅适用于本地存储。
+
+## 修订端点
+
+### 列出修订
+
+```http
+GET /_emdash/api/content/:collection/:entryId/revisions
+```
+
+#### 参数
+
+| 参数     | 类型       | 描述                                 |
+| -------- | ---------- | ------------------------------------ |
+| `limit`  | `number`   | 要返回的最大修订数（默认：50）       |
+
+#### 响应
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "01HXK5MZSN...",
+        "collection": "posts",
+        "entryId": "01HXK5MZSN...",
+        "data": { ... },
+        "createdAt": "2025-01-24T12:00:00Z"
+      }
+    ],
+    "total": 5
+  }
+}
+```
+
+### 获取修订
+
+```http
+GET /_emdash/api/revisions/:revisionId
+```
+
+### 恢复修订
+
+```http
+POST /_emdash/api/revisions/:revisionId/restore
+```
+
+将内容恢复到此修订的状态并创建一个新修订。
+
+## 架构端点
+
+### 列出集合
+
+```http
+GET /_emdash/api/schema/collections
+```
+
+#### 响应
+
+```json
+{
+	"success": true,
+	"data": {
+		"items": [
+			{
+				"id": "01HXK5MZSN...",
+				"slug": "posts",
+				"label": "Posts",
+				"labelSingular": "Post",
+				"supports": ["drafts", "revisions", "preview"]
+			}
+		]
+	}
+}
+```
+
+### 获取集合
+
+```http
+GET /_emdash/api/schema/collections/:slug
+```
+
+#### 参数
+
+| 参数             | 类型        | 描述                               |
+| ---------------- | ----------- | ---------------------------------- |
+| `includeFields`  | `boolean`   | 包含字段定义（查询）               |
+
+### 创建集合
+
+```http
+POST /_emdash/api/schema/collections
+Content-Type: application/json
+```
+
+#### 请求体
+
+```json
+{
+	"slug": "products",
+	"label": "Products",
+	"labelSingular": "Product",
+	"description": "Product catalog",
+	"supports": ["drafts", "revisions"]
+}
+```
+
+### 更新集合
+
+```http
+PATCH /_emdash/api/schema/collections/:slug
+Content-Type: application/json
+```
+
+### 删除集合
+
+```http
+DELETE /_emdash/api/schema/collections/:slug
+```
+
+#### 参数
+
+| 参数     | 类型        | 描述                                       |
+| -------- | ----------- | ------------------------------------------ |
+| `force`  | `boolean`   | 即使集合有内容也删除（查询）               |
+
+### 列出字段
+
+```http
+GET /_emdash/api/schema/collections/:slug/fields
+```
+
+### 创建字段
+
+```http
+POST /_emdash/api/schema/collections/:slug/fields
+Content-Type: application/json
+```
+
+#### 请求体
+
+```json
+{
+	"slug": "price",
+	"label": "Price",
+	"type": "number",
+	"required": true,
+	"validation": {
+		"min": 0
+	}
+}
+```
+
+### 更新字段
+
+```http
+PATCH /_emdash/api/schema/collections/:collectionSlug/fields/:fieldSlug
+Content-Type: application/json
+```
+
+### 删除字段
+
+```http
+DELETE /_emdash/api/schema/collections/:collectionSlug/fields/:fieldSlug
+```
+
+### 重新排序字段
+
+```http
+POST /_emdash/api/schema/collections/:slug/fields/reorder
+Content-Type: application/json
+```
+
+#### 请求体
+
+```json
+{
+	"fieldSlugs": ["title", "content", "author", "publishedAt"]
+}
+```
+
+## 架构导出
+
+### 导出架构（JSON）
+
+```http
+GET /_emdash/api/schema
+Accept: application/json
+```
+
+### 导出架构（TypeScript）
+
+```http
+GET /_emdash/api/schema?format=typescript
+Accept: text/typescript
+```
+
+返回所有集合的 TypeScript 接口。
+
+## 插件端点
+
+### 列出插件
+
+```http
+GET /_emdash/api/plugins
+```
+
+### 获取插件
+
+```http
+GET /_emdash/api/plugins/:pluginId
+```
+
+### 启用插件
+
+```http
+POST /_emdash/api/plugins/:pluginId/enable
+```
+
+### 禁用插件
+
+```http
+POST /_emdash/api/plugins/:pluginId/disable
+```
+
+## 错误代码
+
+| 代码                     | HTTP 状态码 | 描述                     |
+| ------------------------ | ----------- | ------------------------ |
+| `NOT_FOUND`              | 404         | 资源未找到               |
+| `VALIDATION_ERROR`       | 400         | 输入数据无效             |
+| `UNAUTHORIZED`           | 401         | 令牌缺失或无效           |
+| `FORBIDDEN`              | 403         | 权限不足                 |
+| `CONTENT_LIST_ERROR`     | 500         | 列出内容失败             |
+| `CONTENT_CREATE_ERROR`   | 500         | 创建内容失败             |
+| `CONTENT_UPDATE_ERROR`   | 500         | 更新内容失败             |
+| `CONTENT_DELETE_ERROR`   | 500         | 删除内容失败             |
+| `MEDIA_LIST_ERROR`       | 500         | 列出媒体失败             |
+| `MEDIA_CREATE_ERROR`     | 500         | 创建媒体失败             |
+| `SCHEMA_ERROR`           | 400         | 架构操作失败             |
+| `DUPLICATE_SLUG`         | 409         | Slug 已存在              |
+| `RESERVED_SLUG`          | 400         | Slug 是保留的            |
+
+## 搜索端点
+
+### 全局搜索
+
+```http
+GET /_emdash/api/search?q=hello+world
+```
+
+#### 参数
+
+| 参数           | 类型       | 描述                                      |
+| -------------- | ---------- | ----------------------------------------- |
+| `q`            | `string`   | 搜索查询（必需）                          |
+| `collections`  | `string`   | 逗号分隔的集合 slugs                      |
+| `status`       | `string`   | 按状态筛选（默认：published）             |
+| `limit`        | `number`   | 最大结果数（默认：20）                    |
+| `cursor`       | `string`   | 分页游标                                  |
+
+#### 响应
+
+```json
+{
+  "results": [
+    {
+      "collection": "posts",
+      "id": "01HXK5MZSN...",
+      "slug": "hello-world",
+      "title": "Hello World",
+      "snippet": "...this is a <mark>hello</mark> <mark>world</mark> example...",
+      "score": 0.95
+    }
+  ],
+  "nextCursor": "eyJvZmZzZXQiOjIwfQ"
+}
+```
+
+### 搜索建议
+
+```http
+GET /_emdash/api/search/suggest?q=hel&limit=5
+```
+
+返回前缀匹配的标题用于自动补全。
+
+### 重建搜索索引
+
+```http
+POST /_emdash/api/search/rebuild
+```
+
+为所有或特定集合重建 FTS 索引。
+
+### 搜索统计
+
+```http
+GET /_emdash/api/search/stats
+```
+
+返回每个集合的索引文档数量。
+
+## 版块端点
+
+### 列出版块
+
+```http
+GET /_emdash/api/sections
+GET /_emdash/api/sections?source=theme
+GET /_emdash/api/sections?search=newsletter
+```
+
+### 获取版块
+
+```http
+GET /_emdash/api/sections/:slug
+```
+
+### 创建版块
+
+```http
+POST /_emdash/api/sections
+Content-Type: application/json
+
+{
+  "slug": "my-section",
+  "title": "My Section",
+  "keywords": ["keyword1"],
+  "content": [...]
+}
+```
+
+### 更新版块
+
+```http
+PUT /_emdash/api/sections/:slug
+```
+
+### 删除版块
+
+```http
+DELETE /_emdash/api/sections/:slug
+```
+
+## 设置端点
+
+### 获取所有设置
+
+```http
+GET /_emdash/api/settings
+```
+
+### 更新设置
+
+```http
+POST /_emdash/api/settings
+Content-Type: application/json
+
+{
+  "siteTitle": "My Site",
+  "tagline": "A great site",
+  "postsPerPage": 10
+}
+```
+
+## 菜单端点
+
+### 列出菜单
+
+```http
+GET /_emdash/api/menus
+```
+
+### 获取菜单
+
+```http
+GET /_emdash/api/menus/:name
+```
+
+### 创建菜单
+
+```http
+POST /_emdash/api/menus
+Content-Type: application/json
+
+{
+  "name": "footer",
+  "label": "Footer Navigation"
+}
+```
+
+### 更新菜单
+
+```http
+PUT /_emdash/api/menus/:name
+```
+
+### 删除菜单
+
+```http
+DELETE /_emdash/api/menus/:name
+```
+
+### 添加菜单项
+
+```http
+POST /_emdash/api/menus/:name/items
+Content-Type: application/json
+
+{
+  "type": "page",
+  "referenceCollection": "pages",
+  "referenceId": "page_about",
+  "label": "About Us"
+}
+```
+
+### 重新排序菜单项
+
+```http
+POST /_emdash/api/menus/:name/reorder
+Content-Type: application/json
+
+{
+  "items": [
+    { "id": "item_1", "parentId": null, "sortOrder": 0 },
+    { "id": "item_2", "parentId": null, "sortOrder": 1 },
+    { "id": "item_3", "parentId": "item_2", "sortOrder": 0 }
+  ]
+}
+```
+
+## 分类法端点
+
+### 列出分类法定义
+
+```http
+GET /_emdash/api/taxonomies
+```
+
+### 创建分类法
+
+```http
+POST /_emdash/api/taxonomies
+Content-Type: application/json
+
+{
+  "name": "genre",
+  "label": "Genres",
+  "labelSingular": "Genre",
+  "hierarchical": true,
+  "collections": ["books", "movies"]
+}
+```
+
+### 列出术语
+
+```http
+GET /_emdash/api/taxonomies/:name/terms
+```
+
+### 创建术语
+
+```http
+POST /_emdash/api/taxonomies/:name/terms
+Content-Type: application/json
+
+{
+  "slug": "tutorials",
+  "label": "Tutorials",
+  "parentId": "term_abc",
+  "description": "How-to guides"
+}
+```
+
+### 更新术语
+
+```http
+PUT /_emdash/api/taxonomies/:name/terms/:slug
+```
+
+### 删除术语
+
+```http
+DELETE /_emdash/api/taxonomies/:name/terms/:slug
+```
+
+### 设置条目术语
+
+```http
+POST /_emdash/api/content/:collection/:id/terms/:taxonomy
+Content-Type: application/json
+
+{
+  "termIds": ["term_news", "term_featured"]
+}
+```
+
+## 小部件区域端点
+
+### 列出小部件区域
+
+```http
+GET /_emdash/api/widget-areas
+```
+
+### 获取小部件区域
+
+```http
+GET /_emdash/api/widget-areas/:name
+```
+
+### 创建小部件区域
+
+```http
+POST /_emdash/api/widget-areas
+Content-Type: application/json
+
+{
+  "name": "sidebar",
+  "label": "Main Sidebar",
+  "description": "Appears on posts"
+}
+```
+
+### 删除小部件区域
+
+```http
+DELETE /_emdash/api/widget-areas/:name
+```
+
+### 添加小部件
+
+```http
+POST /_emdash/api/widget-areas/:name/widgets
+Content-Type: application/json
+
+{
+  "type": "content",
+  "title": "About",
+  "content": [...]
+}
+```
+
+### 更新小部件
+
+```http
+PUT /_emdash/api/widget-areas/:name/widgets/:id
+```
+
+### 删除小部件
+
+```http
+DELETE /_emdash/api/widget-areas/:name/widgets/:id
+```
+
+### 重新排序小部件
+
+```http
+POST /_emdash/api/widget-areas/:name/reorder
+Content-Type: application/json
+
+{
+  "widgetIds": ["widget_1", "widget_2", "widget_3"]
+}
+```
+
+## 用户管理端点
+
+### 列出用户
+
+```http
+GET /_emdash/api/admin/users
+GET /_emdash/api/admin/users?role=40
+GET /_emdash/api/admin/users?search=john
+```
+
+### 获取用户
+
+```http
+GET /_emdash/api/admin/users/:id
+```
+
+### 更新用户
+
+```http
+PATCH /_emdash/api/admin/users/:id
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "role": 40
+}
+```
+
+### 启用用户
+
+```http
+POST /_emdash/api/admin/users/:id/enable
+```
+
+### 禁用用户
+
+```http
+POST /_emdash/api/admin/users/:id/disable
+```
+
+## 认证端点
+
+### 设置状态
+
+```http
+GET /_emdash/api/setup/status
+```
+
+返回设置是否完成以及是否存在用户。
+
+### 通行密钥登录
+
+```http
+POST /_emdash/api/auth/passkey/options
+```
+
+获取 WebAuthn 认证选项。
+
+```http
+POST /_emdash/api/auth/passkey/verify
+Content-Type: application/json
+
+{
+  "id": "credential-id",
+  "rawId": "...",
+  "response": {...},
+  "type": "public-key"
+}
+```
+
+验证通行密钥并创建会话。
+
+### 魔法链接
+
+```http
+POST /_emdash/api/auth/magic-link/send
+Content-Type: application/json
+
+{
+  "email": "user@example.com"
+}
+```
+
+```http
+GET /_emdash/api/auth/magic-link/verify?token=xxx
+```
+
+### 登出
+
+```http
+POST /_emdash/api/auth/logout
+```
+
+### 当前用户
+
+```http
+GET /_emdash/api/auth/me
+```
+
+### 邀请用户
+
+```http
+POST /_emdash/api/auth/invite
+Content-Type: application/json
+
+{
+  "email": "newuser@example.com",
+  "role": 30
+}
+```
+
+### 通行密钥管理
+
+```http
+GET /_emdash/api/auth/passkey
+```
+
+列出用户的通行密钥。
+
+```http
+POST /_emdash/api/auth/passkey/register/options
+POST /_emdash/api/auth/passkey/register/verify
+```
+
+注册新的通行密钥。
+
+```http
+PATCH /_emdash/api/auth/passkey/:id
+Content-Type: application/json
+
+{
+  "name": "MacBook Pro"
+}
+```
+
+重命名通行密钥。
+
+```http
+DELETE /_emdash/api/auth/passkey/:id
+```
+
+删除通行密钥。
+
+## 导入端点
+
+### 分析 WordPress 导出
+
+```http
+POST /_emdash/api/import/wordpress/analyze
+Content-Type: multipart/form-data
+
+file: <WXR file>
+```
+
+### 执行 WordPress 导入
+
+```http
+POST /_emdash/api/import/wordpress/execute
+Content-Type: application/json
+
+{
+  "analysisId": "...",
+  "options": {
+    "includeMedia": true,
+    "includeTaxonomies": true,
+    "includeMenus": true
+  }
+}
+```
+
+## 速率限制
+
+API 端点可能会根据部署配置进行速率限制。当被限制时，响应包含：
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 60
+```
+
+## CORS
+
+该 API 支持浏览器请求的 CORS。请在您的部署中配置允许的来源。

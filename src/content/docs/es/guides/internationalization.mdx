@@ -1,0 +1,334 @@
+---
+title: Internacionalización (i18n)
+description: Traduce contenido a múltiples idiomas con publicación por localización, slugs y retroceso automático.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash se integra con el [enrutamiento i18n incorporado de Astro](https://docs.astro.build/en/guides/internationalization/) para proporcionar gestión de contenido multilingüe. Astro maneja el enrutamiento de URL y la detección de configuración regional; EmDash maneja el almacenamiento y recuperación de contenido traducido.
+
+Cada traducción es una entrada de contenido completa e independiente con su propio slug, estado e historial de revisiones. La versión en francés de una publicación puede estar en borrador mientras que la versión en inglés está publicada.
+
+## Configuración
+
+Habilita i18n agregando un bloque `i18n` a tu configuración de Astro. EmDash lee esta configuración automáticamente — no hay una configuración de configuración regional separada en EmDash.
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	i18n: {
+		defaultLocale: "en",
+		locales: ["en", "fr", "es"],
+		fallback: { fr: "en", es: "en" },
+	},
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+Cuando `i18n` no está presente en la configuración de Astro, todas las funciones de i18n están deshabilitadas y EmDash se comporta como un CMS de un solo idioma.
+
+## Cómo Funcionan las Traducciones
+
+EmDash utiliza un modelo **fila por configuración regional**. Cada traducción es su propia fila en la base de datos con su propio ID, slug y estado, vinculada a otras traducciones a través de un identificador compartido `translation_group`.
+
+```
+ec_posts:
+id       | slug        | locale | translation_group | status
+---------|-------------|--------|-------------------|----------
+01ABC... | my-post     | en     | 01ABC...          | published
+01DEF... | mon-article | fr     | 01ABC...          | draft
+01GHI... | mi-entrada  | es     | 01ABC...          | published
+```
+
+Este diseño significa:
+
+- **Slugs por configuración regional** — `/blog/my-post` y `/fr/blog/mon-article` funcionan naturalmente
+- **Publicación por configuración regional** — publica la versión en inglés mientras mantienes la francesa en borrador
+- **Revisiones por configuración regional** — cada traducción tiene su propio historial de revisiones
+- **Sin complejidad de consultas entre configuraciones regionales** — las consultas de lista devuelven entradas para una sola configuración regional
+
+## Consultando Contenido Traducido
+
+### Entrada única
+
+Pasa `locale` a `getEmDashEntry` para recuperar una traducción específica. Cuando se omite, por defecto utiliza la configuración regional actual de la solicitud (establecida por el middleware i18n de Astro).
+
+```
+astro title="src/pages/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug, {
+  locale: Astro.currentLocale,
+});
+
+if (!post) return Astro.redirect("/404");
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+</article>
+```
+
+### Cadena de respaldo (fallback)
+
+Cuando no existe contenido para la configuración regional solicitada, EmDash sigue la cadena de respaldo definida en tu configuración de Astro. Dado `fallback: { fr: "en" }`:
+
+1. Intenta la configuración regional solicitada (`fr`)
+2. Intenta la configuración regional de respaldo (`en`)
+3. Intenta la configuración regional predeterminada
+
+El respaldo solo se aplica a consultas de entrada única. Las consultas de lista devuelven entradas solo para la configuración regional solicitada — sin mezcla entre configuraciones regionales.
+
+<Aside>
+  Cuando se usa un respaldo, los metadatos de la respuesta incluyen `fallbackLocale` para que tu plantilla pueda mostrar un aviso de "este contenido aún no está traducido".
+</Aside>
+
+### Listado de colección
+
+Filtra una colección por configuración regional:
+
+```
+astro title="src/pages/posts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  locale: Astro.currentLocale,
+  status: "published",
+});
+---
+
+<ul>
+  {posts.map((post) => (
+    <li><a href={`/${post.data.slug}`}>{post.data.title}</a>
+</li>
+  ))}
+</ul>
+```
+
+## Selector de Idioma
+
+Usa `getTranslations` para construir un selector de idioma que enlace a las traducciones existentes de la entrada actual:
+
+```
+astro title="src/components/LanguageSwitcher.astro"
+---
+import { getTranslations } from "emdash";
+import { getRelativeLocaleUrl } from "astro:i18n";
+
+interface Props {
+  collection: string;
+  entryId: string;
+}
+
+const { collection, entryId } = Astro.props;
+const { translations } = await getTranslations(collection, entryId);
+---
+
+<nav aria-label="Language">
+  <ul>
+    {translations.map((t) => (
+      <li>
+        <a
+          href={getRelativeLocaleUrl(t.locale, `/blog/${t.slug}`)}
+          aria-current={t.locale === Astro.currentLocale ? "page" : undefined}
+        >
+          {t.locale.toUpperCase()}
+        </a>
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+
+La función `getTranslations` devuelve todas las variantes de configuración regional en el mismo grupo de traducción:
+
+```ts
+const { translationGroup, translations } = await getTranslations("posts", post.entry.id);
+// translations: [
+//   { locale: "en", id: "01ABC...", slug: "my-post", status: "published" },
+//   { locale: "fr", id: "01DEF...", slug: "mon-article", status: "draft" },
+// ]
+```
+
+<Aside type="tip">
+  Usa `getRelativeLocaleUrl` de `astro:i18n` para construir URLs con prefijo de configuración regional. Esto respeta tu estrategia de enrutamiento de Astro (`prefix-other-locales` o `prefix-always`).
+</Aside>
+
+## Gestionando Traducciones en el Administrador
+
+### Lista de contenido
+
+Cuando i18n está habilitado, la lista de contenido muestra:
+
+- Una **columna de configuración regional** que muestra la configuración regional de cada entrada
+- Un **filtro de configuración regional** en la barra de herramientas para cambiar entre configuraciones regionales
+
+### Creando traducciones
+
+Abre cualquier entrada de contenido en el editor. La barra lateral muestra un panel de **Traducciones** que enumera todas las configuraciones regionales configuradas. Para cada configuración regional:
+
+- **"Traducir"** aparece para configuraciones regionales sin traducción — haz clic para crear una
+- **"Editar"** aparece para configuraciones regionales con una traducción existente — haz clic para navegar a ella
+- La configuración regional actual está marcada con una marca de verificación
+
+Al crear una traducción, la nueva entrada se prellena con datos de la configuración regional de origen y se le asigna un slug predeterminado de `{source-slug}-{locale}`. Ajusta el slug y el contenido según sea necesario, luego guarda.
+
+### Publicación por configuración regional
+
+Cada traducción tiene su propio estado. Publica, despublica o programa traducciones de forma independiente. La versión en francés puede estar en borrador mientras que la versión en inglés está activa.
+
+## API de Contenido
+
+### Parámetro de configuración regional
+
+Todas las rutas de la API de contenido aceptan un parámetro de consulta opcional `locale`:
+
+```http
+GET /_emdash/api/content/posts?locale=fr
+GET /_emdash/api/content/posts/my-post?locale=fr
+```
+
+Cuando se omite, por defecto utiliza la configuración regional predeterminada configurada.
+
+### Creando traducciones vía API
+
+Crea una traducción pasando `locale` y `translationOf` al endpoint de creación de contenido:
+
+```http
+POST /_emdash/api/content/posts
+Content-Type: application/json
+
+{
+  "locale": "fr",
+  "translationOf": "01ABC...",
+  "data": {
+    "title": "Mon Article",
+    "slug": "mon-article"
+  }
+}
+```
+
+La nueva entrada comparte el `translation_group` de la entrada de origen y comienza como borrador.
+
+### Listando traducciones
+
+Recupera todas las traducciones para una entrada dada:
+
+```http
+GET /_emdash/api/content/posts/01ABC.../translations
+```
+
+Devuelve el ID del grupo de traducción y un array de variantes de configuración regional con sus IDs, slugs y estados.
+
+## CLI
+
+La CLI admite banderas `--locale` en comandos de contenido:
+
+```bash
+# List French posts
+emdash content list posts --locale fr
+
+# Obtener una entrada específica en francés
+emdash content get posts my-post --locale fr
+
+# Crear una traducción al francés de una entrada existente
+emdash content create posts --locale fr --translation-of 01ABC...
+```
+
+## Sembrando Contenido Multilingüe
+
+Los archivos de semilla (seed) expresan traducciones usando `locale` y `translationOf`:
+
+```
+json title=".emdash/seed.json"
+{
+  "content": {
+    "posts": [
+      {
+        "id": "welcome",
+        "slug": "welcome",
+        "locale": "en",
+        "status": "published",
+        "data": { "title": "Welcome" }
+      },
+      {
+        "id": "welcome-fr",
+        "slug": "bienvenue",
+        "locale": "fr",
+        "translationOf": "welcome",
+        "status": "draft",
+        "data": { "title": "Bienvenue" }
+      }
+    ]
+  }
+}
+```
+
+La entrada de la configuración regional de origen debe aparecer antes de sus traducciones en el archivo de semilla para que las referencias `translationOf` se resuelvan correctamente.
+
+## Capacidad de Traducción de Campos
+
+Cada campo tiene una configuración `translatable` (predeterminado: `true`). Al crear una traducción:
+
+- **Campos traducibles** se prellenan desde la configuración regional de origen para su edición
+- **Campos no traducibles** se copian y se mantienen sincronizados en todas las traducciones del grupo
+
+Los campos del sistema como `status`, `published_at` y `author_id` son siempre por configuración regional y nunca se sincronizan.
+
+<Aside>
+  Los campos no traducibles son útiles para valores que deben mantenerse consistentes entre configuraciones regionales, como un SKU de producto o un número de orden de clasificación.
+</Aside>
+
+## Estrategia de URL
+
+EmDash no gestiona las URLs de localización — Astro maneja el enrutamiento. Patrones comunes:
+
+```
+# prefix-other-locales (Astro default)
+/blog/my-post          → en (default locale, no prefix)
+/fr/blog/mon-article   → fr
+
+# prefix-always
+/en/blog/my-post       → en
+/fr/blog/mon-article   → fr
+```
+
+Usa `getRelativeLocaleUrl` de `astro:i18n` para construir URLs correctas independientemente del modo de enrutamiento.
+
+## Importando Contenido Multilingüe
+
+### WordPress con WPML o Polylang
+
+La fuente de importación del plugin de WordPress detecta WPML y Polylang automáticamente. Cuando se detectan, el contenido importado incluye metadatos de localización y grupo de traducción, preservando la estructura multilingüe.
+
+### Archivos WXR
+
+Las exportaciones WXR no incluyen metadatos de WPML/Polylang. Importa como una sola localización y crea traducciones manualmente, o usa la bandera `--locale` para asignar una localización a todos los elementos importados:
+
+```bash
+# Import a French WXR export
+emdash import wordpress export-fr.xml --execute --locale fr
+
+# Coincidir con contenido existente en inglés por slug
+emdash import wordpress export-fr.xml --execute --locale fr --translation-of-locale en
+```
+
+## Próximos Pasos
+
+- [Consultando Contenido](/es/guides/querying-content/) — Referencia completa de la API de consultas
+- [Trabajando con Contenido](/es/guides/working-with-content/) — Gestión de contenido en el administrador
+- [Enrutamiento i18n de Astro](https://docs.astro.build/en/guides/internationalization/) — Configuración de enrutamiento de Astro

@@ -1,0 +1,342 @@
+---
+title: 认证
+description: 为你的 EmDash 站点配置以通行密钥为核心的认证体系。
+---
+
+import { Aside, Steps, Tabs, TabItem, Code } from "@astrojs/starlight/components";
+
+EmDash 主要使用通行密钥登录。通行密钥具备防钓鱼特性、无需密码，也可以通过浏览器或密码管理器在多设备之间同步使用。
+
+如果部署在 Cloudflare 上，你也可以选择使用 [Cloudflare Access](#cloudflare-access) 作为替代认证方案。
+
+## 工作原理
+
+通行密钥使用 WebAuthn，这是一种创建公钥凭据的 Web 标准，凭据存储在您的设备上或通过密码管理器同步。当您登录时，您的设备会证明拥有该凭据，而无需通过网络发送密码。
+
+通行密钥登录的优点：
+
+- **无需记忆或泄露密码**
+- **防钓鱼** — 凭据绑定到您的站点域名
+- **跨设备同步** — 可与 iCloud 钥匙串、Google 密码管理器、1Password 等配合使用
+- **快速登录** — 通过生物识别或 PIN 码一键登录
+
+## 首次用户设置
+
+首次访问管理面板时，设置向导将引导您创建管理员账户。
+
+<Steps>
+
+1. 导航到 `http://localhost:4321/_emdash/admin`
+
+2. 您将被重定向到设置向导。输入：
+   - **站点标题** — 您的站点名称
+   - **标语** — 简短描述
+   - **管理员邮箱** — 您的邮箱地址
+
+3. 点击 **创建站点** 以注册您的通行密钥
+
+4. 您的浏览器将提示您创建通行密钥：
+   - 在 macOS 上：Touch ID、设备密码或安全密钥
+   - 在 Windows 上：Windows Hello 或安全密钥
+   - 在移动设备上：Face ID、指纹或 PIN 码
+
+5. 通行密钥注册成功后，您将登录并被重定向到管理仪表板。
+
+</Steps>
+
+<Aside>
+	您的邮箱在初始设置期间会被存储但不会验证。您可以稍后配置邮箱以启用邀请和魔法链接登录等功能。
+</Aside>
+
+## 登录
+
+设置完成后，返回管理面板将触发通行密钥身份验证：
+
+<Steps>
+
+1. 访问 `/_emdash/admin`
+
+2. 如果未登录，您将看到登录页面
+
+3. 点击 **登录** 进行身份验证
+
+4. 您的浏览器会提示您使用通行密钥（生物识别、PIN 码或安全密钥）
+
+5. 验证通过后，您将被重定向到管理仪表板
+
+</Steps>
+
+## 魔法链接备用方案
+
+如果您无法使用通行密钥（例如，设备丢失），魔法链接提供了一种替代方案。这需要配置邮箱。
+
+<Steps>
+
+1. 在登录页面，点击 **使用邮箱登录**
+
+2. 输入您的邮箱地址
+
+3. 检查您的收件箱中的登录链接
+
+4. 点击链接进行身份验证（链接 15 分钟内有效）
+
+</Steps>
+
+<Aside type="caution">
+	魔法链接为一次性使用，15 分钟后过期。如果您的链接已过期，请重新请求一个。
+</Aside>
+
+## OAuth 登录
+
+配置后，EmDash 支持使用 GitHub 和 Google 进行 OAuth 登录。用户可以在初始通行密钥设置后关联其账户。
+
+有关设置说明，请参阅 [配置指南](/zh-cn/reference/configuration#oauth)。
+
+## 用户角色
+
+EmDash 使用基于角色的访问控制，共分五级：
+
+| 角色         | 级别 | 描述                     |
+| ------------ | ---- | ------------------------ |
+| 订阅者       | 10   | 仅查看权限               |
+| 投稿者       | 20   | 创建内容（需要批准）     |
+| 作者         | 30   | 创建/编辑/发布自己的内容 |
+| 编辑         | 40   | 管理所有内容             |
+| 管理员       | 50   | 包括设置在内的完全访问权限 |
+
+每个角色都继承所有较低级别的权限。第一个用户始终被创建为管理员。
+
+## 邀请用户
+
+管理员可以通过管理面板邀请新用户：
+
+<Steps>
+
+1. 转到 **设置** > **用户**
+
+2. 点击 **邀请用户**
+
+3. 输入用户的邮箱并选择一个角色
+
+4. 点击 **发送邀请**
+
+5. 用户将收到一封包含邀请链接的邮件
+
+6. 他们点击链接并注册其通行密钥
+
+</Steps>
+
+邀请有效期为 7 天。管理员可以从用户页面重新发送或撤销邀请。
+
+## 管理通行密钥
+
+用户可以从账户设置管理其通行密钥：
+
+- **添加通行密钥** — 注册额外的通行密钥用于备份或其他设备
+- **移除通行密钥** — 删除不再使用的通行密钥
+- **重命名通行密钥** — 为通行密钥指定描述性名称
+
+每个用户最多可以注册 10 个通行密钥。
+
+<Aside type="tip">
+	在多个设备（例如，笔记本电脑和手机）上注册通行密钥，以确保您始终有办法登录。
+</Aside>
+
+## 自助注册
+
+对于团队站点，您可以为特定的邮箱域名启用自助注册：
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			auth: {
+				selfSignup: {
+					domains: ["example.com"],
+					defaultRole: "contributor",
+				},
+			},
+		}),
+	],
+});
+```
+
+具有匹配邮箱域名的用户无需邀请即可注册。他们将收到一封验证邮件，并通过注册通行密钥来完成注册。
+
+## 会话配置
+
+会话通过安全的 HttpOnly Cookie 保存，并带有合理的默认配置：
+
+```js title="astro.config.mjs"
+emdash({
+	auth: {
+		session: {
+			maxAge: 30 * 24 * 60 * 60, // 30 days (default)
+			sliding: true, // Reset expiry on activity
+		},
+	},
+});
+```
+
+## 安全说明
+
+- **通行密钥以公钥形式存储** — 私钥永远不会离开您的设备
+- **质询验证** 防止重放攻击
+- **速率限制** 防止暴力破解（5 次尝试/分钟/IP）
+- **会话使用 HttpOnly、Secure、SameSite=Lax** 以确保 Cookie 安全
+- **魔法链接令牌使用 SHA-256 哈希** — 原始令牌从不存储
+
+## 故障排除
+
+### "未注册通行密钥"
+
+如果在登录时看到此错误，您的通行密钥可能已从密码管理器中删除。请让管理员向您发送魔法链接或新邀请。
+
+### "通行密钥认证失败"
+
+这通常意味着通行密钥是为其他域名创建的。通行密钥与域名绑定 — 为 `localhost:4321` 创建的通行密钥在 `example.com` 上无效。请为每个域名注册新的通行密钥。
+
+### "会话已过期"
+
+默认情况下，会话持续 30 天，并具有滑动过期时间。如果您意外退出登录，请清除 Cookie 并重新登录。
+
+### 丢失所有通行密钥
+
+如果您丢失了所有已注册通行密钥的访问权限：
+
+1. 请另一位管理员向您发送魔法链接（需要配置邮箱）
+2. 使用魔法链接登录
+3. 在账户设置中注册新的通行密钥
+
+如果您是唯一的管理员且未配置邮箱，则需要通过数据库重置站点的身份验证。
+
+## Cloudflare Access
+
+部署到 Cloudflare 时，你可以使用 [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/) 替代通行密钥。Access 会在边缘侧接入你现有的身份提供方来完成认证。
+
+<Aside>
+	配置 Cloudflare Access 后，它将成为**唯一的**身份验证方法。通行密钥、OAuth、魔法链接和自助注册都将被禁用。
+</Aside>
+
+### 为何使用 Cloudflare Access？
+
+- **单点登录** — 用户使用您公司的 IdP 进行身份验证
+- **集中式访问控制** — 在 Cloudflare 仪表板中管理谁可以访问管理面板
+- **无需管理通行密钥** — 无需注册或管理通行密钥
+- **基于组的角色** — 自动将 IdP 组映射到 EmDash 角色
+
+### 设置
+
+1. 为您的 EmDash 站点创建一个 [Cloudflare Access 应用程序](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/)
+2. 记下应用程序设置中的 **应用程序受众 (AUD) 标签**
+3. 配置 EmDash 以使用 Access：
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import cloudflare from "@astrojs/cloudflare";
+import emdash from "emdash/astro";
+import { d1, access } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	output: "server",
+	adapter: cloudflare(),
+	integrations: [
+		emdash({
+			database: d1({ binding: "DB" }),
+			auth: access({
+				teamDomain: "myteam.cloudflareaccess.com",
+				audience: "abc123def456...", // From Access app settings
+			}),
+		}),
+	],
+});
+```
+
+### 配置选项
+
+| 选项             | 类型      | 默认值                     | 描述                                                   |
+| ---------------- | --------- | -------------------------- | ------------------------------------------------------ |
+| `teamDomain`     | `string`  | 必填                       | 您的 Access 团队域名（例如，`myteam.cloudflareaccess.com`） |
+| `audience`       | `string`  | 必填                       | 应用程序受众 (AUD) 标签，来自 Access 设置           |
+| `autoProvision`  | `boolean` | `true`                     | 在首次 Access 登录时创建 EmDash 用户                 |
+| `defaultRole`    | `number`  | `30`                       | 不匹配任何组的用户的角色（30 = 作者）                   |
+| `syncRoles`      | `boolean` | `false`                    | 每次登录时根据 IdP 组更新角色                         |
+| `roleMapping`    | `object`  | —                          | 将 IdP 组名映射到角色级别                             |
+| `audienceEnvVar` | `string`  | `"CF_ACCESS_AUDIENCE"`     | 用于存储受众标签的环境变量名称（替代硬编码方式） |
+
+### 角色映射
+
+将您的 IdP 组映射到 EmDash 角色：
+
+```js title="astro.config.mjs"
+emdash({
+	auth: access({
+		teamDomain: "myteam.cloudflareaccess.com",
+		audience: "abc123...",
+		roleMapping: {
+			Admins: 50, // Admin
+			"Content Editors": 40, // Editor
+			Writers: 30, // Author
+		},
+		defaultRole: 20, // Contributor for users not in any group
+	}),
+});
+```
+
+如果用户属于多个组，则第一个匹配的组生效。**第一个用户**访问站点时始终成为管理员，无论其组别如何。
+
+### 角色同步行为
+
+默认情况下（`syncRoles: false`），用户的角色在首次登录时设置，之后不会更改。这允许管理员在 EmDash 中手动调整角色。
+
+如果您希望 IdP 组具有权威性 — 用户的角色将在每次登录时根据其当前组别更新 — 请设置 `syncRoles: true`。
+
+### 工作原理
+
+1. 用户访问 `/_emdash/admin`
+2. Cloudflare Access 拦截并重定向到您的 IdP
+3. 用户进行身份验证（SSO、MFA 等）
+4. Access 在请求中设置一个已签名的 JWT
+5. EmDash 验证 JWT 并创建/验证用户
+
+<Aside type="tip">
+	您仍然可以在 EmDash 中本地禁用用户。即使用户通过了 Access 验证，被禁用的用户也会被拒绝访问。
+</Aside>
+
+### 禁用的功能
+
+启用 Access 后，以下功能不可用：
+
+- 登录页面 (`/_emdash/admin/login`)
+- 通行密钥注册和管理
+- OAuth 登录
+- 魔法链接登录
+- 自助注册
+- 用户邀请
+
+用户管理完全通过您的 Cloudflare Access 策略进行。
+
+### 故障排除
+
+#### "未提供 Access JWT"
+
+请求到达 EmDash 时没有 Access JWT。这意味着：
+
+- Access 未配置为保护您的应用程序
+- Access 策略未匹配到管理路由
+
+请确认您的 Access 应用程序覆盖了 `/_emdash/admin/*`。
+
+#### "JWT 受众不匹配"
+
+您的配置中的 `audience` 与 JWT 不匹配。请仔细检查 Access 应用程序设置中的应用程序受众标签。
+
+#### "用户未授权"
+
+用户通过 Access 进行了身份验证，但 `autoProvision` 为 `false` 且他们在 EmDash 中不存在。请执行以下操作之一：
+
+- 设置 `autoProvision: true`，或
+- 在用户登录前手动创建该用户

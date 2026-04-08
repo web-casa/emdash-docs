@@ -1,0 +1,258 @@
+---
+title: x402 ペイメント
+description: x402ペイメントプロトコルでコンテンツを収益化 — 人間ではなくボットに課金します。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+`@emdash-cms/x402` パッケージは、Cloudflare上の任意のAstroサイトに [x402支払いプロトコル](https://www.x402.org/) サポートを追加します。EmDashコアへの依存はなく単独で動作しますが、ページ単位の価格設定にはEmDashのCMSフィールドと組み合わせて使用すると効果的です。
+
+x402はHTTPネイティブな支払いプロトコルです。クライアントが支払いなしで有料リソースを要求すると、サーバーは `402 Payment Required` と機械可読な支払い指示で応答します。x402を理解するエージェントやブラウザは、支払いを自動的に完了し、リクエストを再試行できます。
+
+## 使用する場面
+
+最も一般的なユースケースは **ボット専用モード** です：AIエージェントやスクレイパーにはコンテンツアクセスに対して課金し、人間の訪問者は無料で閲覧できるようにします。これはCloudflare Bot Managementを使用してボットと人間を区別します。
+
+すべての訪問者に支払いを強制することも、強制せずに支払いヘッダーをチェックすること（条件付きレンダリング）も可能です。
+
+## インストール
+
+<Tabs>
+<TabItem label="pnpm">
+```bash
+pnpm add @emdash-cms/x402
+```
+</TabItem>
+<TabItem label="npm">
+```bash
+npm install @emdash-cms/x402
+```
+</TabItem>
+<TabItem label="yarn">
+```bash
+yarn add @emdash-cms/x402
+```
+</TabItem>
+</Tabs>
+
+## セットアップ
+
+Astro設定にインテグレーションを追加します：
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import { x402 } from "@emdash-cms/x402";
+
+export default defineConfig({
+	integrations: [
+		x402({
+			payTo: "0xYourWalletAddress",
+			network: "eip155:8453", // Base mainnet
+			defaultPrice: "$0.01",
+			botOnly: true,
+			botScoreThreshold: 30,
+		}),
+	],
+});
+```
+
+TypeScriptが `Astro.locals.x402` を認識できるように型参照を追加します：
+
+```
+ts title="src/env.d.ts"
+/// <reference types="@emdash-cms/x402/locals" />
+```
+
+## 基本的な使い方
+
+このインテグレーションは、`Astro.locals.x402` にエンフォーサーを配置します。ページのフロントマターで `enforce()` を呼び出して、コンテンツを支払いの後ろに制限します：
+
+```
+astro title="src/pages/posts/[...slug].astro"
+---
+const { x402 } = Astro.locals;
+
+const result = await x402.enforce(Astro.request, {
+  price: "$0.05",
+  description: "Premium article",
+});
+
+// リクエストに有効な支払いがない場合、enforce() は402 Responseを返します。
+// それを直接返して、クライアントに支払い指示を送信します。
+if (result instanceof Response) return result;
+
+// 支払いが検証された（またはbotOnlyモードでスキップされた）。レスポンスヘッダーを適用して、
+// クライアントが決済証明を受け取れるようにします。
+x402.applyHeaders(result, Astro.response);
+---
+
+<article>
+  <h1>プレミアムコンテンツ</h1>
+</article>
+```
+
+`enforce()` メソッドは次のいずれかを返します：
+
+- **`Response`** (402) — クライアントは支払いが必要です。直接返します。
+- **`EnforceResult`** — リクエストを続行すべきです。コンテンツの支払いが済んでいるか、強制がスキップされました（botOnlyモードでの人間）。
+
+## ボット専用モード
+
+`botOnly` が `true` の場合、インテグレーションは `request.cf.botManagement.score` を読み取ってリクエストを分類します：
+
+- **スコアが閾値未満** (デフォルト30) -> ボットとして扱われ、支払いが強制される
+- **スコアが閾値以上** -> 人間として扱われ、強制がスキップされる
+- **ボット管理データなし** (ローカル開発、非CFデプロイ) -> 人間として扱われる
+
+`EnforceResult` には `skipped` フラグが含まれるため、「支払いが不要だった」と「支払い済み」を区別できます：
+
+```astro
+---
+const result = await x402.enforce(Astro.request, { price: "$0.01" });
+if (result instanceof Response) return result;
+
+x402.applyHeaders(result, Astro.response);
+
+// result.paid    — 支払いが検証された場合はtrue
+// result.skipped — 強制がスキップされた場合はtrue（botOnlyモードでの人間）
+// result.payer   — 支払い者のウォレットアドレス（支払い済みの場合）
+---
+```
+
+<Aside>
+	ボット専用モードでは、Bot Managementが有効なCloudflareデプロイメントが必要です。ローカル開発では、
+	すべてのリクエストは人間として扱われ、強制はスキップされます。
+</Aside>
+
+## EmDashを使用したページ単位の価格設定
+
+EmDashを使用する場合、コレクションに `number` フィールドを追加してページ単位の価格設定ができます。特別なスキーマや管理UIは不要です — 通常のCMSフィールドのみで可能です：
+
+```
+astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry } = await getEmDashEntry("posts", slug);
+
+if (!entry) return Astro.redirect("/404");
+
+const { x402 } = Astro.locals;
+
+// CMSからの価格を使用し、デフォルトにフォールバック
+const result = await x402.enforce(Astro.request, {
+  price: entry.data.price || "$0.01",
+  description: entry.data.title,
+});
+if (result instanceof Response) return result;
+
+x402.applyHeaders(result, Astro.response);
+---
+
+<article>
+  <h1>{entry.data.title}</h1>
+</article>
+```
+
+## 強制せずに支払いをチェックする
+
+`hasPayment()` を使用して、検証や強制を行わずに、リクエストに支払いヘッダーが含まれているかどうかを確認します。これは条件付きレンダリング — 支払い済みの訪問者と未払いの訪問者に異なるコンテンツを表示する — に便利です：
+
+```astro
+---
+const { x402 } = Astro.locals;
+
+const hasPaid = x402.hasPayment(Astro.request);
+---
+
+{hasPaid ? (
+  <p>Full premium content here.</p>
+) : (
+  <p>Subscribe for the full article.</p>
+)}
+```
+
+<Aside type="caution">
+	`hasPayment()` は支払いヘッダーの存在のみをチェックします。支払いが有効かどうかは検証しません。
+	検証済みの支払いが必要な場合は `enforce()` を使用してください。
+</Aside>
+
+## 設定リファレンス
+
+| オプション              | 型        | デフォルト                          | 説明                                      |
+| ------------------- | --------- | -------------------------------- | ------------------------------------------------ |
+| `payTo`             | `string`  | 必須                         | 送金先ウォレットアドレス                        |
+| `network`           | `string`  | 必須                         | CAIP-2ネットワーク識別子 (例: `eip155:8453`)  |
+| `defaultPrice`      | `Price`   | —                                | デフォルト価格、ページ単位で上書き可能               |
+| `facilitatorUrl`    | `string`  | `https://x402.org/facilitator`   | 支払いファシリテーターURL                           |
+| `scheme`            | `string`  | `"exact"`                        | 支払いスキーム                                    |
+| `maxTimeoutSeconds` | `number`  | `60`                             | 支払い署名の最大タイムアウト時間            |
+| `evm`               | `boolean` | `true`                           | EVMチェーンサポートを有効化                          |
+| `svm`               | `boolean` | `false`                          | Solanaチェーンサポートを有効化 ( `@x402/svm` が必要) |
+| `botOnly`           | `boolean` | `false`                          | ボットに対してのみ支払いを強制                     |
+| `botScoreThreshold` | `number`  | `30`                             | ボットスコア閾値 (1-99, 低いほどボットの可能性が高い) |
+
+### 価格フォーマット
+
+価格はいくつかのフォーマットで指定できます：
+
+- **ドル文字列** — `"$0.10"` (`$` 接頭辞は除去され、値はそのまま渡される)
+- **数値文字列** — `"0.10"`
+- **数値** — `0.10`
+- **オブジェクト** — `{ amount: "100000", asset: "0x...", extra: {} }` 明示的な資産/金額用
+
+### ネットワーク識別子
+
+ネットワークは [CAIP-2](https://github.com/ChainAgnostic/CAIPs/blob/main/CAIPs/caip-2.md) フォーマットを使用します：
+
+| ネットワーク       | 識別子           |
+| ------------- | ---------------- |
+| Base mainnet  | `eip155:8453`    |
+| Base Sepolia  | `eip155:84532`   |
+| Ethereum      | `eip155:1`       |
+| Solana        | `solana:mainnet` |
+
+## 強制オプション
+
+特定のページに対して設定のデフォルトを上書きします:
+
+```ts
+await x402.enforce(Astro.request, {
+	price: "$0.25", // Override price
+	payTo: "0xDifferentWallet", // Override wallet
+	network: "eip155:1", // Override network
+	description: "Article: How x402 Works", // Resource description
+	mimeType: "text/html", // MIME type hint
+});
+```
+
+## Solana サポート
+
+Solanaはオプトインです。`@x402/svm`をインストールし、設定で有効にしてください:
+
+```bash
+pnpm add @x402/svm
+```
+
+```
+js title="astro.config.mjs"
+x402({
+	payTo: "YourSolanaAddress",
+	network: "solana:mainnet",
+	svm: true,
+	evm: false, // Disable EVM if only using Solana
+});
+```
+
+## 仕組み
+
+1. `x402()` 統合は、エンフォーサーを作成し `Astro.locals.x402` に配置するミドルウェアを登録します
+2. 設定はVite仮想モジュール (`virtual:x402/config`) を介してミドルウェアに渡されます
+3. `enforce()` が呼び出されると、リクエストの `payment-signature` ヘッダーをチェックします
+4. 支払いヘッダーが存在しない場合、`402 Payment Required` レスポンスが返され、支払い手順が `PAYMENT-REQUIRED` ヘッダーに含まれます
+5. 支払いヘッダーが存在する場合、ファシリテーターサービスを介して検証され、決済されます
+6. 決済後、`applyHeaders()` を介してレスポンスに `PAYMENT-RESPONSE` ヘッダーが設定されます
+
+リソースサーバーは最初のリクエスト時に遅延初期化され、ワーカーのライフタイム中キャッシュされます。

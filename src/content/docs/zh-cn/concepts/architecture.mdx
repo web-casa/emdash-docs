@@ -1,0 +1,262 @@
+---
+title: 架构
+description: EmDash 底层工作原理——数据库优先的架构、实时集合、插件系统和管理面板。
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDash 与 Astro 深度集成，提供完整的 CMS 体验。本页解释了关键的架构决策以及各个部分如何协同工作。
+
+## 高层概览
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         Your Astro Site                          │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                   EmDash Integration                     │  │
+│  │                                                            │  │
+│  │  ┌──────────────┐   ┌──────────────┐   ┌───────────────┐   │  │
+│  │  │   Content    │   │    Admin     │   │    Plugins    │   │  │
+│  │  │    APIs      │   │    Panel     │   │               │   │  │
+│  │  └──────────────┘   └──────────────┘   └───────────────┘   │  │
+│  │                                                            │  │
+│  │  ┌──────────────────────────────────────────────────────┐  │  │
+│  │  │                    Data Layer                        │  │  │
+│  │  │      Database (D1/SQLite)     +  Storage (R2/S3)     │  │  │
+│  │  └──────────────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                    Astro Framework                         │  │
+│  │         Live Collections · Middleware · Sessions           │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+EmDash 作为 Astro 集成运行。它注入管理面板和 REST API 的路由，为实时集合提供内容加载器，并管理数据库迁移和存储连接。
+
+## 数据库优先的架构
+
+与传统 CMS 在代码中定义架构不同，EmDash 将架构定义存储在数据库本身。两个系统表跟踪您的内容结构：
+
+- `_emdash_collections` — 集合元数据（slug、标签、功能）
+- `_emdash_fields` — 每个集合的字段定义
+
+当您通过管理界面创建带有标题和价格字段的 "products" 集合时，EmDash 会：
+
+1. 将记录插入 `_emdash_collections` 和 `_emdash_fields`
+2. 运行 `ALTER TABLE` 以创建具有适当列的 `ec_products`
+
+这种设计实现了：
+
+- **运行时架构修改** — 无需更改代码或重新构建即可创建和编辑内容类型
+- **非开发者友好设置** — 内容编辑者可以通过界面设计其数据模型
+- **真实的 SQL 列** — 适当的索引、外键和查询优化
+
+<Aside type="tip">
+	运行 `npx emdash types` 以从实时架构生成 TypeScript 类型。这为您提供了针对动态定义集合的类型安全。
+</Aside>
+
+## 按集合分表
+
+每个集合都有自己的 SQLite 表，带有 `ec_` 前缀：
+
+```sql
+-- Created when "posts" collection is added
+CREATE TABLE ec_posts (
+  -- System columns (always present)
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
+  status TEXT DEFAULT 'draft',  -- draft, published, scheduled
+  author_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  published_at TEXT,
+  deleted_at TEXT,              -- Soft delete
+  version INTEGER DEFAULT 1,    -- Optimistic locking
+
+  -- Content columns (from your field definitions)
+  title TEXT NOT NULL,
+  content JSON,                 -- Portable Text
+  excerpt TEXT
+);
+```
+
+**为什么使用按集合分表，而不是使用带有 JSON 的单一内容表？**
+
+- 真实的 SQL 列支持适当的索引和查询
+- 外键正常工作
+- 架构在数据库中自我记录
+- 字段访问无需 JSON 解析开销
+- 数据库工具可以直接检查架构
+
+## 实时集合集成
+
+EmDash 使用 Astro 6 的实时集合在运行时提供内容。内容更改立即可用，无需静态重新构建。
+
+`emdashLoader()` 实现了 Astro 的 `LiveLoader` 接口：
+
+```ts
+// src/live.config.ts
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({ loader: emdashLoader() }),
+};
+```
+
+<Aside type="note">
+	一个单一的 `_emdash` Astro 集合包装了您所有的内容类型。当您调用 `getEmDashCollection("posts")` 时，加载器会在内部按类型进行过滤。
+</Aside>
+
+使用提供的包装函数查询内容：
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+// Get all published posts
+const { entries: posts } = await getEmDashCollection("posts");
+
+// Get drafts
+const { entries: drafts } = await getEmDashCollection("posts", {
+	status: "draft",
+});
+
+// Get a single entry by slug
+const { entry: post } = await getEmDashEntry("posts", "my-post-slug");
+```
+
+## 路由注入
+
+EmDash 集成使用 Astro 的 `injectRoute` API 来添加管理和 API 路由：
+
+| 路径模式                          | 用途                               |
+| ------------------------------------- | ------------------------------------- |
+| `/_emdash/admin/[...path]`          | 管理面板 SPA                       |
+| `/_emdash/api/manifest`             | 管理清单（集合、插件） |
+| `/_emdash/api/content/[collection]` | 内容条目的 CRUD              |
+| `/_emdash/api/media/*`              | 媒体库操作              |
+| `/_emdash/api/schema/*`             | 架构管理                     |
+| `/_emdash/api/settings`             | 站点设置                         |
+| `/_emdash/api/menus/*`              | 导航菜单                      |
+| `/_emdash/api/taxonomies/*`         | 分类、标签、自定义分类法   |
+
+路由从 `emdash` 包注入——没有任何内容被复制到您的项目中。
+
+## 数据层
+
+EmDash 使用 [Kysely](https://kysely.dev) 在所有支持的数据库中进行类型安全的 SQL 查询：
+
+<CardGrid>
+  <Card title="SQLite" icon="laptop">
+    使用 `sqlite({ url: "file:./data.db" })` 进行本地开发
+  </Card>
+  <Card title="D1" icon="cloudflare">
+    使用 `d1({ binding: "DB" })` 的 Cloudflare 无服务器 SQL
+  </Card>
+  <Card title="libSQL" icon="external">
+    使用 `libsql({ url: "...", authToken: "..." })` 的远程 SQLite
+  </Card>
+</CardGrid>
+
+数据库配置在 `astro.config.mjs` 中传递给集成：
+
+```ts
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { sqlite } from "emdash/db";
+import { local } from "emdash/storage";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+## 存储抽象
+
+媒体文件与数据库分开存储。EmDash 支持：
+
+- **本地文件系统** — 开发和简单部署
+- **Cloudflare R2** — 边缘的 S3 兼容对象存储
+- **S3 兼容** — 任何 S3 兼容的对象存储
+
+上传使用签名 URL 进行客户端到存储的直接上传，绕过 Workers 的请求体大小限制。
+
+## 插件架构
+
+插件通过受 WordPress 启发的钩子系统扩展 EmDash：
+
+- **内容钩子** — `content:beforeSave`、`content:afterSave`、`content:beforeDelete`、`content:afterDelete`
+- **媒体钩子** — `media:beforeUpload`、`media:afterUpload`
+- **隔离存储** — 每个插件都有命名空间的 KV 访问权限
+- **管理界面扩展** — 仪表板小部件、设置页面、自定义字段编辑器
+
+插件可以在两种模式下运行：
+
+1. **受信任** — 对主机环境的完全访问权限（适用于第一方插件）
+2. **沙盒化** — 在具有基于能力的权限的 V8 隔离中运行（适用于 Cloudflare 上的第三方插件）
+
+```ts
+// astro.config.mjs
+import { seoPlugin } from "@emdash-cms/plugin-seo";
+
+emdash({
+	plugins: [seoPlugin({ maxTitleLength: 60 })],
+});
+```
+
+## 请求流程
+
+典型的内容请求遵循以下路径：
+
+<Steps>
+	1. **Astro 接收请求** — 您的页面组件运行 2. **查询内容** —
+	`getEmDashCollection()` 调用 Astro 的 `getLiveCollection()` 3. **加载器执行** —
+	`emdashLoader` 通过 Kysely 查询相应的 `ec_*` 表 4. **数据返回** — 条目
+	被映射到 Astro 的条目格式，包含 `id`、`slug` 和 `data` 5. **页面渲染** — 您的
+	组件接收内容并渲染 HTML
+</Steps>
+
+对于管理请求：
+
+<Steps>
+	1. **中间件认证** — 验证会话令牌 2. **API 路由处理请求** — 通过存储库进行 CRUD
+	操作 3. **钩子触发** — `beforeCreate`、`afterUpdate` 等 4. **数据库
+	更新** — Kysely 执行 SQL 5. **返回响应** — 向管理 SPA 返回 JSON 响应
+</Steps>
+
+## 虚拟模块
+
+EmDash 在构建时生成虚拟模块以配置运行时：
+
+| 模块                           | 用途                             |
+| -------------------------------- | ----------------------------------- |
+| `virtual:emdash/config`        | 数据库和存储配置  |
+| `virtual:emdash/dialect`       | 数据库方言工厂            |
+| `virtual:emdash/plugin-admins` | 插件管理界面的静态导入 |
+
+这种方法确保打包工具能够正确解析和 tree-shake 插件代码。
+
+## 后续步骤
+
+<CardGrid>
+	<Card title="集合" icon="document">
+		了解 [内容集合和字段类型](/zh-cn/concepts/collections/)。
+	</Card>
+	<Card title="内容模型" icon="open-book">
+		理解 [数据库优先的内容模型](/zh-cn/concepts/content-model/)。
+	</Card>
+	<Card title="管理面板" icon="setting">
+		探索 [管理面板架构](/zh-cn/concepts/admin-panel/)。
+	</Card>
+</CardGrid>

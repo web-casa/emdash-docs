@@ -1,0 +1,428 @@
+---
+title: フィールドタイプリファレンス
+description: EmDashのすべてのフィールドタイプの完全なリファレンスです。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDashはコンテンツスキーマを定義するための14種類のフィールドタイプをサポートしています。各タイプはSQLiteのカラムタイプにマッピングされ、適切な管理UIを提供します。
+
+## 概要
+
+| タイプ           | SQLiteカラム | 説明                         |
+| -------------- | ------------- | -------------------------- |
+| `string`       | TEXT          | 短いテキスト入力           |
+| `text`         | TEXT          | 複数行テキスト            |
+| `number`       | REAL          | 小数               |
+| `integer`      | INTEGER       | 整数               |
+| `boolean`      | INTEGER       | 真偽値                 |
+| `datetime`     | TEXT          | 日付と時刻              |
+| `select`       | TEXT          | オプションからの単一選択 |
+| `multiSelect`  | JSON          | 複数選択           |
+| `portableText` | JSON          | リッチテキストコンテンツ          |
+| `image`        | TEXT          | 画像参照            |
+| `file`         | TEXT          | ファイル参照             |
+| `reference`    | TEXT          | 他のエントリーへの参照 |
+| `json`         | JSON          | 任意のJSONデータ        |
+| `slug`         | TEXT          | URLセーフな識別子        |
+
+## テキストタイプ
+
+### `string`
+
+短い、単一行のテキスト。タイトル、名前、短い値に使用します。
+
+```ts
+{
+  slug: "title",
+  label: "Title",
+  type: "string",
+  required: true,
+  validation: {
+    minLength: 1,
+    maxLength: 200,
+  },
+}
+```
+
+**バリデーションオプション:**
+
+- `minLength` — 最小文字数
+- `maxLength` — 最大文字数
+- `pattern` — 一致させる正規表現パターン
+
+**ウィジェットオプション:**
+
+- 特になし
+
+### `text`
+
+複数行のプレーンテキスト。説明、抜粋、長いプレーンテキストに使用します。
+
+```ts
+{
+  slug: "excerpt",
+  label: "Excerpt",
+  type: "text",
+  options: {
+    rows: 3,
+  },
+}
+```
+
+**バリデーションオプション:**
+
+- `minLength` — 最小文字数
+- `maxLength` — 最大文字数
+
+**ウィジェットオプション:**
+
+- `rows` — テキストエリアの行数（デフォルト: 3）
+
+### `slug`
+
+URLセーフな識別子。他のフィールドから自動生成されるか、手動で入力されます。
+
+```ts
+{
+  slug: "slug",
+  label: "URL Slug",
+  type: "slug",
+  required: true,
+  unique: true,
+}
+```
+
+スラッグは自動的にサニタイズされます：小文字化、スペースをハイフンに置換、特殊文字を削除。
+
+## 数値タイプ
+
+### `number`
+
+小数。価格、評価、測定値に使用します。
+
+```ts
+{
+  slug: "price",
+  label: "Price",
+  type: "number",
+  required: true,
+  validation: {
+    min: 0,
+    max: 999999.99,
+  },
+}
+```
+
+**バリデーションオプション:**
+
+- `min` — 最小値
+- `max` — 最大値
+
+SQLite REAL（64ビット浮動小数点数）として保存されます。
+
+### `integer`
+
+整数。数量、カウント、順序値に使用します。
+
+```ts
+{
+  slug: "quantity",
+  label: "Quantity",
+  type: "integer",
+  defaultValue: 1,
+  validation: {
+    min: 0,
+    max: 1000,
+  },
+}
+```
+
+**バリデーションオプション:**
+
+- `min` — 最小値
+- `max` — 最大値
+
+SQLite INTEGERとして保存されます。
+
+### `boolean`
+
+真または偽。トグルやフラグに使用します。
+
+```ts
+{
+  slug: "featured",
+  label: "Featured",
+  type: "boolean",
+  defaultValue: false,
+}
+```
+
+SQLite INTEGER（0または1）として保存されます。
+
+## 日付と時刻
+
+### `datetime`
+
+日付と時刻の値。ISO 8601形式で保存されます。
+
+```ts
+{
+  slug: "publishedAt",
+  label: "Published At",
+  type: "datetime",
+}
+```
+
+**バリデーションオプション:**
+
+- `min` — 最小日付（ISO文字列）
+- `max` — 最大日付（ISO文字列）
+
+**保存形式:** `2025-01-24T12:00:00.000Z`
+
+## 選択タイプ
+
+### `select`
+
+事前定義されたオプションからの単一選択。
+
+```ts
+{
+  slug: "status",
+  label: "Status",
+  type: "select",
+  required: true,
+  defaultValue: "draft",
+  validation: {
+    options: ["draft", "published", "archived"],
+  },
+}
+```
+
+**バリデーションオプション:**
+
+- `options` — 許可された値の配列（必須）
+
+選択された値を含むTEXTとして保存されます。
+
+### `multiSelect`
+
+事前定義されたオプションからの複数選択。
+
+```ts
+{
+  slug: "tags",
+  label: "Tags",
+  type: "multiSelect",
+  validation: {
+    options: ["news", "tutorial", "review", "opinion"],
+  },
+}
+```
+
+**バリデーションオプション:**
+
+- `options` — 許可された値の配列（必須）
+
+JSON配列として保存されます：`["news", "tutorial"]`
+
+## リッチコンテンツ
+
+### `portableText`
+
+Portable Text形式を使用したリッチテキストコンテンツ。見出し、リスト、リンク、画像、カスタムブロックをサポートします。
+
+```ts
+{
+  slug: "content",
+  label: "Content",
+  type: "portableText",
+  required: true,
+}
+```
+
+Portable TextブロックのJSON配列として保存されます：
+
+```json
+[
+	{
+		"_type": "block",
+		"style": "normal",
+		"children": [{ "_type": "span", "text": "Hello world" }]
+	}
+]
+```
+
+プラグインはカスタムブロックタイプ（埋め込み、ウィジェットなど）をエディターに追加できます。これらはスラッシュコマンドメニューに表示され、サイト上で自動的にレンダリングされます。詳細は[プラグインの作成 — Portable Textブロックタイプ](/ja/plugins/creating-plugins/#portable-text-block-types)を参照してください。
+
+<Aside>
+	Portable Textは構造化されたリッチテキストの仕様です。詳細は
+	[portabletext.org](https://portabletext.org)を参照してください。
+</Aside>
+
+## メディアタイプ
+
+### `image`
+
+アップロードされた画像への参照。寸法や代替テキストなどのメタデータを含みます。
+
+```ts
+{
+  slug: "featuredImage",
+  label: "Featured Image",
+  type: "image",
+  options: {
+    showPreview: true,
+  },
+}
+```
+
+**ウィジェットオプション:**
+
+- `showPreview` — 管理パネルで画像プレビューを表示（デフォルト: true）
+
+**保存される値:**
+
+```json
+{
+	"id": "01HXK5MZSN...",
+	"url": "https://cdn.example.com/image.jpg",
+	"alt": "Description",
+	"width": 1920,
+	"height": 1080
+}
+```
+
+### `file`
+
+アップロードされたファイル（文書、PDFなど）への参照。
+
+```ts
+{
+  slug: "document",
+  label: "Document",
+  type: "file",
+}
+```
+
+**保存される値:**
+
+```json
+{
+	"id": "01HXK5MZSN...",
+	"url": "https://cdn.example.com/doc.pdf",
+	"filename": "report.pdf",
+	"mimeType": "application/pdf",
+	"size": 102400
+}
+```
+
+## リレーショナルタイプ
+
+### `reference`
+
+他のコンテンツエントリーへの参照。
+
+```ts
+{
+  slug: "author",
+  label: "Author",
+  type: "reference",
+  required: true,
+  options: {
+    collection: "authors",
+  },
+}
+```
+
+**ウィジェットオプション:**
+
+- `collection` — ターゲットコレクションのスラッグ（必須）
+- `allowMultiple` — 複数参照を許可（デフォルト: false）
+
+**単一参照の保存値:**
+
+```json
+"01HXK5MZSN..."
+```
+
+**複数参照の保存値:**
+
+```json
+["01HXK5MZSN...", "01HXK6NATS..."]
+```
+
+## 柔軟なタイプ
+
+### `json`
+
+任意のJSONデータ。複雑なネスト構造、サードパーティ統合、固定スキーマのないデータに使用します。
+
+```ts
+{
+  slug: "metadata",
+  label: "Metadata",
+  type: "json",
+}
+```
+
+SQLite JSONカラムにそのまま保存されます。
+
+<Aside type="caution">JSONフィールドにはバリデーションがありません。真に動的なデータに限って使用してください。</Aside>
+
+## フィールドプロパティ
+
+すべてのフィールドは以下の共通プロパティをサポートします：
+
+| プロパティ       | タイプ        | 説明                         |
+| -------------- | ----------- | ----------------------------------- |
+| `slug`         | `string`    | 一意の識別子（必須）        |
+| `label`        | `string`    | 表示名（必須）             |
+| `type`         | `FieldType` | フィールドタイプ（必須）               |
+| `required`     | `boolean`   | 値の必須化（デフォルト: false）    |
+| `unique`       | `boolean`   | 一意性の強制（デフォルト: false） |
+| `defaultValue` | `unknown`   | 新規エントリーのデフォルト値       |
+| `validation`   | `object`    | タイプ固有のバリデーションルール      |
+| `widget`       | `string`    | カスタムウィジェットのオーバーライド              |
+| `options`      | `object`    | ウィジェット設定                |
+| `sortOrder`    | `number`    | 管理パネルでの表示順序              |
+
+## 予約済みフィールドスラッグ
+
+以下のスラッグは予約済みで使用できません：
+
+- `id`
+- `slug`
+- `status`
+- `author_id`
+- `created_at`
+- `updated_at`
+- `published_at`
+- `deleted_at`
+- `version`
+
+## TypeScriptタイプ
+
+プログラムでの使用のためにフィールドタイプをインポート：
+
+```ts
+import type { FieldType, Field, CreateFieldInput } from "emdash";
+
+const fieldTypes: FieldType[] = [
+	"string",
+	"text",
+	"number",
+	"integer",
+	"boolean",
+	"datetime",
+	"select",
+	"multiSelect",
+	"portableText",
+	"image",
+	"file",
+	"reference",
+	"json",
+	"slug",
+];
+```

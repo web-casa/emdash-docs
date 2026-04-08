@@ -1,0 +1,316 @@
+---
+title: 数据库选项
+description: 使用 D1、PostgreSQL、libSQL 或 SQLite 配置 EmDash。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 支持多种数据库后端。请根据您的部署目标进行选择。
+
+## 概述
+
+| 数据库         | 最佳适用场景       | 部署方式                     |
+| -------------- | ------------------ | -------------------------- |
+| **D1**         | Cloudflare Workers | 边缘，全局分布式             |
+| **PostgreSQL** | 生产环境 Node.js   | 任何支持 Postgres 的平台     |
+| **libSQL**     | 远程数据库         | 边缘或 Node.js              |
+| **SQLite**     | Node.js，本地开发  | 单服务器                    |
+
+## Cloudflare D1
+
+D1 是 Cloudflare 的无服务器 SQLite 数据库。部署到 Cloudflare Workers 时使用它。
+
+```js title="astro.config.mjs"
+import { d1 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: d1({ binding: "DB" }),
+		}),
+	],
+});
+```
+
+### 配置
+
+| 选项             | 类型       | 默认值                | 描述                                   |
+| ---------------- | ---------- | --------------------- | ------------------------------------- |
+| `binding`        | `string`   | —                     | 来自 `wrangler.jsonc` 的 D1 绑定名称   |
+| `session`        | `string`   | `"disabled"`          | 读取复制模式（见下文）                 |
+| `bookmarkCookie` | `string`   | `"__ec_d1_bookmark"`  | 会话书签的 Cookie 名称                 |
+
+### 设置
+
+<Tabs>
+  <TabItem label="wrangler.jsonc">
+    ```jsonc
+    {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "emdash-db",
+          "database_id": "your-database-id"
+        }
+      ]
+    }
+    ```
+  </TabItem>
+  <TabItem label="wrangler.toml">
+    ```toml
+    [[d1_databases]]
+    binding = "DB"
+    database_name = "emdash-db"
+    database_id = "your-database-id"
+    ```
+  </TabItem>
+</Tabs>
+
+<Aside type="caution">
+	D1 不允许在运行时执行 DDL 语句。请在部署前通过 Wrangler CLI 运行迁移：
+	```bash wrangler d1 migrations apply emdash-db ```
+</Aside>
+
+### 创建 D1 数据库
+
+```bash
+wrangler d1 create emdash-db
+```
+
+### 只读副本
+
+D1 支持[读取复制](https://developers.cloudflare.com/d1/configuration/read-replication/)，以降低全局分布式站点的读取延迟。启用后，读取查询将被路由到附近的副本，而不是始终访问主数据库。
+
+EmDash 使用 D1 Sessions API 透明地管理此功能。通过 `session` 选项启用：
+
+```js title="astro.config.mjs"
+import { d1 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: d1({
+				binding: "DB",
+				session: "auto",
+			}),
+		}),
+	],
+});
+```
+
+#### 会话模式
+
+| 模式               | 行为                                                                                           |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| `"disabled"`       | 无会话。所有查询都发送到主数据库。默认值。                                                   |
+| `"auto"`           | 匿名请求从最近的副本读取。经过身份验证的用户通过书签 Cookie 获得读写一致性。 |
+| `"primary-first"`  | 类似于 `"auto"`，但第一个查询始终发送到主数据库。适用于写入非常频繁的站点。 |
+
+#### 工作原理
+
+- **匿名访客** 获得 `first-unconstrained` 模式 — 读取操作发送到最近的副本以获得最低延迟。由于匿名用户从不写入，他们不需要一致性保证。
+- **经过身份验证的用户**（编辑者、作者）获得基于书签的会话。写入后，书签 Cookie 确保下一个请求至少能看到该状态。
+- **写入请求**（`POST`、`PUT`、`DELETE`）始终从主数据库开始。
+- **构建时查询**（Astro 内容集合）完全绕过会话，直接使用主数据库。
+
+<Aside type="tip">
+	读取复制也必须在 D1 数据库本身上通过 Cloudflare 仪表板或 REST API 启用。`session` 选项仅控制 EmDash 的客户端会话管理。
+</Aside>
+
+<Aside>
+	匿名访客可能会看到几秒钟前的陈旧数据。对于 CMS 来说，这是预期的 — 内容更改不是实时的，并且如果您启用了路由缓存，响应本身在定义上已经是陈旧的。
+</Aside>
+
+## libSQL
+
+libSQL 是 SQLite 的一个分支，支持远程连接。当您需要远程数据库但不想使用 Cloudflare D1 时，请使用它。
+
+```js title="astro.config.mjs"
+import { libsql } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: libsql({
+				url: process.env.LIBSQL_DATABASE_URL,
+				authToken: process.env.LIBSQL_AUTH_TOKEN,
+			}),
+		}),
+	],
+});
+```
+
+### 配置
+
+| 选项        | 类型       | 描述                                          |
+| ----------- | ---------- | --------------------------------------------- |
+| `url`       | `string`   | 数据库 URL（`libsql://...` 或 `file:...`）    |
+| `authToken` | `string`   | 远程数据库的身份验证令牌（本地数据库可选）    |
+
+### 本地开发
+
+在开发期间使用本地 libSQL 文件：
+
+```js
+database: libsql({ url: "file:./data.db" });
+```
+
+## PostgreSQL
+
+PostgreSQL 适用于需要完整关系数据库的 Node.js 部署。
+
+```js title="astro.config.mjs"
+import { postgres } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: postgres({
+				connectionString: process.env.DATABASE_URL,
+			}),
+		}),
+	],
+});
+```
+
+### 配置
+
+您可以使用连接字符串或单独的参数进行连接：
+
+```js
+// Connection string
+database: postgres({
+	connectionString: "postgres://user:password@localhost:5432/emdash",
+});
+
+// Individual parameters
+database: postgres({
+	host: "localhost",
+	port: 5432,
+	database: "emdash",
+	user: "emdash",
+	password: process.env.DB_PASSWORD,
+	ssl: true,
+});
+```
+
+| 选项                 | 类型        | 描述                          |
+| -------------------- | ----------- | ----------------------------- |
+| `connectionString`   | `string`    | PostgreSQL 连接 URL           |
+| `host`               | `string`    | 数据库主机                    |
+| `port`               | `number`    | 数据库端口                    |
+| `database`           | `string`    | 数据库名称                    |
+| `user`               | `string`    | 数据库用户                    |
+| `password`           | `string`    | 数据库密码                    |
+| `ssl`                | `boolean`   | 启用 SSL                      |
+| `pool.min`           | `number`    | 最小连接池连接数（默认 0）    |
+| `pool.max`           | `number`    | 最大连接池连接数（默认 10）   |
+
+### 连接池
+
+适配器底层使用 `pg.Pool`。根据您的部署调整连接池大小：
+
+```js
+database: postgres({
+	connectionString: process.env.DATABASE_URL,
+	pool: { min: 2, max: 20 },
+});
+```
+
+<Aside>
+	PostgreSQL 需要 `pg` 包。请将其作为依赖项安装：
+	```bash
+	pnpm add pg
+	```
+</Aside>
+
+## SQLite
+
+使用 better-sqlite3 的 SQLite 是 Node.js 部署中最简单的选项。
+
+```js title="astro.config.mjs"
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+		}),
+	],
+});
+```
+
+### 配置
+
+| 选项   | 类型       | 描述                   |
+| ------ | ---------- | ---------------------- |
+| `url`  | `string`   | 以 `file:` 前缀开头的文件路径 |
+
+### 文件路径
+
+`url` 必须以 `file:` 开头：
+
+```js
+// Relative path
+database: sqlite({ url: "file:./data/emdash.db" });
+
+// Absolute path
+database: sqlite({ url: "file:/var/data/emdash.db" });
+
+// From environment variable
+database: sqlite({ url: `file:${process.env.DATABASE_PATH}` });
+```
+
+<Aside>
+	SQLite 需要持久性文件系统。在没有额外配置的情况下，它无法在具有临时存储的平台上工作。
+</Aside>
+
+## 迁移
+
+EmDash 为 SQLite、libSQL 和 PostgreSQL 自动处理迁移。对于 D1，请通过 Wrangler 运行迁移。
+
+### 检查迁移状态
+
+```bash
+npx emdash init --database ./data.db
+```
+
+此命令：
+
+1. 如果需要，创建数据库文件
+2. 运行任何待处理的迁移
+3. 报告当前的迁移状态
+
+### 迁移文件
+
+迁移文件与 EmDash 捆绑在一起。要手动运行它们：
+
+```bash
+# SQLite/libSQL - migrations run automatically
+
+# D1 - run via wrangler
+wrangler d1 migrations apply DB
+```
+
+## 基于环境的配置
+
+为每个环境使用不同的数据库：
+
+```js title="astro.config.mjs"
+import { sqlite, libsql, postgres } from "emdash/db";
+import { d1 } from "@emdash-cms/cloudflare";
+
+const database = import.meta.env.PROD ? d1({ binding: "DB" }) : sqlite({ url: "file:./data.db" });
+
+export default defineConfig({
+	integrations: [emdash({ database })],
+});
+```
+
+或者根据环境变量进行切换：
+
+```js
+const database = process.env.DATABASE_URL
+	? postgres({ connectionString: process.env.DATABASE_URL })
+	: sqlite({ url: "file:./data.db" });
+```

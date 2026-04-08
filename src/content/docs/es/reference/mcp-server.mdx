@@ -1,0 +1,566 @@
+---
+title: Referencia del Servidor MCP
+description: Detalles del protocolo, especificaciones de herramientas y configuración de OAuth para el servidor MCP.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash incluye un servidor integrado de [Model Context Protocol](https://modelcontextprotocol.io) (MCP) en `/_emdash/api/mcp` que expone operaciones de gestión de contenido como herramientas para asistentes de IA.
+
+<Aside>
+	¿Buscas conectar Claude, ChatGPT u otra herramienta de IA a tu sitio? Consulta la [guía de Herramientas de IA](/es/guides/ai-tools) para instrucciones de configuración y consejos de uso.
+</Aside>
+
+Esta página cubre los detalles del protocolo: autenticación, transporte, especificaciones de herramientas, descubrimiento OAuth y manejo de errores.
+
+## Autenticación
+
+El servidor MCP admite tres métodos de autenticación:
+
+| Método | Cómo funciona |
+| --- | --- |
+| **Código de Autorización OAuth 2.1 + PKCE** | Flujo estándar para clientes MCP. El usuario aprueba los alcances en el navegador. |
+| **Token de Acceso Personal (PAT)** | Tokens de larga duración `ec_pat_*` creados en el panel de administración. |
+| **Flujo de Dispositivo** | Flujo estilo CLI donde apruebas un código en el navegador. Utilizado por `emdash login`. |
+
+Las cookies de sesión (desde la interfaz de administración) también funcionan, pero no son prácticas para clientes MCP externos.
+
+### Alcances
+
+Los tokens tienen alcances para limitar las operaciones que un cliente puede realizar. Los alcances se solicitan durante la autorización OAuth y se aplican en cada llamada a herramienta.
+
+| Alcance | Otorga acceso a |
+| --- | --- |
+| `content:read` | Listar, obtener, comparar y buscar contenido. Listar términos de taxonomía y menús. |
+| `content:write` | Crear, actualizar, eliminar, publicar, despublicar, programar, duplicar y restaurar contenido. Crear términos de taxonomía. |
+| `media:read` | Listar y obtener elementos multimedia. |
+| `media:write` | Actualizar y eliminar metadatos de elementos multimedia. |
+| `schema:read` | Listar colecciones y obtener esquemas de colección. |
+| `schema:write` | Crear y eliminar colecciones y campos. |
+| `admin` | Acceso completo a todas las operaciones. |
+
+El alcance `admin` otorga acceso a todo. La autenticación basada en sesión (sin token) también tiene acceso completo según el rol del usuario.
+
+### Requisitos de Rol
+
+Además de los alcances, algunas herramientas requieren un rol mínimo de RBAC:
+
+| Operación | Rol mínimo |
+| --- | --- |
+| Operaciones de contenido | Sin mínimo (los alcances controlan el acceso) |
+| Lectura de esquema | Editor (40) |
+| Escritura de esquema | Administrador (50) |
+
+Consulta la [guía de Autenticación](/es/guides/authentication#user-roles) para las definiciones de roles.
+
+## Transporte
+
+El servidor utiliza el transporte HTTP Streamable en **modo sin estado**. Cada solicitud es independiente: no hay sesiones ni conexiones de larga duración.
+
+- **`POST /_emdash/api/mcp`** -- Enviar llamadas JSON-RPC a herramientas
+- **`GET /_emdash/api/mcp`** -- Devuelve 405 (no hay SSE en modo sin estado)
+- **`DELETE /_emdash/api/mcp`** -- Devuelve 405 (no hay sesión que cerrar)
+
+Las respuestas siguen el formato [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Los errores utilizan códigos de error estándar de JSON-RPC, con códigos específicos de MCP para fallos de alcance y permisos.
+
+## Herramientas
+
+El servidor expone 33 herramientas en siete dominios. Cada herramienta devuelve resultados como contenido de texto JSON, o un mensaje de error con `isError: true` en caso de fallo.
+
+### Herramientas de Contenido
+
+#### `content_list`
+
+Lista elementos de contenido en una colección con filtrado opcional y paginación.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección (ej. `posts`, `pages`) |
+| `status` | `string` | No | Filtro: `draft`, `published` o `scheduled` |
+| `limit` | `integer` | No | Máximo de elementos a devolver (1-100, predeterminado 50) |
+| `cursor` | `string` | No | Cursor de paginación de una respuesta anterior |
+| `orderBy` | `string` | No | Campo por el que ordenar (ej. `created_at`, `updated_at`) |
+| `order` | `string` | No | Dirección de orden: `asc` o `desc` (predeterminado `desc`) |
+| `locale` | `string` | No | Filtrar por localización (ej. `en`, `fr`). Solo relevante con i18n. |
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+#### `content_get`
+
+Obtiene un único elemento de contenido por ID o slug. Devuelve todos los valores de campo, metadatos y un token `_rev` para concurrencia optimista.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID del elemento de contenido (ULID) o slug |
+| `locale` | `string` | No | Localización para búsqueda por slug. Los IDs son globalmente únicos. |
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+<Aside>
+	El token `_rev` en la respuesta se utiliza para detección de conflictos. Pásalo de nuevo al actualizar para asegurarte de que nadie más ha modificado el elemento desde que lo leíste.
+</Aside>
+
+#### `content_create`
+
+Crea un nuevo elemento de contenido. El objeto `data` debe contener valores de campo que coincidan con el esquema de la colección: usa `schema_get_collection` para verificar qué campos están disponibles. Los elementos se crean como `draft` por defecto.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `data` | `object` | Sí | Valores de campo como pares clave-valor |
+| `slug` | `string` | No | Slug de URL (se genera automáticamente desde el título si se omite) |
+| `status` | `string` | No | Estado inicial: `draft` o `published` (predeterminado `draft`) |
+| `locale` | `string` | No | Localización para este contenido (predeterminado al valor por defecto del sitio) |
+| `translationOf` | `string` | No | ID del elemento del que es traducción |
+
+**Alcance:** `content:write`
+
+#### `content_update`
+
+Actualiza un elemento de contenido existente. Solo incluye los campos que quieres cambiar; los campos no especificados permanecen sin cambios.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID del elemento de contenido o slug |
+| `data` | `object` | No | Valores de campo a actualizar |
+| `slug` | `string` | No | Nuevo slug de URL |
+| `status` | `string` | No | Nuevo estado: `draft` o `published` |
+| `_rev` | `string` | No | Token de revisión de `content_get` para detección de conflictos |
+
+**Alcance:** `content:write`
+
+#### `content_delete`
+
+Elimina suavemente un elemento de contenido moviéndolo a la papelera. Usa `content_restore` para deshacer, o `content_permanent_delete` para eliminarlo permanentemente.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID del elemento de contenido o slug |
+
+**Alcance:** `content:write` | **Destructivo:** Sí
+
+#### `content_restore`
+
+Restaurar un elemento de contenido eliminado temporalmente de la papelera.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID o slug del elemento de contenido |
+
+**Alcance:** `content:write`
+
+#### `content_permanent_delete`
+
+Eliminar de forma permanente e irreversible un elemento de contenido en la papelera. El elemento debe estar primero en la papelera.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID o slug del elemento de contenido |
+
+**Alcance:** `content:write` | **Destructivo:** Sí
+
+#### `content_publish`
+
+Publicar un elemento de contenido, haciéndolo visible en el sitio. Crea una revisión publicada a partir del borrador actual. Las ediciones posteriores crean un nuevo borrador sin afectar la versión en vivo hasta que se vuelva a publicar.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID o slug del elemento de contenido |
+
+**Alcance:** `content:write`
+
+#### `content_unpublish`
+
+Revertir un elemento publicado a estado de borrador. Ya no será visible en el sitio en vivo, pero se conserva su contenido.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID o slug del elemento de contenido |
+
+**Alcance:** `content:write`
+
+#### `content_schedule`
+
+Programar un elemento de contenido para su publicación futura. Se publicará automáticamente en la fecha/hora especificada.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID o slug del elemento de contenido |
+| `scheduledAt` | `string` | Sí | Fecha y hora en formato ISO 8601 (ej. `2026-06-01T09:00:00Z`) |
+
+**Alcance:** `content:write`
+
+#### `content_compare`
+
+Comparar la versión publicada (en vivo) de un elemento de contenido con su borrador actual. Devuelve ambas versiones y un indicador de si hay cambios.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID o slug del elemento de contenido |
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+#### `content_discard_draft`
+
+Descartar el borrador actual y revertir a la última versión publicada. Solo funciona en elementos que se han publicado al menos una vez.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID o slug del elemento de contenido |
+
+**Alcance:** `content:write` | **Destructivo:** Sí
+
+#### `content_list_trashed`
+
+Listar elementos de contenido eliminados temporalmente en la papelera de una colección.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `limit` | `integer` | No | Máximo de elementos (1-100, predeterminado 50) |
+| `cursor` | `string` | No | Cursor de paginación |
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+#### `content_duplicate`
+
+Crear una copia de un elemento de contenido existente. El duplicado se crea como un borrador con "(Copia)" añadido al título y un slug generado automáticamente.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID o slug del elemento a duplicar |
+
+**Alcance:** `content:write`
+
+#### `content_translations`
+
+Obtener todas las variantes de localización de un elemento de contenido. Devuelve el grupo de traducción y un resumen de cada versión de localización. Solo es relevante cuando i18n está habilitado.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID o slug del elemento de contenido |
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+### Herramientas de Esquema
+
+<Aside type="caution">
+	Las herramientas de esquema modifican la estructura de la base de datos. Crear o eliminar colecciones y campos cambia las tablas subyacentes. Estas operaciones requieren el rol de Administrador.
+</Aside>
+
+#### `schema_list_collections`
+
+Listar todas las colecciones de contenido definidas en el CMS. Devuelve slug, etiqueta, características admitidas y marcas de tiempo.
+
+**Sin parámetros.**
+
+**Alcance:** `schema:read` | **Rol mínimo:** Editor | **Solo lectura:** Sí
+
+#### `schema_get_collection`
+
+Obtener información detallada sobre una colección, incluidas todas las definiciones de campos. Los campos describen el modelo de contenido: nombre, tipo, restricciones y reglas de validación. Úsalo para entender qué esperan `content_create` y `content_update`.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `slug` | `string` | Sí | Slug de la colección (ej. `posts`) |
+
+**Alcance:** `schema:read` | **Rol mínimo:** Editor | **Solo lectura:** Sí
+
+#### `schema_create_collection`
+
+Crear una nueva colección de contenido. Esto crea una tabla de base de datos y una definición de esquema. El slug debe ser alfanumérico en minúsculas con guiones bajos, comenzando con una letra.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `slug` | `string` | Sí | Identificador único (`/^[a-z][a-z0-9_]*$/`) |
+| `label` | `string` | Sí | Nombre para mostrar (plural, ej. "Entradas de Blog") |
+| `labelSingular` | `string` | No | Nombre para mostrar en singular |
+| `description` | `string` | No | Descripción de esta colección |
+| `icon` | `string` | No | Nombre del icono para la interfaz de administración |
+| `supports` | `string[]` | No | Características: `drafts`, `revisions`, `preview`, `scheduling`, `search` (predeterminado: `['drafts', 'revisions']`) |
+
+**Alcance:** `schema:write` | **Rol mínimo:** Administrador
+
+#### `schema_delete_collection`
+
+Eliminar una colección y su tabla de base de datos. Esto es irreversible y elimina todo el contenido de la colección.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `slug` | `string` | Sí | Slug de la colección a eliminar |
+| `force` | `boolean` | No | Forzar la eliminación incluso si la colección tiene contenido |
+
+**Alcance:** `schema:write` | **Rol mínimo:** Administrador | **Destructivo:** Sí
+
+#### `schema_create_field`
+
+Agregar un nuevo campo al esquema de una colección. Esto añade una columna a la tabla de la base de datos.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `slug` | `string` | Sí | Identificador del campo (`/^[a-z][a-z0-9_]*$/`) |
+| `label` | `string` | Sí | Nombre para mostrar |
+| `type` | `string` | Sí | Tipo de dato (ver abajo) |
+| `required` | `boolean` | No | Si el campo es obligatorio |
+| `unique` | `boolean` | No | Si los valores deben ser únicos |
+| `defaultValue` | `any` | No | Valor por defecto para nuevos elementos |
+| `validation` | `object` | No | Restricciones: `min`, `max`, `minLength`, `maxLength`, `pattern`, `options` |
+| `options` | `object` | No | Configuración del widget: `collection` (para referencias), `rows` (para textarea) |
+| `searchable` | `boolean` | No | Incluir en el índice de búsqueda de texto completo |
+| `translatable` | `boolean` | No | Si este campo es traducible (por defecto true) |
+
+Tipos de campo: `string`, `text`, `number`, `integer`, `boolean`, `datetime`, `select`, `multiSelect`, `portableText`, `image`, `file`, `reference`, `json`, `slug`.
+
+Para los tipos `select` y `multiSelect`, proporciona los valores permitidos en `validation.options`.
+
+**Alcance:** `schema:write` | **Rol mínimo:** Admin
+
+#### `schema_delete_field`
+
+Elimina un campo de una colección. Esto elimina la columna y borra todos los datos en ese campo. Irreversible.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `fieldSlug` | `string` | Sí | Slug del campo a eliminar |
+
+**Alcance:** `schema:write` | **Rol mínimo:** Admin | **Destructivo:** Sí
+
+### Herramientas de Medios
+
+#### `media_list`
+
+Lista archivos multimedia subidos con filtrado opcional por tipo MIME y paginación.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `mimeType` | `string` | No | Filtrar por prefijo de tipo MIME (ej. `image/`, `application/pdf`) |
+| `limit` | `integer` | No | Máximo de elementos (1-100, por defecto 50) |
+| `cursor` | `string` | No | Cursor de paginación |
+
+**Alcance:** `media:read` | **Solo lectura:** Sí
+
+#### `media_get`
+
+Obtiene detalles de un solo archivo multimedia por ID. Devuelve metadatos incluyendo nombre de archivo, tipo MIME, tamaño, dimensiones, texto alternativo y URL.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `id` | `string` | Sí | ID del elemento multimedia |
+
+**Alcance:** `media:read` | **Solo lectura:** Sí
+
+#### `media_update`
+
+Actualiza los metadatos de un archivo multimedia subido. El archivo en sí no se puede cambiar.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `id` | `string` | Sí | ID del elemento multimedia |
+| `alt` | `string` | No | Texto alternativo para accesibilidad |
+| `caption` | `string` | No | Texto del pie de foto |
+| `width` | `integer` | No | Ancho de la imagen en píxeles |
+| `height` | `integer` | No | Altura de la imagen en píxeles |
+
+**Alcance:** `media:write`
+
+#### `media_delete`
+
+Elimina permanentemente un archivo multimedia. Elimina el registro de la base de datos y el archivo del almacenamiento. El contenido que haga referencia a este medio tendrá referencias rotas.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `id` | `string` | Sí | ID del elemento multimedia |
+
+**Alcance:** `media:write` | **Destructivo:** Sí
+
+### Herramienta de Búsqueda
+
+#### `search`
+
+Búsqueda de texto completo en colecciones de contenido. Las colecciones deben tener `search` en su lista de `supports` y los campos deben estar marcados como `searchable`.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `query` | `string` | Sí | Texto de la consulta de búsqueda |
+| `collections` | `string[]` | No | Limitar la búsqueda a slugs de colección específicos |
+| `locale` | `string` | No | Filtrar resultados por idioma |
+| `limit` | `integer` | No | Máximo de resultados (1-50, por defecto 20) |
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+### Herramientas de Taxonomía
+
+#### `taxonomy_list`
+
+Lista todas las definiciones de taxonomía (ej. categorías, etiquetas). Devuelve nombre, etiqueta, si es jerárquica y las colecciones asociadas.
+
+**Sin parámetros.**
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+#### `taxonomy_list_terms`
+
+Lista términos en una taxonomía con paginación.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `taxonomy` | `string` | Sí | Nombre de la taxonomía (ej. `categories`, `tags`) |
+| `limit` | `integer` | No | Máximo de elementos (1-100, por defecto 50) |
+| `cursor` | `string` | No | Cursor de paginación |
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+#### `taxonomy_create_term`
+
+Crea un nuevo término en una taxonomía. Para taxonomías jerárquicas, especifica un `parentId` para crear un término hijo.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `taxonomy` | `string` | Sí | Nombre de la taxonomía |
+| `slug` | `string` | Sí | Identificador seguro para URL |
+| `label` | `string` | Sí | Nombre para mostrar |
+| `parentId` | `string` | No | ID del término padre (para taxonomías jerárquicas) |
+| `description` | `string` | No | Descripción del término |
+
+**Alcance:** `content:write`
+
+### Herramientas de Menú
+
+#### `menu_list`
+
+Lista todos los menús de navegación. Devuelve nombre, etiqueta y marcas de tiempo.
+
+**Sin parámetros.**
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+#### `menu_get`
+
+Obtiene un menú por nombre incluyendo todos sus elementos en orden. Los elementos tienen una etiqueta, URL, tipo y un padre opcional para anidamiento.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `name` | `string` | Sí | Nombre del menú (ej. `main`, `footer`) |
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+### Herramientas de Revisión
+
+#### `revision_list`
+
+Lista el historial de revisiones para un elemento de contenido, del más nuevo al más antiguo. Requiere que la colección admita `revisions`.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sí | Slug de la colección |
+| `id` | `string` | Sí | ID o slug del elemento de contenido |
+| `limit` | `integer` | No | Máximo de revisiones (1-50, por defecto 20) |
+
+**Alcance:** `content:read` | **Solo lectura:** Sí
+
+#### `revision_restore`
+
+Restaura un elemento de contenido a una revisión anterior. Reemplaza el borrador actual con los datos de la revisión especificada. No se publica automáticamente; usa `content_publish` después si es necesario.
+
+| Parámetro | Tipo | Requerido | Descripción |
+| --- | --- | --- | --- |
+| `revisionId` | `string` | Sí | ID de la revisión a restaurar |
+
+**Alcance:** `content:write`
+
+## Descubrimiento OAuth
+
+Los clientes MCP que admiten OAuth 2.1 pueden descubrir automáticamente cómo autenticarse. El servidor publica dos documentos de metadatos:
+
+### Metadatos del Recurso Protegido
+
+```http
+GET /.well-known/oauth-protected-resource
+```
+
+```json
+{
+  "resource": "https://example.com/_emdash/api/mcp",
+  "authorization_servers": ["https://example.com/_emdash"],
+  "scopes_supported": [
+    "content:read", "content:write",
+    "media:read", "media:write",
+    "schema:read", "schema:write",
+    "admin"
+  ],
+  "bearer_methods_supported": ["header"]
+}
+```
+
+### Metadatos del Servidor de Autorización
+
+```http
+GET /_emdash/.well-known/oauth-authorization-server
+```
+
+```json
+{
+  "issuer": "https://example.com/_emdash",
+  "authorization_endpoint": "https://example.com/_emdash/oauth/authorize",
+  "token_endpoint": "https://example.com/_emdash/api/oauth/token",
+  "scopes_supported": ["content:read", "content:write", "..."],
+  "response_types_supported": ["code"],
+  "grant_types_supported": [
+    "authorization_code",
+    "refresh_token",
+    "urn:ietf:params:oauth:grant-type:device_code"
+  ],
+  "code_challenge_methods_supported": ["S256"],
+  "token_endpoint_auth_methods_supported": ["none"],
+  "device_authorization_endpoint": "https://example.com/_emdash/api/oauth/device/code"
+}
+```
+
+Cuando una solicitud no autenticada llega al endpoint MCP, el servidor devuelve:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"
+```
+
+Esto desencadena el flujo de descubrimiento estándar del cliente MCP.
+
+## Manejo de Errores
+
+Los errores de herramientas se devuelven como contenido de texto con `isError: true`:
+
+```json
+{
+  "content": [{ "type": "text", "text": "Collection 'nonexistent' not found" }],
+  "isError": true
+}
+```
+
+Los errores de alcance y permisos lanzan errores del protocolo MCP:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32600,
+    "message": "Insufficient scope: requires content:write"
+  },
+  "id": 1
+}
+```
+
+Los errores a nivel de transporte (configuración incorrecta del servidor, excepciones no manejadas) devuelven el código de error JSON-RPC `-32603` (Error interno) sin filtrar detalles de implementación.

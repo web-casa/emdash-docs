@@ -1,0 +1,258 @@
+---
+title: Migrar do WordPress para o EmDash
+description: Um guia passo a passo de migração do WordPress para o EmDash, abrangendo exportações, importação de conteúdo, mídia, taxonomias e planejamento de redirecionamentos.
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+O EmDash oferece um caminho completo de migração a partir do WordPress. Importe seus posts, páginas, mídia e taxonomias através do painel administrativo — sem necessidade de CLI.
+
+Se você quiser primeiro uma visão geral de alto nível da migração, leia [WordPress para Astro com EmDash](/pt/wordpress-to-astro-with-emdash/) e [EmDash vs WordPress](/pt/emdash-vs-wordpress/).
+
+## Antes de Começar
+
+<CardGrid>
+	<Card title="Exporte seu conteúdo" icon="document">
+		No WordPress, vá para **Ferramentas → Exportar** e baixe um arquivo de exportação completo (.xml).
+	</Card>
+	<Card title="Faça backup do seu site" icon="warning">
+		Mantenha seu site WordPress funcionando até verificar se a migração foi bem-sucedida.
+	</Card>
+</CardGrid>
+
+## Métodos de Importação
+
+O EmDash suporta três métodos para importar conteúdo do WordPress:
+
+| Método           | Melhor para                       | Inclui rascunhos | Requer autenticação |
+| ---------------- | ------------------------------ | --------------- | ------------- |
+| Upload de arquivo WXR  | Migrações completas            | Sim             | Não            |
+| WordPress.com    | Sites hospedados no WordPress.com     | Sim             | OAuth         |
+| API REST (probe) | Verificar conteúdo antes da exportação | Não              | Opcional      |
+
+O upload de arquivo WXR é recomendado para a maioria das migrações. Ele captura todo o conteúdo, incluindo rascunhos, campos personalizados e posts privados.
+
+## Importação de Arquivo WXR
+
+<Steps>
+
+1. **Exporte do WordPress**
+
+   No seu painel administrativo do WordPress, vá para **Ferramentas → Exportar → Todo o conteúdo → Baixar Arquivo de Exportação**.
+
+2. **Abra o assistente de importação**
+
+   No EmDash, vá para **Administração → Configurações → Importar → WordPress**.
+
+3. **Faça upload do seu arquivo de exportação**
+
+   Arraste e solte seu arquivo `.xml` ou clique para procurar. O arquivo é analisado no seu navegador.
+
+4. **Revise o conteúdo detectado**
+
+   O assistente mostra o que foi encontrado:
+
+   ```
+	   Encontrado na exportação:
+	   ├── Posts: 127 → posts [Nova coleção]
+	   ├── Páginas: 12  → pages [Adicionar campos]
+	   └── Mídia: 89 anexos
+   ```
+
+5. **Configure os mapeamentos**
+
+   Ative/desative quais tipos de post importar. O EmDash automaticamente:
+   - Cria novas coleções para tipos de post não mapeados
+   - Adiciona campos faltantes a coleções existentes
+   - Avisa sobre conflitos de tipo de campo
+
+6. **Execute a importação**
+
+   Clique em **Importar Conteúdo**. O progresso é exibido à medida que cada item é processado.
+
+7. **Importe mídia (opcional)**
+
+   Após a importação do conteúdo, escolha se deseja baixar os arquivos de mídia. O EmDash:
+   - Faz o download a partir das URLs do seu WordPress
+   - Remove duplicatas por hash de conteúdo
+   - Reescreve as URLs no seu conteúdo automaticamente
+
+</Steps>
+
+<Aside type="tip">
+	Executar a importação novamente é seguro. Os itens são correspondidos pelo ID do WordPress, então você não criará duplicatas.
+</Aside>
+
+## Conversão de Conteúdo
+
+### Gutenberg para Portable Text
+
+O EmDash converte blocos do Gutenberg para [Portable Text](https://github.com/portabletext/portabletext), um formato de conteúdo estruturado.
+
+| Bloco Gutenberg  | Portable Text                | Observações                         |
+| ---------------- | ---------------------------- | ----------------------------- |
+| `core/paragraph` | `block` style="normal"       | Marcas inline preservadas        |
+| `core/heading`   | `block` style="h1-h6"        | Nível a partir dos atributos do bloco   |
+| `core/image`     | `image` block                | Referência de mídia atualizada       |
+| `core/list`      | `block` with `listItem` type | Ordenadas e não ordenadas         |
+| `core/quote`     | `block` style="blockquote"   | Citação incluída             |
+| `core/code`      | `code` block                 | Atributo de linguagem preservado  |
+| `core/embed`     | `embed` block                | URL e provedor armazenados       |
+| `core/gallery`   | `gallery` block              | Array de referências de imagem     |
+| `core/columns`   | `columns` block              | Conteúdo aninhado preservado      |
+| Blocos desconhecidos   | `htmlBlock`                  | HTML bruto preservado para revisão |
+
+Blocos desconhecidos são armazenados como `htmlBlock` com o HTML original e metadados do bloco. Você pode revisar e converter estes manualmente ou criar componentes Portable Text personalizados para renderizá-los.
+
+### Conteúdo do Editor Clássico
+
+HTML do Editor Clássico é convertido em blocos Portable Text. Estilos inline (`<strong>`, `<em>`, `<a>`) tornam-se marcas em spans.
+
+### Mapeamento de Status
+
+| Status WordPress | Status EmDash |
+| ---------------- | --------------- |
+| `publish`        | `published`     |
+| `draft`          | `draft`         |
+| `pending`        | `pending`       |
+| `private`        | `private`       |
+| `future`         | `scheduled`     |
+| `trash`          | `archived`      |
+
+## Importação de Taxonomia
+
+Categorias e tags são importadas como taxonomias com a hierarquia preservada:
+
+```
+WordPress:                       EmDash:
+├── Categorias (hierárquicas)   ├── tabela `taxonomies`
+│   ├── Notícias                │   ├── category/news
+│   │   ├── Local               │   ├── category/local (parent: news)
+│   │   └── Mundo               │   ├── category/world (parent: news)
+│   └── Esportes                │   └── category/sports
+└── Tags (planas)               └── junção `content_taxonomies`
+    ├── destaque                    ├── tag/featured
+    └── urgente                     └── tag/breaking
+```
+
+## Campos Personalizados e ACF
+
+Meta de post do WordPress e campos ACF são analisados durante a importação:
+
+<Steps>
+
+1. **Fase de análise**
+
+   O assistente detecta campos personalizados e sugere tipos de campo do EmDash:
+
+   ```
+	   Campos personalizados:
+	   ├── subtitle (string, 45 posts)
+	   ├── _yoast_wpseo_title → seo.title (string, 127 posts)
+	   ├── _thumbnail_id → featuredImage (reference, 89 posts)
+	   └── price (number, 23 posts)
+   ```
+
+2. **Mapeamento de campos**
+
+   Campos internos do WordPress (iniciando com `_edit_`, `_wp_`) são ocultados por padrão. Campos de plugins de SEO são mapeados para um objeto `seo`.
+
+3. **Inferência de tipo**
+
+   O EmDash infere tipos de campo a partir dos valores:
+   - Strings numéricas → `number`
+   - `"1"`, `"0"`, `"true"`, `"false"` → `boolean`
+   - Datas ISO → `date`
+   - PHP serializado/JSON → `json`
+   - IDs do WordPress (ex.: `_thumbnail_id`) → `reference`
+
+</Steps>
+
+<Aside>
+	Campos ACF repeater e conteúdo flexível são importados como JSON. Crie campos Portable Text ou array correspondentes no EmDash para estruturar esses dados.
+</Aside>
+
+## Redirecionamentos de URL
+
+Após a importação, o EmDash gera um mapa de redirecionamento:
+
+```json
+{
+	"redirects": [
+		{ "from": "/?p=123", "to": "/posts/hello-world" },
+		{ "from": "/2024/01/hello-world/", "to": "/posts/hello-world" },
+		{ "from": "/category/news/", "to": "/categories/news" }
+	],
+	"feeds": [
+		{ "from": "/feed/", "to": "/rss.xml" },
+		{ "from": "/feed/atom/", "to": "/atom.xml" }
+	]
+}
+```
+
+Aplique esses redirecionamentos para:
+
+- Regras de redirecionamento do Cloudflare
+- A configuração de redirecionamento da sua plataforma de hospedagem
+- A opção `redirects` do Astro em `astro.config.mjs`
+
+## Referência de Mapeamento de Conceitos
+
+Use esta tabela ao adaptar padrões do WordPress para o EmDash:
+
+| WordPress               | EmDash                             | Notas                          |
+| ----------------------- | ------------------------------------ | ------------------------------ |
+| `register_post_type()`  | Coleção na interface de administração | Criado via painel ou API       |
+| `register_taxonomy()`   | Taxonomia ou campo de array          | Depende da complexidade        |
+| `register_meta()`       | Campo no esquema da coleção          | Tipado, não chave-valor        |
+| `WP_Query`              | `getCollection(filters)`             | Consultas em tempo de execução |
+| `get_post()`            | `getEntry(collection, id)`           | Retorna entrada ou nulo        |
+| `wp_insert_post()`      | `POST /_emdash/api/content/{type}` | API REST                       |
+| `the_content`           | `<PortableText value={...} />`       | Renderização de Portable Text  |
+| `add_shortcode()`       | Bloco personalizado de Portable Text | Renderizador de componente personalizado |
+| `register_block_type()` | Bloco personalizado de Portable Text | Igual aos shortcodes           |
+| `add_menu_page()`       | Página de administração do plugin    | Em `/_emdash/admin/`           |
+| `add_action/filter()`   | Ganchos do plugin                    | `hooks.content:beforeSave`     |
+| `wp_options`            | `ctx.kv`                             | Armazenamento chave-valor      |
+| `wp_postmeta`           | Campos da coleção                    | Estruturado, não chave-valor   |
+| `$wpdb`                 | `ctx.storage`                        | Acesso direto ao armazenamento |
+| Categorias/Tags         | Taxonomias                           | Suporte hierárquico preservado |
+
+## Importação via API (Avançado)
+
+A importação do WordPress está disponível através do painel de administração e da API REST. Use o assistente de importação do painel de administração para a melhor experiência — ele fornece mapeamento de campos, resolução de conflitos e acompanhamento de progresso.
+
+Os endpoints da API de importação estão em `/_emdash/api/import/wordpress/` para acesso programático.
+
+## Solução de Problemas
+
+### "Erro de análise XML"
+
+O arquivo de exportação pode estar corrompido ou incompleto. Reexporte do WordPress.
+
+### Falhas no download de mídia
+
+Algumas imagens podem estar atrás de autenticação ou terem sido movidas. A importação continua, e as URLs com falha são registradas para tratamento manual.
+
+### Conflitos de tipo de campo
+
+Se uma coleção existente tiver um campo com um tipo incompatível, o assistente de importação mostra o conflito. Ou:
+
+- Renomeie o campo do EmDash
+- Altere o mapeamento do campo do WordPress
+- Exclua e recrie a coleção
+
+### Exportações grandes
+
+Para exportações acima de 100MB, considere:
+
+1. Exportar tipos de post separadamente no WordPress
+2. Importar cada arquivo sequencialmente
+3. Usar a CLI com `--resume` para confiabilidade
+
+## Próximos Passos
+
+- **[Importação de Conteúdo](/pt/migration/content-import/)** — Outras fontes e métodos de importação
+- **[Portabilidade de plugins](/pt/migration/porting-plugins/)** — Migre a funcionalidade de plugins do WordPress
+- **[Trabalhando com Conteúdo](/pt/guides/working-with-content/)** — Consulte e renderize seu conteúdo importado

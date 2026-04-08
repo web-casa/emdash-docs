@@ -1,0 +1,323 @@
+---
+title: Opciones de base de datos
+description: Configura EmDash con D1, PostgreSQL, libSQL o SQLite.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash admite varios motores de base de datos. Elige el que mejor encaje con tu entorno de despliegue.
+
+## Resumen
+
+| Base de datos   | Mejor para          | Despliegue                     |
+| ---------------- | ------------------- | ------------------------------ |
+| **D1**           | Cloudflare Workers  | Edge, distribuido globalmente  |
+| **PostgreSQL**   | Node.js en producción | Cualquier plataforma con Postgres |
+| **libSQL**       | Bases de datos remotas | Edge o Node.js                |
+| **SQLite**       | Node.js, desarrollo local | Servidor único              |
+
+## Cloudflare D1
+
+D1 es la base de datos SQLite sin servidor de Cloudflare. Úsala al desplegar en Cloudflare Workers.
+
+```js title="astro.config.mjs"
+import { d1 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: d1({ binding: "DB" }),
+		}),
+	],
+});
+```
+
+### Opciones
+
+| Opción           | Tipo     | Valor por defecto       | Descripción                               |
+| ----------------- | -------- | ----------------------- | ----------------------------------------- |
+| `binding`         | `string` | —                       | Nombre del binding D1 de `wrangler.jsonc` |
+| `session`         | `string` | `"disabled"`            | Modo de replicación de lectura (ver abajo) |
+| `bookmarkCookie`  | `string` | `"__ec_d1_bookmark"`    | Nombre de la cookie para marcadores de sesión |
+
+### Configuración de Wrangler
+
+<Tabs>
+  <TabItem label="wrangler.jsonc">
+    ```jsonc
+    {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "emdash-db",
+          "database_id": "your-database-id"
+        }
+      ]
+    }
+    ```
+  </TabItem>
+  <TabItem label="wrangler.toml">
+    ```toml
+    [[d1_databases]]
+    binding = "DB"
+    database_name = "emdash-db"
+    database_id = "your-database-id"
+    ```
+  </TabItem>
+</Tabs>
+
+<Aside type="caution">
+	D1 no permite sentencias DDL en tiempo de ejecución. Ejecuta las migraciones con la CLI de Wrangler antes del despliegue:
+	```bash
+	wrangler d1 migrations apply emdash-db
+	```
+</Aside>
+
+### Crear una base de datos D1
+
+```bash
+wrangler d1 create emdash-db
+```
+
+### Réplicas de lectura
+
+D1 admite [replicación de lectura](https://developers.cloudflare.com/d1/configuration/read-replication/) para reducir la latencia de lectura en sitios distribuidos globalmente. Cuando está habilitada, las consultas de lectura se dirigen a las réplicas más cercanas en lugar de siempre acceder a la base de datos principal.
+
+EmDash utiliza la API de sesiones de D1 para gestionarlo de forma transparente. Actívala con la opción `session`:
+
+```js title="astro.config.mjs"
+import { d1 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: d1({
+				binding: "DB",
+				session: "auto",
+			}),
+		}),
+	],
+});
+```
+
+#### Modos de sesión
+
+| Modo              | Comportamiento                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"disabled"`      | Sin sesiones. Todas las consultas van a la principal. Valor por defecto.                                                                    |
+| `"auto"`          | Las solicitudes anónimas leen desde la réplica más cercana. Los usuarios autenticados obtienen consistencia de lectura-tus-escrituras mediante cookies de marcador. |
+| `"primary-first"` | Como `"auto"`, pero la primera consulta siempre va a la principal. Úsalo para sitios con escrituras muy frecuentes.                         |
+
+#### Cómo funciona
+
+- **Visitantes anónimos** reciben `first-unconstrained`: las lecturas van a la réplica más cercana para minimizar la latencia. Como nunca escriben, no necesitan garantías de consistencia.
+- **Usuarios autenticados** (editores, autores) reciben sesiones basadas en marcadores. Después de una escritura, una cookie de marcador garantiza que la siguiente solicitud vea al menos ese estado.
+- **Solicitudes de escritura** (`POST`, `PUT`, `DELETE`) siempre comienzan en la base de datos principal.
+- **Consultas en tiempo de compilación** (colecciones de contenido de Astro) omiten las sesiones por completo y usan la principal directamente.
+
+<Aside type="tip">
+	La replicación de lectura también debe estar habilitada en la propia base de datos D1 a través del panel de administración de Cloudflare o
+	la API REST. La opción `session` solo controla la gestión de sesiones del lado del cliente de EmDash.
+</Aside>
+
+<Aside>
+	Los visitantes anónimos pueden ver datos con unos segundos de retraso. Para un CMS esto es esperado — los cambios de contenido
+	no son en tiempo real, y si tienes habilitado el almacenamiento en caché de rutas, la respuesta ya está desactualizada por
+	definición.
+</Aside>
+
+## libSQL
+
+libSQL es un fork de SQLite que admite conexiones remotas. Úsalo cuando necesites una base de datos remota sin Cloudflare D1.
+
+```js title="astro.config.mjs"
+import { libsql } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: libsql({
+				url: process.env.LIBSQL_DATABASE_URL,
+				authToken: process.env.LIBSQL_AUTH_TOKEN,
+			}),
+		}),
+	],
+});
+```
+
+### Configuración
+
+| Opción      | Tipo     | Descripción                                          |
+| ----------- | -------- | ---------------------------------------------------- |
+| `url`       | `string` | URL de la base de datos (`libsql://...` o `file:...`) |
+| `authToken` | `string` | Token de autenticación para bases de datos remotas (opcional para locales) |
+
+### Desarrollo local
+
+Usa un archivo libSQL local durante el desarrollo:
+
+```js
+database: libsql({ url: "file:./data.db" });
+```
+
+## PostgreSQL
+
+PostgreSQL es compatible para despliegues de Node.js que necesitan una base de datos relacional completa.
+
+```js title="astro.config.mjs"
+import { postgres } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: postgres({
+				connectionString: process.env.DATABASE_URL,
+			}),
+		}),
+	],
+});
+```
+
+### Configuración
+
+Puedes conectarte con una cadena de conexión o parámetros individuales:
+
+```js
+// Cadena de conexión
+database: postgres({
+	connectionString: "postgres://user:password@localhost:5432/emdash",
+});
+
+// Parámetros individuales
+database: postgres({
+	host: "localhost",
+	port: 5432,
+	database: "emdash",
+	user: "emdash",
+	password: process.env.DB_PASSWORD,
+	ssl: true,
+});
+```
+
+| Opción             | Tipo      | Descripción                          |
+| ------------------ | --------- | ------------------------------------ |
+| `connectionString` | `string`  | URL de conexión de PostgreSQL        |
+| `host`             | `string`  | Host de la base de datos             |
+| `port`             | `number`  | Puerto de la base de datos           |
+| `database`         | `string`  | Nombre de la base de datos           |
+| `user`             | `string`  | Usuario de la base de datos          |
+| `password`         | `string`  | Contraseña de la base de datos       |
+| `ssl`              | `boolean` | Habilitar SSL                        |
+| `pool.min`         | `number`  | Conexiones mínimas del pool (por defecto 0) |
+| `pool.max`         | `number`  | Conexiones máximas del pool (por defecto 10)|
+
+### Pool de conexiones
+
+El adaptador utiliza `pg.Pool` internamente. Ajusta el tamaño del pool según tu despliegue:
+
+```js
+database: postgres({
+	connectionString: process.env.DATABASE_URL,
+	pool: { min: 2, max: 20 },
+});
+```
+
+<Aside>
+	PostgreSQL requiere el paquete `pg`. Instálalo como dependencia:
+	```bash
+	pnpm add pg
+	```
+</Aside>
+
+## SQLite
+
+SQLite con better-sqlite3 es la opción más simple para despliegues de Node.js.
+
+```
+js title="astro.config.mjs"
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+		}),
+	],
+});
+```
+
+### Configuración
+
+| Opción | Tipo     | Descripción                   |
+| ------ | -------- | ----------------------------- |
+| `url`  | `string` | Ruta del archivo con prefijo `file:` |
+
+### Ruta del archivo
+
+La `url` debe comenzar con `file:`:
+
+```js
+// Relative path
+database: sqlite({ url: "file:./data/emdash.db" });
+
+// Ruta absoluta
+database: sqlite({ url: "file:/var/data/emdash.db" });
+
+// Desde variable de entorno
+database: sqlite({ url: `file:${process.env.DATABASE_PATH}` });
+```
+
+<Aside>
+	SQLite requiere un sistema de archivos persistente. No funciona en plataformas con almacenamiento efímero
+	sin configuración adicional.
+</Aside>
+
+## Migraciones
+
+EmDash maneja las migraciones automáticamente para SQLite, libSQL y PostgreSQL. Para D1, ejecuta las migraciones a través de Wrangler.
+
+### Verificar el Estado de la Migración
+
+```bash
+npx emdash init --database ./data.db
+```
+
+Este comando:
+
+1. Crea el archivo de base de datos si es necesario
+2. Ejecuta cualquier migración pendiente
+3. Informa el estado actual de la migración
+
+### Archivos de Migración
+
+Las migraciones están incluidas con EmDash. Para ejecutarlas manualmente:
+
+```bash
+# SQLite/libSQL: las migraciones se ejecutan automáticamente
+
+# D1: ejecutar mediante Wrangler
+wrangler d1 migrations apply DB
+```
+
+## Configuración basada en el entorno
+
+Usa diferentes bases de datos por entorno:
+
+```js title="astro.config.mjs"
+import { sqlite, libsql, postgres } from "emdash/db";
+import { d1 } from "@emdash-cms/cloudflare";
+
+const database = import.meta.env.PROD ? d1({ binding: "DB" }) : sqlite({ url: "file:./data.db" });
+
+export default defineConfig({
+	integrations: [emdash({ database })],
+});
+```
+
+O cambia según las variables de entorno:
+
+```js
+const database = process.env.DATABASE_URL
+	? postgres({ connectionString: process.env.DATABASE_URL })
+	: sqlite({ url: "file:./data.db" });
+```

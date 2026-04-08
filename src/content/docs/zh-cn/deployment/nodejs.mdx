@@ -1,0 +1,169 @@
+---
+title: 部署到 Node.js
+description: 将 EmDash 部署到任何 Node.js 托管平台。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 可以运行在任何支持 Node.js 22+ 的托管平台上。本指南介绍如何使用 SQLite，以及本地或 S3 兼容存储来完成部署。
+
+## 先决条件
+
+- Node.js v22.12.0 或更高版本
+- 一个 Node.js 托管提供商或 VPS
+
+## 配置
+
+为 Node.js 部署配置 EmDash：
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import node from "@astrojs/node";
+import emdash, { local, s3 } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	output: "server",
+	adapter: node({ mode: "standalone" }),
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data/emdash.db" }),
+			storage: local({
+				directory: "./data/uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+## 构建与运行
+
+1. 构建项目：
+
+```bash
+npm run build
+```
+
+2. 初始化数据库：
+
+    ```bash
+   npx emdash init --database ./data/emdash.db
+   ```
+
+3. 启动服务器：
+
+    ```bash
+   node ./dist/server/entry.mjs
+   ```
+
+服务器默认运行在 `http://localhost:4321`。
+
+## 生产环境存储
+
+在生产环境中，建议使用 S3 兼容存储，而不是本地文件系统：
+
+```js title="astro.config.mjs"
+import emdash, { s3 } from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: `file:${process.env.DATABASE_PATH}` }),
+			storage: s3({
+				endpoint: process.env.S3_ENDPOINT,
+				bucket: process.env.S3_BUCKET,
+				accessKeyId: process.env.S3_ACCESS_KEY_ID,
+				secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+				publicUrl: process.env.S3_PUBLIC_URL, // Optional CDN URL
+			}),
+		}),
+	],
+});
+```
+
+<Aside>
+	S3 兼容存储可与 Cloudflare R2（通过 S3 API）、MinIO 以及其他 S3 兼容服务配合使用。
+</Aside>
+
+## Docker
+
+创建 `Dockerfile`：
+
+```dockerfile title="Dockerfile"
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:22-alpine
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+
+ENV HOST=0.0.0.0
+ENV PORT=4321
+
+EXPOSE 4321
+CMD ["node", "./dist/server/entry.mjs"]
+```
+
+构建并运行：
+
+```bash
+docker build -t my-emdash-site .
+docker run -p 4321:4321 -v emdash-data:/app/data my-emdash-site
+```
+
+## 环境变量
+
+### 生产环境必需
+
+| 变量 | 描述 |
+| -------- | ----------- |
+| `EMDASH_AUTH_SECRET` | 用于签署会话 Cookie 和身份验证令牌。使用 `npx emdash auth secret` 生成。 |
+| `EMDASH_PREVIEW_SECRET` | 用于签署草稿内容的预览 URL。使用 `npx emdash auth secret` 生成。 |
+
+### 数据库与存储
+
+| 变量               | 描述             | 示例                    |
+| ---------------------- | ----------------------- | -------------------------- |
+| `DATABASE_PATH`        | SQLite 数据库路径 | `/data/emdash.db`        |
+| `HOST`                 | 服务器主机             | `0.0.0.0`                  |
+| `PORT`                 | 服务器端口             | `4321`                     |
+| `S3_ENDPOINT`          | S3 端点 URL         | `https://xxx.r2.cloudflarestorage.com` |
+| `S3_BUCKET`            | S3 存储桶名称          | `my-media-bucket`          |
+| `S3_ACCESS_KEY_ID`     | S3 访问密钥           | `AKIA...`                  |
+| `S3_SECRET_ACCESS_KEY` | S3 秘密密钥           | `...`                      |
+| `S3_PUBLIC_URL`        | 媒体文件的公开 URL    | `https://cdn.example.com`  |
+
+<Aside type="caution">
+不要把密钥提交到代码仓库。生产环境下，请使用平台提供的 Secrets 管理能力，例如环境变量或专用密钥存储。
+</Aside>
+
+## 持久化存储
+
+SQLite 需要持久化磁盘存储。请确保您的托管平台提供：
+
+- 已挂载的卷或持久化磁盘
+- 对数据库目录的写入权限
+- 数据库文件的备份机制
+
+<Aside type="caution">
+	临时文件系统会在重启时丢失您的数据库。请使用带有远程数据库或持久化存储的 libSQL。
+</Aside>
+
+## 健康检查
+
+为负载均衡器添加健康检查端点：
+
+```astro title="src/pages/health.ts"
+export const GET = () => {
+  return new Response("OK", { status: 200 });
+};
+```
+
+配置您的平台以检查 `/health` 端点作为存活探针。

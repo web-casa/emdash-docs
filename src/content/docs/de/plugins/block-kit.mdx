@@ -1,0 +1,144 @@
+---
+title: Block Kit
+description: Deklarative UI-Blöcke für abgesicherte Plugin-Admin-Seiten und Widgets.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Das Block Kit von EmDash ermöglicht es isolierten Plugins, ihre Admin-Oberfläche als JSON zu beschreiben. Der Host rendert die Blöcke, ohne dass vom Plugin bereitgestellter JavaScript-Code im Browser ausgeführt wird.
+
+<Aside>
+Vertrauenswürdige Plugins (in `astro.config.ts` deklariert) können weiterhin eigene React-Komponenten bereitstellen. Block Kit ist für zur Laufzeit installierte, isolierte Plugins gedacht, denen kein DOM-Zugriff gewährt werden kann.
+</Aside>
+
+<Aside type="tip">
+Block-Kit-Elemente werden auch für [Portable-Text-Block-Editierfelder](/de/plugins/creating-plugins/#portable-text-block-types) verwendet. Wenn ein Plugin `fields` für einen Blocktyp deklariert, rendert der Editor ein Block-Kit-Formular zum Bearbeiten der Blockdaten (URL, Titel, Parameter usw.).
+</Aside>
+
+## So funktioniert es
+
+1. Der Benutzer navigiert zur Admin-Seite eines Plugins
+2. Das Admin-Interface sendet eine `page_load`-Interaktion an die Admin-Route des Plugins
+3. Das Plugin gibt eine `BlockResponse` mit einem Array von Blöcken zurück
+4. Das Admin-Interface rendert die Blöcke mithilfe der `BlockRenderer`-Komponente
+5. Wenn der Benutzer interagiert (auf einen Button klickt, ein Formular absendet), sendet das Admin-Interface die Interaktion zurück an das Plugin
+6. Das Plugin gibt neue Blöcke zurück, und der Zyklus wiederholt sich
+
+```typescript
+// Handler für die Admin-Route des Plugins
+routes: {
+  admin: {
+    handler: async (ctx, { request }) => {
+      const interaction = await request.json();
+
+      if (interaction.type === "page_load") {
+        return {
+          blocks: [
+            { type: "header", text: "Plugin-Einstellungen" },
+            {
+              type: "form",
+              block_id: "settings",
+              fields: [
+                { type: "text_input", action_id: "api_url", label: "API-URL" },
+                { type: "toggle", action_id: "enabled", label: "Aktiviert", initial_value: true },
+              ],
+              submit: { label: "Speichern", action_id: "save" },
+            },
+          ],
+        };
+      }
+
+      if (interaction.type === "form_submit" && interaction.action_id === "save") {
+        await ctx.kv.set("settings", interaction.values);
+        return {
+          blocks: [/* ... aktualisierte Blöcke ... */],
+          toast: { message: "Einstellungen gespeichert", type: "success" },
+        };
+      }
+    },
+  },
+}
+```
+
+## Blocktypen
+
+| Typ | Beschreibung |
+|------|-------------|
+| `header` | Große, fette Überschrift |
+| `section` | Text mit optionalem Zusatzelement |
+| `divider` | Horizontale Trennlinie |
+| `fields` | Zwei-Spalten-Grid mit Label/Wert |
+| `table` | Datentabelle mit Formatierung, Sortierung, Paginierung |
+| `actions` | Horizontale Reihe von Buttons und Steuerelementen |
+| `stats` | Dashboard-Metriken-Karten mit Trendindikatoren |
+| `form` | Eingabefelder mit bedingter Sichtbarkeit und Absenden |
+| `image` | Blockweites Bild mit Bildunterschrift |
+| `context` | Kleiner, dezent gehaltener Hilfetext |
+| `columns` | 2-3-Spalten-Layout mit verschachtelten Blöcken |
+
+## Elementtypen
+
+| Typ | Beschreibung |
+|------|-------------|
+| `button` | Aktionsbutton mit optionalem Bestätigungsdialog |
+| `text_input` | Einzeilige oder mehrzeilige Texteingabe |
+| `number_input` | Numerische Eingabe mit Min/Max |
+| `select` | Dropdown-Auswahl |
+| `toggle` | Ein/Aus-Schalter |
+| `secret_input` | Maskierte Eingabe für API-Schlüssel und Tokens |
+
+## Builder-Helfer
+
+Das Paket `@emdash-cms/blocks` exportiert Builder-Helfer für saubereren Code:
+
+```typescript
+import { blocks, elements } from "@emdash-cms/blocks";
+
+const { header, form, section, stats } = blocks;
+const { textInput, toggle, select, button } = elements;
+
+return {
+  blocks: [
+    header("SEO-Einstellungen"),
+    form({
+      blockId: "settings",
+      fields: [
+        textInput("site_title", "Seitentitel", { initialValue: "Meine Website" }),
+        toggle("generate_sitemap", "Sitemap generieren", { initialValue: true }),
+        select("robots", "Standard-Robots", [
+          { label: "Index, Follow", value: "index,follow" },
+          { label: "Nicht indexieren", value: "noindex,follow" },
+        ]),
+      ],
+      submit: { label: "Speichern", actionId: "save" },
+    }),
+  ],
+};
+```
+
+## Bedingte Felder
+
+Formularfelder können basierend auf den Werten anderer Felder bedingt angezeigt werden:
+
+```json
+{
+  "type": "toggle",
+  "action_id": "auth_enabled",
+  "label": "Authentifizierung aktivieren"
+}
+```
+
+```json
+{
+  "type": "secret_input",
+  "action_id": "api_key",
+  "label": "API-Schlüssel",
+  "condition": { "field": "auth_enabled", "eq": true }
+}
+```
+
+Das Feld `api_key` erscheint nur, wenn `auth_enabled` aktiviert ist. Bedingungen werden clientseitig ausgewertet, ohne Roundtrip zum Server.
+
+## Ausprobieren
+
+Nutze den [Block Playground](https://emdash-blocks.cto.cloudflare.dev/), um Block-Layouts interaktiv zu erstellen und zu testen.

@@ -1,0 +1,264 @@
+---
+title: Abschnitte
+description: Erstellen und verwenden Sie wiederverwendbare Inhaltsblöcke auf Ihrer Website.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Abschnitte sind wiederverwendbare Inhaltsblöcke, die Redakteure per Slash-Befehl in beliebige Inhalte einfügen können. Sie eignen sich für wiederkehrende Muster wie CTAs, Testimonials, Feature-Grids oder andere Inhalte, die auf mehreren Seiten auftauchen.
+
+## Abschnitte abfragen
+
+### getSection
+
+Einen einzelnen Abschnitt anhand seines Slugs abrufen:
+
+```typescript
+import { getSection } from "emdash";
+
+const cta = await getSection("newsletter-cta");
+
+if (cta) {
+  console.log(cta.title);    // "Newsletter CTA"
+  console.log(cta.content);  // PortableTextBlock[]
+}
+```
+
+### getSections
+
+Mehrere Abschnitte mit optionalen Filtern abrufen:
+
+```typescript
+import { getSections } from "emdash";
+
+// Alle Sections abrufen
+const { items: all } = await getSections();
+
+// Nach Quelle filtern
+const { items: themeSections } = await getSections({ source: "theme" });
+
+// Nach Titel/Schlüsselwörtern suchen
+const { items: results } = await getSections({ search: "newsletter" });
+```
+
+`getSections` gibt `{ items: Section[], nextCursor?: string }` nach dem üblichen Paginierungsmuster zurück.
+
+## Struktur eines Abschnitts
+
+```typescript
+interface Section {
+  id: string;
+  slug: string;
+  title: string;
+  description?: string;
+  keywords: string[];
+  content: PortableTextBlock[];
+  previewUrl?: string;
+  source: "theme" | "user" | "import";
+  themeId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+### Quelltypen
+
+| Quelle   | Beschreibung                                      |
+| -------- | ------------------------------------------------ |
+| `theme`  | In Seed-Datei definiert, vom Theme verwaltet     |
+| `user`   | Von Redakteuren im Admin erstellt                |
+| `import` | Aus WordPress importiert (wiederverwendbare Blöcke) |
+
+## Abschnitte in Inhalten verwenden
+
+Redakteure fügen Abschnitte im Rich-Text-Editor über den Slash-Befehl `/section` ein:
+
+<Steps>
+
+1. `/section` eingeben (oder `/pattern`, `/block`, `/template`)
+
+2. Verfügbare Sections durchsuchen oder durchstöbern
+
+3. Klicken, um den Inhalt der Section an der Cursorposition einzufügen
+
+</Steps>
+
+Der Portable-Text-Inhalt des Abschnitts wird in das Dokument kopiert. Das bedeutet:
+
+- Änderungen am Abschnitt wirken sich nicht auf bereits eingefügte Inhalte aus
+- Redakteure können den eingefügten Inhalt anpassen
+- Der Inhalt bleibt eigenständig
+
+<Aside type="tip">
+  Für Inhalte, die synchronisiert bleiben sollen, sollten Sie stattdessen [Widget-Bereiche](/de/guides/widgets/) mit Komponenten-Widgets in Betracht ziehen.
+</Aside>
+
+## Abschnitte erstellen
+
+### In der Admin-Oberfläche
+
+1. Öffnen Sie **Sections** in der Admin-Seitenleiste
+
+2. Klicken Sie auf **New Section**
+
+3. Füllen Sie diese Felder aus:
+   - **Title** - Anzeigename des Abschnitts
+   - **Slug** - URL-Identifikator, automatisch aus dem Titel erzeugt
+   - **Description** - Hilfetext für Redakteure
+
+4. Inhalt mit dem Rich-Text-Editor hinzufügen
+
+5. Optional Schlüsselwörter für eine einfachere Auffindbarkeit setzen
+
+### Über Seed-Dateien
+
+Sie können Abschnitte direkt in der Seed-Datei Ihres Themes definieren:
+
+```json
+{
+  "sections": [
+    {
+      "slug": "hero-centered",
+      "title": "Centered Hero",
+      "description": "Full-width hero with centered heading and CTA",
+      "keywords": ["hero", "banner", "header"],
+      "content": [
+        {
+          "_type": "block",
+          "style": "h1",
+          "children": [{ "_type": "span", "text": "Willkommen auf unserer Website" }]
+        },
+        {
+          "_type": "block",
+          "children": [{ "_type": "span", "text": "Your tagline goes here." }]
+        }
+      ]
+    },
+    {
+      "slug": "newsletter-cta",
+      "title": "Newsletter CTA",
+      "keywords": ["newsletter", "subscribe", "email"],
+      "content": [
+        {
+          "_type": "block",
+          "style": "h3",
+          "children": [{ "_type": "span", "text": "Subscribe to our newsletter" }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Über WordPress-Import
+
+Wiederverwendbare WordPress-Blöcke (`wp_block`-Post-Typ) werden automatisch als Abschnitte importiert:
+
+- Quelle wird auf `"import"` gesetzt
+- Gutenberg-Inhalt wird in Portable Text konvertiert
+
+## Abschnitte programmatisch rendern
+
+Wenn Sie Abschnittsinhalte außerhalb des Editors serverseitig rendern möchten:
+
+```astro
+---
+import { getSection } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const newsletter = await getSection("newsletter-cta");
+---
+
+{newsletter && (
+  <aside class="cta-box">
+    <PortableText value={newsletter.content} />
+  </aside>
+)}
+```
+
+## Funktionen der Admin-Oberfläche
+
+Die Sections-Bibliothek (`/_emdash/admin/sections`) bietet:
+
+- **Rasteransicht** mit Vorschauen der Abschnitte
+- **Suche** nach Titel und Schlüsselwörtern
+- **Filter** nach Quelle
+- **Schnelles Kopieren** des Slugs in die Zwischenablage
+- **Bearbeiten** von Abschnittsinhalten und Metadaten
+- **Löschen** mit Bestätigung, inklusive Warnung bei Theme-Abschnitten
+
+## API-Referenz
+
+### `getSection(slug)`
+
+Eine Section anhand des Slugs abrufen.
+
+**Parameter:**
+- `slug` — Der eindeutige Identifikator der Section (String)
+
+**Rückgabewert:** `Promise<Section | null>`
+
+### `getSections(options?)`
+
+Sections mit optionalen Filtern auflisten.
+
+**Parameter:**
+- `options.source` — Nach Quelle filtern: `"theme"`, `"user"` oder `"import"`
+- `options.search` — Titel und Schlüsselwörter durchsuchen
+
+**Rückgabewert:** `Promise<Section[]>`
+
+## REST-API
+
+### Abschnitte auflisten
+
+```http
+GET /_emdash/api/sections
+GET /_emdash/api/sections?source=theme
+GET /_emdash/api/sections?search=newsletter
+```
+
+### Einen Abschnitt abrufen
+
+```http
+GET /_emdash/api/sections/newsletter-cta
+```
+
+### Einen Abschnitt erstellen
+
+```http
+POST /_emdash/api/sections
+Content-Type: application/json
+
+{
+  "slug": "my-section",
+  "title": "Mein Abschnitt",
+  "description": "Optionale Beschreibung",
+  "keywords": ["keyword1", "keyword2"],
+  "content": [...]
+}
+```
+
+### Einen Abschnitt aktualisieren
+
+```http
+PUT /_emdash/api/sections/my-section
+Content-Type: application/json
+
+{
+  "title": "Aktualisierter Titel",
+  "content": [...]
+}
+```
+
+### Einen Abschnitt löschen
+
+```http
+DELETE /_emdash/api/sections/my-section
+```
+
+## Nächste Schritte
+
+- [Mit Inhalten arbeiten](/de/guides/working-with-content/) - Erfahren Sie mehr über den Rich-Text-Editor
+- [Widget-Bereiche](/de/guides/widgets/) - Für synchronisierte dynamische Inhalte
+- [Content-Import](/de/migration/content-import/) - Wiederverwendbare WordPress-Blöcke importieren

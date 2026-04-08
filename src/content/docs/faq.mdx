@@ -1,0 +1,111 @@
+---
+title: FAQ
+description: Practical answers and current caveats for evaluating or adopting EmDash.
+lastUpdated: 2026-04-07
+---
+
+import FaqJsonLd from "../../components/FaqJsonLd.astro";
+
+<FaqJsonLd />
+
+This FAQ complements the official guides with answers pulled from the public docs, the repository
+README, and open GitHub issues. The "current caveats" section reflects publicly visible project
+status as of April 7, 2026.
+
+## General
+
+### What is EmDash?
+
+EmDash is an Astro-native CMS focused on type-safe content, an admin panel for non-developers, and
+a plugin architecture that can run in sandboxed Cloudflare Worker isolates. If you know WordPress,
+the shortest description is "WordPress ideas rebuilt around Astro, TypeScript, and portable
+deployment."
+
+See the [introduction](/introduction/), [why EmDash](/why-emdash/), and the project
+[README](https://github.com/emdash-cms/emdash).
+
+### Does EmDash require Cloudflare?
+
+No. EmDash runs on Cloudflare, but it can also run on Node.js with SQLite and local or
+S3-compatible storage. The main exception is **sandboxed plugins**: the README notes that Dynamic
+Workers are currently only available on paid Cloudflare accounts, so that specific plugin isolation
+model is tied to Cloudflare's platform.
+
+See [Deploy to Node.js](/deployment/nodejs/), [Deploy to Cloudflare](/deployment/cloudflare/), and
+the [README](https://github.com/emdash-cms/emdash/blob/main/README.md).
+
+### Can I run EmDash locally without Cloudflare?
+
+Yes. The local getting-started flow uses a standard Astro project and works without a Cloudflare
+account. For local development or simpler deployments, Node.js + SQLite is the most direct setup.
+
+See [Getting Started](/getting-started/) and [Deploy to Node.js](/deployment/nodejs/).
+
+### Do content changes require a rebuild?
+
+No. EmDash is documented around Astro Live Content Collections, so content changes can appear at
+runtime without rebuilding the site.
+
+See [Getting Started](/getting-started/), [Querying Content](/guides/querying-content/), and
+[Architecture](/concepts/architecture/).
+
+### How does authentication work?
+
+EmDash is passkey-first. The default flow uses WebAuthn passkeys, with optional magic-link and
+OAuth fallbacks when configured.
+
+See [Authentication](/guides/authentication/).
+
+### Is EmDash production-ready?
+
+The repository README currently describes EmDash as **beta preview**. That means it is usable for
+real evaluation and development, but you should still expect active API and feature changes.
+
+See the [README status section](https://github.com/emdash-cms/emdash/blob/main/README.md#status).
+
+If you want a broader overview first, read [What Is EmDash?](/what-is-emdash/) and [EmDash vs WordPress](/emdash-vs-wordpress/).
+
+## Current Caveats
+
+### Does `admin.settingsSchema` already auto-generate a plugin settings UI?
+
+Not reliably yet. The plugin settings guide describes schema-driven admin UI generation, but
+[issue #341](https://github.com/emdash-cms/emdash/issues/341) reports that the schema is validated
+and typed without producing the expected settings form in the admin panel. Treat this as an
+in-progress feature until the issue is resolved.
+
+Related doc: [Plugin Settings](/plugins/settings/).
+
+### Can the menu editor accept relative URLs like `/about`?
+
+There is an open bug report saying it currently rejects relative URLs because the form uses
+`type="url"` and browser validation expects a full URL with a scheme.
+
+Track [issue #342](https://github.com/emdash-cms/emdash/issues/342) if internal relative paths are
+important to your menu workflow.
+
+### Can plugins register custom widget components for widget areas?
+
+Not yet, at least not as a completed public feature. [Issue #343](https://github.com/emdash-cms/emdash/issues/343)
+requests both the registration API and the runtime rendering support needed for plugin-provided
+widget components.
+
+If your plugin strategy depends on reusable widget blocks, assume additional framework work is
+still needed.
+
+### What should I verify before adopting EmDash for a production site?
+
+Check four things first:
+
+- Your target deployment model: Cloudflare vs. Node.js
+- Whether you need sandboxed plugins, and if paid Cloudflare features are acceptable
+- Whether the current plugin APIs cover your use case without relying on open issues
+- Whether your team is comfortable adopting a beta-preview CMS
+
+For most teams, a small pilot project is the right starting point before a full migration.
+
+## Related Reading
+
+- [What Is EmDash?](/what-is-emdash/)
+- [Best Astro CMS](/best-astro-cms/)
+- [WordPress to Astro with EmDash](/wordpress-to-astro-with-emdash/)

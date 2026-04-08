@@ -1,0 +1,405 @@
+---
+title: WordPress開発者向けEmDash
+description: EmDashが投稿、タクソノミー、メニュー、ウィジェット、WP_QueryなどのWordPress概念をAstroとTypeScriptにどのようにマッピングするかを学びます。
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDashは、WordPressの馴染み深い概念—投稿、固定ページ、タクソノミー、メニュー、ウィジェット、メディアライブラリ—をモダンなAstroスタックに持ち込みます。あなたのコンテンツ管理に関する知識はそのまま活かせます。
+
+移行前にプラットフォームを比較する場合は、[EmDash vs WordPress](/ja/emdash-vs-wordpress/) と [WordPress to Astro with EmDash](/ja/wordpress-to-astro-with-emdash/) をお読みください。
+
+## 変わらないもの
+
+WordPressから知っている概念は、EmDashにおいても第一級の機能です：
+
+- **コレクション**はカスタム投稿タイプのように機能します—コンテンツ構造を定義し、テンプレート内でクエリします
+- **タクソノミー**も同じように機能します—階層型（カテゴリーのような）とフラット型（タグのような）
+- **メニュー**はドラッグ＆ドロップでの順序変更とネストされた項目に対応
+- **ウィジェットエリア**はサイドバーや動的コンテンツ領域用です
+- **メディアライブラリ**はアップロード、整理、画像管理機能付き
+- **管理UI**はコンテンツ編集者がコードに触れずに使用できます
+
+<Aside type="tip">
+	Reactや特定のJavaScriptフレームワークの知識は必要ありません。AstroコンポーネントはHTMLとシンプルなテンプレート式を使用します—ReactよりもPHPテンプレートに近いものです。
+</Aside>
+
+## 異なるもの
+
+実装は変わりますが、メンタルモデルは同じままです：
+
+<CardGrid>
+	<Card title="PHPの代わりにTypeScript" icon="seti:typescript">
+		テンプレートはAstroコンポーネントです。構文はよりクリーンですが、概念は同じです：HTMLを出力するサーバーコードです。
+	</Card>
+	<Card title="WP_Queryの代わりにコンテンツAPI" icon="document">
+		`getEmDashCollection()`のようなクエリ関数が`WP_Query`を置き換えます。SQLは不要で、関数呼び出しだけです。
+	</Card>
+	<Card title="ファイルベースのルーティング" icon="puzzle">
+		`src/pages/`内のファイルがURLになります。リライトルールやテンプレート階層を暗記する必要はありません。
+	</Card>
+	<Card title="テンプレートパーツの代わりにコンポーネント" icon="rocket">
+		コンポーネントをインポートして使用します。`get_template_part()`と同じ考え方ですが、より整理されています。
+	</Card>
+</CardGrid>
+
+## クイックリファレンス
+
+| WordPress              | EmDash                             | 備考                             |
+| ---------------------- | ------------------------------------ | --------------------------------- |
+| カスタム投稿タイプ      | コレクション                          | 管理UIまたはAPIで定義        |
+| `WP_Query`             | `getEmDashCollection()`            | フィルター、制限、タクソノミークエリ |
+| `get_post()`           | `getEmDashEntry()`                 | エントリーまたはnullを返す             |
+| カテゴリー/タグ        | タクソノミー                           | 階層型サポートを維持    |
+| `register_nav_menus()` | `getMenu()`                          | 第一級のメニューサポート          |
+| `register_sidebar()`   | `getWidgetArea()`                    | 第一級のウィジェットエリアサポート          |
+| `bloginfo('name')`     | `getSiteSetting("title")`            | サイト設定API                 |
+| `the_content()`        | `<PortableText />`                   | 構造化コンテンツレンダリング      |
+| ショートコード             | Portable Textブロック                 | カスタムコンポーネント                 |
+| `add_action/filter()`  | プラグインフック                         | `content:beforeSave`など        |
+| `wp_options`           | `ctx.kv`                             | キーバリューストレージ                 |
+| テーマディレクトリ        | `src/`ディレクトリ                     | コンポーネント、レイアウト、ページ        |
+| `functions.php`        | `astro.config.mjs` + EmDash設定 | ビルドおよびランタイム設定          |
+
+## コンテンツAPI
+
+### コレクションのクエリ
+
+WordPressのクエリは`WP_Query`またはヘルパー関数を使用します。EmDashは型付きクエリ関数を使用します。
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="archive.php"
+<?php
+$posts = new WP_Query([
+  'post_type' => 'post',
+  'posts_per_page' => 10,
+  'post_status' => 'publish',
+  'category_name' => 'news',
+]);
+
+while ($posts->have_posts()) :
+$posts->the_post();
+?>
+
+  <h2><?php the_title(); ?></h2>
+  <?php the_excerpt(); ?>
+<?php endwhile; ?>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```
+astro title="src/pages/posts/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+status: "published",
+limit: 10,
+where: { category: "news" },
+});
+
+---
+
+{posts.map((post) => (
+
+  <article>
+    <h2>{post.data.title}</h2>
+    <p>{post.data.excerpt}</p>
+  </article>
+))}
+```
+	</TabItem>
+</Tabs>
+
+### 単一エントリーの取得
+
+<Tabs>
+	<TabItem label="WordPress">
+```
+php title="single.php"
+<?php
+$post = get_post($id);
+?>
+<article>
+  <h1><?php echo $post->post_title; ?></h1>
+  <?php echo apply_filters('the_content', $post->post_content); ?>
+</article>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+
+## if (!post) return Astro.redirect("/404");
+
+<article>
+  <h1>{post.data.title}</h1>
+  <PortableText value={post.data.content} />
+</article>
+```
+	</TabItem>
+</Tabs>
+
+## テンプレート階層
+
+WordPressはテンプレート階層を使用してページをレンダリングするファイルを選択します。Astroは明示的なファイルベースのルーティングを使用します。
+
+| WordPressテンプレート          | EmDash相当                 |
+| --------------------------- | ----------------------------------- |
+| `index.php`                 | `src/pages/index.astro`             |
+| `single.php`                | `src/pages/posts/[slug].astro`      |
+| `single-{type}.php`         | `src/pages/{type}/[slug].astro`     |
+| `page.php`                  | `src/pages/pages/[slug].astro`      |
+| `archive.php`               | `src/pages/posts/index.astro`       |
+| `archive-{type}.php`        | `src/pages/{type}/index.astro`      |
+| `category.php`              | `src/pages/categories/[slug].astro` |
+| `tag.php`                   | `src/pages/tags/[slug].astro`       |
+| `search.php`                | `src/pages/search.astro`            |
+| `404.php`                   | `src/pages/404.astro`               |
+| `header.php` / `footer.php` | `src/layouts/Base.astro`            |
+| `sidebar.php`               | `src/components/Sidebar.astro`      |
+
+<Aside type="tip">
+	AstroのルーティングはWordPressの階層よりも明示的です。各ルートはファイルです。動的セグメントには`[param]`構文を使用します。
+</Aside>
+
+## テンプレートパーツ → コンポーネント
+
+WordPressのテンプレートパーツはAstroコンポーネントになります：
+
+<Tabs>
+	<TabItem label="WordPress">
+```
+php title="functions.php / template"
+// テンプレート内：
+get_template_part('template-parts/content', 'post');
+
+// template-parts/content-post.php：
+
+<article class="post">
+  <h2><?php the_title(); ?></h2>
+  <?php the_excerpt(); ?>
+</article>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```
+astro title="src/components/PostCard.astro"
+---
+const { post } = Astro.props;
+---
+
+<article class="post">
+	<h2>{post.data.title}</h2>
+	<p>{post.data.excerpt}</p>
+</article>
+```
+
+```
+astro title="src/pages/index.astro"
+---
+import PostCard from "../../components/PostCard.astro";
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts");
+---
+
+{posts.map((post) => <PostCard {post} />)}
+```
+
+    </TabItem>
+
+</Tabs>
+
+## メニュー
+
+EmDashは自動URL解決を備えたファーストクラスのメニューサポートを提供します：
+
+<Tabs>
+	<TabItem label="WordPress">
+```
+php title="header.php"
+<?php
+wp_nav_menu([
+  'theme_location' => 'primary',
+  'container' => 'nav',
+]);
+?>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```
+astro title="src/components/Header.astro"
+---
+import { getMenu } from "emdash";
+
+## const menu = await getMenu("primary");
+
+<nav>
+  <ul>
+    {menu?.items.map((item) => (
+      <li>
+        <a href={item.url}>{item.label}</a>
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+	</TabItem>
+</Tabs>
+
+メニューは管理UI、シードファイル、またはWordPressインポートを通じて作成されます。
+
+## ウィジェットエリア
+
+ウィジェットエリアはWordPressのサイドバーのように機能します：
+
+<Tabs>
+	<TabItem label="WordPress">
+```
+php title="sidebar.php"
+<?php if (is_active_sidebar('sidebar-1')) : ?>
+  <aside>
+    <?php dynamic_sidebar('sidebar-1'); ?>
+  </aside>
+<?php endif; ?>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```
+astro title="src/components/Sidebar.astro"
+---
+import { getWidgetArea } from "emdash";
+import { PortableText } from "emdash/ui";
+
+## const sidebar = await getWidgetArea("sidebar");
+
+{sidebar && (
+
+  <aside>
+    {sidebar.widgets.map((widget) => {
+      if (widget.type === "content") {
+        return <PortableText value={widget.content} />;
+      }
+      // 他のウィジェットタイプを処理
+    })}
+  </aside>
+)}
+```
+	</TabItem>
+</Tabs>
+
+## サイト設定
+
+サイトオプションとカスタマイザー設定は `getSiteSetting()` にマッピングされます：
+
+| WordPress                   | EmDash                       |
+| --------------------------- | ------------------------------ |
+| `bloginfo('name')`          | `getSiteSetting("title")`      |
+| `bloginfo('description')`   | `getSiteSetting("tagline")`    |
+| `get_custom_logo()`         | `getSiteSetting("logo")`       |
+| `get_option('date_format')` | `getSiteSetting("dateFormat")` |
+| `home_url()`                | `Astro.site`                   |
+
+```ts
+import { getSiteSetting } from "emdash";
+
+const title = await getSiteSetting("title");
+const logo = await getSiteSetting("logo"); // { mediaId, alt, url } を返します
+```
+
+## タクソノミー
+
+タクソノミーは概念的には同じように機能します—階層型（カテゴリーなど）またはフラット型（タグなど）：
+
+```ts
+import { getTaxonomyTerms, getEntryTerms, getTerm } from "emdash";
+
+// すべてのカテゴリーを取得
+const categories = await getTaxonomyTerms("categories");
+
+// 特定のタームを取得
+const news = await getTerm("categories", "news");
+
+// 投稿のタームを取得
+const postCategories = await getEntryTerms("posts", postId, "categories");
+```
+
+## フック → プラグインシステム
+
+WordPressフック（`add_action`, `add_filter`）はEmDashプラグインフックになります：
+
+| WordPress Hook  | EmDash Hook           | 目的                         |
+| --------------- | ----------------------- | ---------------------------- |
+| `save_post`     | `content:beforeSave`    | 保存前のコンテンツを変更     |
+| `the_content`   | PortableText components | レンダリングされたコンテンツを変換 |
+| `pre_get_posts` | Query options           | クエリをフィルタリング       |
+| `wp_head`       | Layout `<head>`         | ヘッドコンテンツを追加       |
+| `wp_footer`     | Layout before `</body>` | フッターコンテンツを追加     |
+
+## EmDashでより優れている点
+
+<CardGrid>
+	<Card title="Type Safety" icon="seti:typescript">
+		TypeScriptを全面的に採用。コレクション、クエリ、コンポーネントは完全に型付けされています。フィールド名や戻り値の型を推測する必要はありません。
+	</Card>
+	<Card title="Performance" icon="rocket">
+		PHPのオーバーヘッドなし。デフォルトで静的生成。必要に応じてサーバーレンダリング。エッジデプロイメントに対応。
+	</Card>
+	<Card title="Modern DX" icon="laptop">
+		ホットモジュールリプレースメント。コンポーネントベースのアーキテクチャ。モダンなツーリング（Vite、TypeScript、ESLint）。
+	</Card>
+	<Card title="Git-based Deployments" icon="github">
+		コードとテンプレートはgitで管理。コンテンツはデータベースに保存。FTP、ファイルパーミッション、ハッキングされたサイトはありません。
+	</Card>
+</CardGrid>
+
+### プレビューリンク
+
+EmDashはHMAC署名付きトークンを使用した安全なプレビューURLを生成します。コンテンツ編集者は本番環境にログインせずに下書きをプレビューできます—認証情報ではなくリンクを共有します。
+
+### プラグイン競合なし
+
+WordPressのプラグイン競合は解消されます。EmDashプラグインは明示的なAPIを持つ分離されたコンテキストで実行されます。グローバル状態の汚染はありません。
+
+## コンテンツ編集者エクスペリエンス
+
+コンテンツ編集者はwp-adminに似たEmDash管理パネルを使用します：
+
+- **ダッシュボード**：最近のアクティビティを表示
+- **コレクション一覧**：検索、フィルタリング、一括操作が可能
+- **リッチエディター**：コンテンツ編集用（GutenbergではなくPortable Text）
+- **メディアライブラリ**：ドラッグ＆ドロップアップロード
+- **メニュービルダー**：ドラッグ＆ドロップによる順序変更
+- **ウィジェットエリアエディター**：サイドバーコンテンツ用
+
+編集エクスペリエンスは見慣れたものですが、その基盤となる技術はモダンです。
+
+## 移行パス
+
+EmDashはWordPressコンテンツを直接インポートします：
+
+1. WordPressからエクスポート（ツール → エクスポート）
+2. EmDash管理パネルで `.xml` ファイルをアップロード
+3. 投稿タイプをコレクションにマッピング
+4. コンテンツとメディアをインポート
+
+投稿、ページ、タクソノミー、メニュー、メディアが移行されます。GutenbergブロックはPortable Textに変換されます。カスタムフィールドは分析されマッピングされます。
+
+完全な手順については[WordPress移行ガイド](/ja/migration/from-wordpress/)を参照してください。
+
+## 次のステップ
+
+- **[はじめに](/ja/getting-started/)** — 最初のEmDashサイトをセットアップ
+- **[コンテンツのクエリ](/ja/guides/querying-content/)** — コンテンツAPIの詳細な解説
+- **[タクソノミー](/ja/guides/taxonomies/)** — カテゴリー、タグ、カスタムタクソノミー
+- **[メニュー](/ja/guides/menus/)** — ナビゲーションメニュー
+- **[WordPressからの移行](/ja/migration/from-wordpress/)** — 既存コンテンツのインポート

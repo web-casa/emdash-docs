@@ -1,0 +1,679 @@
+---
+title: Format du fichier seed
+description: Référence pour la structure et la syntaxe des fichiers de graine EmDash.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Les fichiers seed sont des documents JSON qui initialisent les sites EmDash. Ils définissent les collections, les champs, les taxonomies, les menus, les redirections, les zones de widgets, les paramètres du site et un contenu d'exemple optionnel.
+
+## Structure racine
+
+```json
+{
+	"$schema": "https://emdashcms.com/seed.schema.json",
+	"version": "1",
+	"meta": {},
+	"settings": {},
+	"collections": [],
+	"taxonomies": [],
+	"bylines": [],
+	"menus": [],
+	"redirects": [],
+	"widgetAreas": [],
+	"sections": [],
+	"content": {}
+}
+```
+
+| Champ          | Type      | Requis   | Description                                   |
+| --------------- | --------- | -------- | --------------------------------------------- |
+| `$schema`       | `string`  | Non      | URL du schéma JSON pour validation de l'éditeur |
+| `version`       | `"1"`     | Oui      | Version du format seed                        |
+| `meta`          | `object`  | Non      | Métadonnées sur le seed                       |
+| `settings`      | `object`  | Non      | Paramètres du site                            |
+| `collections`   | `array`   | Non      | Définitions des collections                   |
+| `taxonomies`    | `array`   | Non      | Définitions des taxonomies                    |
+| `bylines`       | `array`   | Non      | Définitions des profils de rédacteurs         |
+| `menus`         | `array`   | Non      | Menus de navigation                           |
+| `redirects`     | `array`   | Non      | Règles de redirection                         |
+| `widgetAreas`   | `array`   | Non      | Définitions des zones de widgets              |
+| `sections`      | `array`   | Non      | Blocs de contenu réutilisables                |
+| `content`       | `object`  | Non      | Entrées de contenu d'exemple                  |
+
+## Meta
+
+Métadonnées optionnelles sur le seed :
+
+```json
+{
+	"meta": {
+			"name": "Base de blog",
+			"description": "Un blog simple avec des articles, des pages et des catégories",
+		"author": "EmDash"
+	}
+}
+```
+
+## Paramètres
+
+Valeurs de configuration à l'échelle du site :
+
+```json
+{
+	"settings": {
+			"title": "Mon site",
+			"tagline": "Un CMS moderne",
+		"postsPerPage": 10,
+		"dateFormat": "MMMM d, yyyy"
+	}
+}
+```
+
+Les paramètres sont appliqués à la table `options` avec le préfixe `site:`. L'Assistant de Configuration permet aux utilisateurs de remplacer `title` et `tagline`.
+
+## Collections
+
+Les définitions de collections créent des types de contenu dans la base de données :
+
+```json
+{
+	"collections": [
+		{
+			"slug": "posts",
+				"label": "Articles",
+				"labelSingular": "Article",
+				"description": "Articles du blog",
+			"icon": "file-text",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{
+					"slug": "title",
+						"label": "Titre",
+					"type": "string",
+					"required": true
+				},
+				{
+					"slug": "content",
+						"label": "Contenu",
+					"type": "portableText"
+				},
+				{
+					"slug": "featured_image",
+						"label": "Image mise en avant",
+					"type": "image"
+				}
+			]
+		}
+	]
+}
+```
+
+### Propriétés de la collection
+
+| Propriété        | Type      | Requis   | Description                                      |
+| ----------------- | --------- | -------- | ------------------------------------------------ |
+| `slug`            | `string`  | Oui      | Identifiant sûr pour les URL (minuscules, tirets bas) |
+| `label`           | `string`  | Oui      | Nom d'affichage au pluriel                       |
+| `labelSingular`   | `string`  | Non      | Nom d'affichage au singulier                     |
+| `description`     | `string`  | Non      | Description dans l'interface d'administration     |
+| `icon`            | `string`  | Non      | Nom de l'icône Lucide                            |
+| `supports`        | `array`   | Non      | Fonctionnalités : `"drafts"`, `"revisions"`       |
+| `fields`          | `array`   | Oui      | Définitions des champs                           |
+
+### Propriétés du champ
+
+| Propriété       | Type       | Requis   | Description                          |
+| ---------------- | ---------- | -------- | ------------------------------------ |
+| `slug`           | `string`   | Oui      | Nom de la colonne (minuscules, tirets bas) |
+| `label`          | `string`   | Oui      | Nom d'affichage                      |
+| `type`           | `string`   | Oui      | Type de champ                        |
+| `required`       | `boolean`  | Non      | Validation : le champ doit avoir une valeur |
+| `unique`         | `boolean`  | Non      | Validation : la valeur doit être unique |
+| `defaultValue`   | `any`      | Non      | Valeur par défaut pour les nouvelles entrées |
+| `validation`     | `object`   | Non      | Règles de validation supplémentaires |
+| `widget`         | `string`   | Non      | Surcharge du widget de l'interface d'administration |
+| `options`        | `object`   | Non      | Configuration spécifique au widget   |
+
+### Types de champs
+
+| Type             | Description                | Stocké sous       |
+| ----------------- | -------------------------- | ----------------- |
+| `string`         | Texte court                | `TEXT`            |
+| `text`           | Texte long (zone de texte) | `TEXT`            |
+| `number`         | Valeur numérique           | `REAL`            |
+| `integer`        | Nombre entier              | `INTEGER`         |
+| `boolean`        | Vrai/faux                  | `INTEGER`         |
+| `date`           | Valeur de date             | `TEXT` (ISO 8601) |
+| `datetime`       | Date et heure              | `TEXT` (ISO 8601) |
+| `email`          | Adresse e-mail             | `TEXT`            |
+| `url`            | URL                        | `TEXT`            |
+| `slug`           | Chaîne sûre pour les URL   | `TEXT`            |
+| `portableText`   | Contenu de texte enrichi   | `JSON`            |
+| `image`          | Référence d'image          | `JSON`            |
+| `file`           | Référence de fichier       | `JSON`            |
+| `json`           | JSON arbitraire            | `JSON`            |
+| `reference`      | Référence à une autre entrée | `TEXT`            |
+
+## Taxonomies
+
+Systèmes de classification pour le contenu :
+
+```json
+{
+	"taxonomies": [
+		{
+			"name": "category",
+				"label": "Catégories",
+				"labelSingular": "Catégorie",
+			"hierarchical": true,
+			"collections": ["posts"],
+			"terms": [
+					{ "slug": "news", "label": "Actualités" },
+					{ "slug": "tutorials", "label": "Tutoriels" },
+				{
+					"slug": "advanced",
+						"label": "Tutoriels avancés",
+					"parent": "tutorials"
+				}
+			]
+		},
+		{
+			"name": "tag",
+				"label": "Étiquettes",
+				"labelSingular": "Étiquette",
+			"hierarchical": false,
+			"collections": ["posts"]
+		}
+	]
+}
+```
+
+### Propriétés de la taxonomie
+
+| Propriété        | Type       | Requis   | Description                                    |
+| ----------------- | ---------- | -------- | ---------------------------------------------- |
+| `name`            | `string`   | Oui      | Identifiant unique                             |
+| `label`           | `string`   | Oui      | Nom d'affichage au pluriel                     |
+| `labelSingular`   | `string`   | Non      | Nom d'affichage au singulier                   |
+| `hierarchical`    | `boolean`  | Oui      | Autoriser les termes imbriqués (catégories) ou plats (étiquettes) |
+| `collections`     | `array`    | Oui      | Collections auxquelles cette taxonomie s'applique |
+| `terms`           | `array`    | Non      | Termes prédéfinis                              |
+
+### Propriétés du terme
+
+| Propriété      | Type      | Requis   | Description                          |
+| --------------- | --------- | -------- | ------------------------------------ |
+| `slug`          | `string`  | Oui      | Identifiant sûr pour les URL         |
+| `label`         | `string`  | Oui      | Nom d'affichage                      |
+| `description`   | `string`  | Non      | Description du terme                 |
+| `parent`        | `string`  | Non      | Slug du terme parent (hiérarchique uniquement) |
+
+## Menus
+
+Menus de navigation modifiables depuis l'administration :
+
+```json
+{
+	"menus": [
+		{
+			"name": "primary",
+				"label": "Navigation principale",
+			"items": [
+					{ "type": "custom", "label": "Accueil", "url": "/" },
+				{ "type": "page", "ref": "about" },
+					{ "type": "custom", "label": "Blog", "url": "/posts" },
+				{
+					"type": "custom",
+						"label": "Externe",
+					"url": "https://example.com",
+					"target": "_blank"
+				}
+			]
+		}
+	]
+}
+```
+
+### Types d'éléments de menu
+
+| Type         | Description                  | Champs requis     |
+| ------------ | ---------------------------- | ------------------- |
+| `custom`     | URL personnalisée            | `url`               |
+| `page`       | Lien vers une page           | `ref`               |
+| `post`       | Lien vers un article         | `ref`               |
+| `taxonomy`   | Lien vers une archive de taxonomie | `ref`, `collection` |
+| `collection` | Lien vers une archive de collection | `collection`        |
+
+### Propriétés des éléments de menu
+
+| Propriété    | Type     | Description                                      |
+| ------------ | -------- | ------------------------------------------------ |
+| `type`       | `string` | Type d'élément (voir ci-dessus)                  |
+| `label`      | `string` | Texte affiché (généré automatiquement pour les références page/article) |
+| `url`        | `string` | URL personnalisée (pour le type `custom`)        |
+| `ref`        | `string` | ID de contenu dans le seed (pour les types `page`/`post`) |
+| `collection` | `string` | Slug de la collection                            |
+| `target`     | `string` | `"_blank"` pour une nouvelle fenêtre             |
+| `titleAttr`  | `string` | Attribut HTML title                              |
+| `cssClasses` | `string` | Classes CSS personnalisées                       |
+| `children`   | `array`  | Éléments de menu imbriqués                       |
+
+## Bylines
+
+Les profils de byline sont distincts de la propriété (`author_id`). Définissez des identités de byline réutilisables une fois, puis référencez-les depuis les entrées de contenu.
+
+```json
+{
+	"bylines": [
+		{
+			"id": "editorial",
+			"slug": "emdash-editorial",
+			"displayName": "EmDash Editorial"
+		},
+		{
+			"id": "guest",
+			"slug": "guest-contributor",
+				"displayName": "Contributeur invité",
+			"isGuest": true
+		}
+	]
+}
+```
+
+| Propriété     | Type      | Requis | Description                                |
+| ------------ | --------- | -------- | ------------------------------------------ |
+| `id`         | `string`  | Oui      | ID local au seed utilisé par `content[].bylines` |
+| `slug`       | `string`  | Oui      | Slug de byline adapté aux URL              |
+| `displayName`| `string`  | Oui      | Nom affiché dans les modèles et les API    |
+| `bio`        | `string`  | Non      | Bio de profil optionnelle                  |
+| `websiteUrl` | `string`  | Non      | URL de site web optionnelle                |
+| `isGuest`    | `boolean` | Non      | Marque le byline comme profil invité       |
+
+## Redirections
+
+Règles de redirection pour préserver les URL héritées après migration :
+
+```json
+{
+	"redirects": [
+		{ "source": "/old-about", "destination": "/about" },
+		{ "source": "/legacy-feed", "destination": "/rss.xml", "type": 308 },
+		{
+			"source": "/category/news",
+			"destination": "/categories/news",
+			"groupName": "migration"
+		}
+	]
+}
+```
+
+### Propriétés des redirections
+
+| Propriété      | Type      | Requis | Description                                        |
+| ------------- | --------- | -------- | -------------------------------------------------- |
+| `source`      | `string`  | Oui      | Chemin source (doit commencer par `/`)             |
+| `destination` | `string`  | Oui      | Chemin de destination (doit commencer par `/`)     |
+| `type`        | `number`  | Non      | Statut HTTP : `301`, `302`, `307` ou `308`         |
+| `enabled`     | `boolean` | Non      | Si la redirection est active (par défaut : `true`) |
+| `groupName`   | `string`  | Non      | Libellé de regroupement optionnel pour le filtrage/recherche admin |
+
+<Aside type="caution">
+	`source` et `destination` doivent être des chemins locaux. Les URL externes, les chemins relatifs au protocole (`//...`),
+	les segments de traversée de chemin (`..`) et les caractères de nouvelle ligne sont rejetés par la validation du seed.
+</Aside>
+
+## Zones de widgets
+
+Régions de contenu configurables :
+
+```json
+{
+	"widgetAreas": [
+		{
+			"name": "sidebar",
+				"label": "Barre latérale principale",
+				"description": "Apparaît sur les articles et les pages du blog",
+			"widgets": [
+				{
+					"type": "component",
+						"title": "Articles récents",
+					"componentId": "core:recent-posts",
+					"props": { "count": 5 }
+				},
+				{
+					"type": "menu",
+						"title": "Liens rapides",
+					"menuName": "footer"
+				},
+				{
+					"type": "content",
+						"title": "À propos",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+								"children": [{ "_type": "span", "text": "Bienvenue sur notre site." }]
+						}
+					]
+				}
+			]
+		}
+	]
+}
+```
+
+### Types de widgets
+
+| Type        | Description          | Champs requis           |
+| ----------- | -------------------- | ------------------------- |
+| `content`   | Contenu texte enrichi | `content` (Portable Text) |
+| `menu`      | Affiche un menu      | `menuName`                |
+| `component` | Composant enregistré | `componentId`             |
+
+### Composants intégrés
+
+| ID du composant   | Description          |
+| ------------------- | -------------------- |
+| `core:recent-posts` | Liste des articles récents |
+| `core:categories`   | Liste des catégories |
+| `core:tags`         | Nuage de tags        |
+| `core:search`       | Formulaire de recherche |
+| `core:archives`     | Archives mensuelles  |
+
+## Sections
+
+Blocs de contenu réutilisables que les éditeurs peuvent insérer dans les champs Portable Text via la commande slash `/section` :
+
+```json
+{
+	"sections": [
+		{
+			"slug": "hero-centered",
+				"title": "Hero centré",
+				"description": "Hero pleine largeur avec titre centré et bouton d'appel à l'action",
+			"keywords": ["hero", "banner", "header", "landing"],
+			"content": [
+				{
+					"_type": "block",
+					"style": "h1",
+						"children": [{ "_type": "span", "text": "Bienvenue sur notre site" }]
+				},
+				{
+					"_type": "block",
+					"children": [
+							{ "_type": "span", "text": "Ajoutez ici votre promesse de marque principale." }
+					]
+				}
+			]
+		}
+	]
+}
+```
+
+### Propriétés des sections
+
+| Propriété      | Type     | Requis | Description                                     |
+| ------------- | -------- | -------- | ----------------------------------------------- |
+| `slug`        | `string` | Oui      | Identifiant adapté aux URL                      |
+| `title`       | `string` | Oui      | Nom affiché dans le sélecteur de sections       |
+| `description` | `string` | Non      | Explique quand utiliser cette section           |
+| `keywords`    | `array`  | Non      | Termes de recherche pour trouver la section     |
+| `content`     | `array`  | Oui      | Blocs Portable Text                             |
+| `source`      | `string` | Non      | `"theme"` (par défaut pour les seeds) ou `"import"` |
+
+Les sections des fichiers seed sont marquées `source: "theme"` et ne peuvent pas être supprimées depuis l'interface d'administration. Les éditeurs peuvent créer leurs propres sections (`source: "user"`) et insérer n'importe quel type de section lors de l'édition du contenu.
+
+## Contenu
+
+Contenu exemple organisé par collection :
+
+```json
+{
+	"content": {
+		"posts": [
+			{
+				"id": "hello-world",
+				"slug": "hello-world",
+				"status": "published",
+				"bylines": [
+					{ "byline": "editorial" },
+						{ "byline": "guest", "roleLabel": "Article invité" }
+				],
+				"data": {
+						"title": "Bonjour tout le monde",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+								"children": [{ "_type": "span", "text": "Bienvenue !" }]
+						}
+					],
+						"excerpt": "Votre premier article."
+				},
+				"taxonomies": {
+					"category": ["news"],
+					"tag": ["welcome", "first-post"]
+				}
+			}
+		],
+		"pages": [
+			{
+				"id": "about",
+				"slug": "about",
+				"status": "published",
+				"data": {
+						"title": "À propos de nous",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+								"children": [{ "_type": "span", "text": "Contenu de la page À propos." }]
+						}
+					]
+				}
+			}
+		]
+	}
+}
+```
+
+### Propriétés des entrées de contenu
+
+| Propriété     | Type     | Requis | Description                                         |
+| ------------ | -------- | -------- | --------------------------------------------------- |
+| `id`         | `string` | Oui      | ID local au seed pour les références                |
+| `slug`       | `string` | Oui      | Slug d'URL                                          |
+| `status`     | `string` | Non      | `"published"` ou `"draft"` (par défaut : `"published"`) |
+| `data`       | `object` | Oui      | Valeurs des champs                                  |
+| `bylines`    | `array`  | Non      | Crédits de byline ordonnés (`byline`, `roleLabel` optionnel) |
+| `taxonomies` | `object` | Non      | Assignations de termes par nom de taxonomie         |
+
+## Références de contenu
+
+Référencez d'autres entrées de contenu en utilisant le préfixe `$ref:` :
+
+```json
+{
+	"data": {
+		"related_posts": ["$ref:another-post", "$ref:third-post"]
+	}
+}
+```
+
+Le préfixe `$ref:` résout les IDs de seed en IDs de base de données lors du seeding.
+
+## Références multimédias
+
+Incluez des images depuis des URL :
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"url": "https://images.unsplash.com/photo-xxx",
+					"alt": "Description de l'image",
+				"filename": "hero.jpg",
+					"caption": "Photo par quelqu'un"
+			}
+		}
+	}
+}
+```
+
+Inclure des images locales depuis `.emdash/media/` :
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"file": "hero.jpg",
+					"alt": "Description de l'image"
+			}
+		}
+	}
+}
+```
+
+### Propriétés des Médias
+
+| Propriété | Type     | Requis   | Description                          |
+| ---------- | -------- | -------- | ------------------------------------ |
+| `url`      | `string` | Oui\*    | URL distante à télécharger           |
+| `file`     | `string` | Oui\*    | Nom de fichier local dans `.emdash/media/` |
+| `alt`      | `string` | Non      | Texte alternatif pour l'accessibilité |
+| `filename` | `string` | Non      | Remplacer le nom de fichier          |
+| `caption`  | `string` | Non      | Légende du média                     |
+
+\*Soit `url`, soit `file` est requis, pas les deux.
+
+<Aside>
+	Les médias sont téléchargés lors de l'ensemencement. Les images volumineuses peuvent ralentir l'Assistant de Configuration. Envisagez d'utiliser
+	des images compressées ou des versions miniatures pour le contenu d'exemple.
+</Aside>
+
+## Appliquer les Semences de Manière Programmatique
+
+Utilisez l'API de semence pour les outils CLI ou les scripts :
+
+```typescript
+import { applySeed, validateSeed } from "emdash/seed";
+import seedData from "../../themes/.emdash/seed.json";
+
+// Valider d'abord
+const validation = validateSeed(seedData);
+if (!validation.valid) {
+	console.error(validation.errors);
+	process.exit(1);
+}
+
+// Appliquer la semence
+const result = await applySeed(db, seedData, {
+	includeContent: true,
+	onConflict: "skip",
+	storage: myStorage,
+	baseUrl: "http://localhost:4321",
+});
+
+console.log(result);
+// {
+//   collections: { created: 2, skipped: 0 },
+//   fields: { created: 8, skipped: 0 },
+//   taxonomies: { created: 2, terms: 5 },
+//   bylines: { created: 2, skipped: 0 },
+//   menus: { created: 1, items: 4 },
+//   redirects: { created: 3, skipped: 0 },
+//   widgetAreas: { created: 1, widgets: 3 },
+//   settings: { applied: 3 },
+//   content: { created: 3, skipped: 0 },
+//   media: { created: 2, skipped: 0 }
+// }
+```
+
+### Options d'Application
+
+| Option           | Type      | Par défaut | Description                        |
+| ---------------- | --------- | -------- | ---------------------------------- |
+| `includeContent` | `boolean` | `false`  | Créer des entrées de contenu d'exemple |
+| `onConflict`     | `string`  | `"skip"` | `"skip"`, `"update"`, ou `"error"` |
+| `mediaBasePath`  | `string`  | —        | Chemin de base pour les fichiers multimédias locaux |
+| `storage`        | `Storage` | —        | Adaptateur de stockage pour les téléversements multimédias |
+| `baseUrl`        | `string`  | —        | URL de base pour les URL multimédias |
+
+## Idempotence
+
+L'ensemencement peut être exécuté plusieurs fois en toute sécurité. Comportement en cas de conflit par type d'entité :
+
+| Entité              | Comportement                              |
+| ------------------- | ------------------------------------- |
+| Collection          | Ignorer si le slug existe             |
+| Champ               | Ignorer si collection + slug existe   |
+| Définition de taxonomie | Ignorer si le nom existe           |
+| Terme de taxonomie  | Ignorer si nom + slug existe          |
+| Profil de signature | Ignorer si le slug existe             |
+| Menu                | Ignorer si le nom existe               |
+| Éléments de menu    | Remplacer tous (le menu est recréé)   |
+| Redirection         | Ignorer si la source existe           |
+| Zone de widget      | Ignorer si le nom existe               |
+| Widgets             | Remplacer tous (la zone est recréée)  |
+| Section             | Ignorer si le slug existe             |
+| Paramètres          | Mettre à jour (les paramètres sont destinés à changer) |
+| Contenu             | Ignorer si le slug existe dans la collection |
+
+<Aside type="caution">
+	Les éléments de menu et les widgets sont **remplacés**, pas fusionnés. Le fichier de semence est la source de vérité pour la structure
+	du menu et des zones de widgets.
+</Aside>
+
+## Validation
+
+Les fichiers de semence sont validés avant application :
+
+```typescript
+import { validateSeed } from "emdash/seed";
+
+const { valid, errors, warnings } = validateSeed(seedData);
+
+if (!valid) {
+	errors.forEach((e) => console.error(e));
+}
+
+warnings.forEach((w) => console.warn(w));
+```
+
+Vérifications de validation :
+
+- Les champs obligatoires sont présents
+- Les slugs suivent les conventions de nommage (minuscules, tirets bas)
+- Les types de champs sont valides
+- Les références pointent vers du contenu existant
+- Les parents des termes hiérarchiques existent
+- Les chemins de redirection sont des URL locales sûres
+- Les sources de redirection sont uniques
+- Pas de slugs en double au sein des collections
+
+## Commandes CLI
+
+```bash
+# Apply seed file
+npx emdash seed .emdash/seed.json
+
+# Appliquer sans contenu d'exemple
+npx emdash seed .emdash/seed.json --no-content
+
+# Valider uniquement
+npx emdash seed .emdash/seed.json --validate
+
+# Exporter le schéma actuel en tant que semence
+npx emdash export-seed > seed.json
+
+# Exporter avec contenu
+npx emdash export-seed --with-content > seed.json
+```
+
+## Prochaines Étapes
+
+- **[Création de Thèmes](/fr/themes/creating-themes/)** — Construire un thème complet
+- **[Vue d'ensemble des Thèmes](/fr/themes/overview/)** — Comment fonctionnent les thèmes

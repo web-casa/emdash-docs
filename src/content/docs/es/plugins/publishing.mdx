@@ -1,0 +1,200 @@
+---
+title: Publicar plugins
+description: Empaqueta y publica tu plugin de EmDash en el marketplace.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Una vez que hayas construido un plugin, puedes publicarlo en el Marketplace de EmDash para que otros sitios puedan instalarlo desde el panel de administración.
+
+## Requisitos previos
+
+Antes de publicar, asegúrate de que tu plugin:
+
+- Tenga un `package.json` válido con la exportación `"."` apuntando a la entrada de tu plugin
+- Use `definePlugin()` con un `id` único y una `version` semver válida
+- Declare sus `capabilities` (a qué APIs necesita acceso)
+
+## Formato del paquete
+
+Los plugins publicados se distribuyen como archivos `.tar.gz` que contienen:
+
+| Archivo             | Requerido | Descripción                            |
+| ---------------- | -------- | -------------------------------------- |
+| `manifest.json`  | Sí       | Metadatos del plugin extraídos de `definePlugin()` |
+| `backend.js`     | No       | Código del sandbox empaquetado (módulo ES autocontenido) |
+| `admin.js`       | No       | Código de la interfaz de administración empaquetado |
+| `README.md`      | No       | Documentación del plugin               |
+| `icon.png`       | No       | Icono del plugin (PNG 256x256)         |
+| `screenshots/`   | No       | Hasta 5 capturas de pantalla (PNG/JPEG, máximo 1920x1080) |
+
+El `manifest.json` se genera automáticamente a partir de tu llamada a `definePlugin()`. Contiene el ID del plugin, la versión, las capacidades, los nombres de los hooks, los nombres de las rutas y la configuración de administración, pero no código ejecutable.
+
+## Construir un Paquete
+
+El comando `emdash plugin bundle` produce un archivo comprimido a partir del código fuente de tu plugin:
+
+```bash
+cd packages/plugins/my-plugin
+emdash plugin bundle
+```
+
+Esto hará:
+
+<Steps>
+1. Leer tu `package.json` para encontrar los puntos de entrada
+2. Construir la entrada principal con tsdown para extraer el manifiesto
+3. Empaquetar `backend.js` (minificado, con tree-shaking, autocontenido)
+4. Empaquetar `admin.js` si existe una exportación `"./admin"`
+5. Recopilar recursos (README, icono, capturas de pantalla)
+6. Validar el paquete (límites de tamaño, sin built-ins de Node.js en backend)
+7. Escribir `{id}-{version}.tar.gz` en `dist/`
+</Steps>
+
+### Resolución del Punto de Entrada
+
+El comando bundle encuentra tu código a través de las exportaciones de `package.json`:
+
+```json title="package.json"
+{
+  "exports": {
+    ".": { "import": "./dist/index.mjs" },
+    "./sandbox": { "import": "./dist/sandbox-entry.mjs" },
+    "./admin": { "import": "./dist/admin.mjs" }
+  }
+}
+```
+
+| Exportación       | Propósito | Construido como |
+| ------------ | ------- | -------- |
+| `"."`        | Entrada principal — usada para extraer el manifiesto | Externos: `emdash`, `@emdash-cms/*` |
+| `"./sandbox"` | Código backend que se ejecuta en el sandbox | Completamente autocontenido (sin externos) |
+| `"./admin"`  | Componentes de la interfaz de administración | Completamente autocontenido |
+
+Si falta `"./sandbox"`, el comando busca `src/sandbox-entry.ts` como alternativa.
+
+<Aside type="note">
+  El comando bundle mapea las rutas de dist al código fuente automáticamente. Si tu exportación `"."` apunta a `./dist/index.mjs`, encontrará y construirá `src/index.ts`.
+</Aside>
+
+### Opciones
+
+```bash
+emdash plugin bundle [--dir <path>] [--outDir <path>]
+```
+
+| Bandera | Valor por defecto | Descripción |
+| ---- | ------- | ----------- |
+| `--dir` | Directorio actual | Directorio fuente del plugin |
+| `--outDir`, `-o` | `dist` | Directorio de salida para el archivo comprimido |
+
+### Validación del bundle
+
+El comando bundle verifica:
+
+- **Límite de tamaño** — El paquete total debe ser menor a 5MB
+- **Sin built-ins de Node.js** — `backend.js` no puede importar `fs`, `path`, `child_process`, etc. (el código del sandbox se ejecuta en un aislado V8, no en Node.js)
+- **Dimensiones del icono** — `icon.png` debe ser 256x256 (advierte si es incorrecto, pero aún lo incluye)
+- **Límites de capturas de pantalla** — Máximo 5 capturas, máximo 1920x1080
+
+<Aside type="tip">
+  Si tu código backend importa un built-in de Node.js, la validación del paquete fallará. Reemplaza las APIs de Node.js con APIs Web o mueve la lógica a un plugin de confianza en su lugar.
+</Aside>
+
+## Publicación
+
+El comando `emdash plugin publish` sube tu archivo comprimido al marketplace:
+
+```bash
+emdash plugin publish
+```
+
+Esto buscará el archivo `.tar.gz` más reciente en tu directorio `dist/` y lo subirá. También puedes especificar el archivo explícitamente o construir antes de publicar:
+
+```bash
+# Ruta explícita del archivo `.tar.gz`
+emdash plugin publish --tarball dist/my-plugin-1.0.0.tar.gz
+
+# Construir primero, luego publicar
+emdash plugin publish --build
+```
+
+### Autenticación
+
+La primera vez que publiques, la CLI te autenticará a través de GitHub:
+
+<Steps>
+1. La CLI abre tu navegador a la página de autorización de dispositivos de GitHub
+2. Ingresas el código mostrado en tu terminal
+3. GitHub emite un token de acceso
+4. La CLI lo intercambia por un JWT del marketplace (almacenado en `~/.config/emdash/auth.json`)
+</Steps>
+
+El token dura 30 días. Una vez que expire, se te pedirá que te reautentiques en la próxima publicación.
+
+También puedes gestionar la autenticación por separado:
+
+```bash
+# Iniciar sesión sin publicar
+emdash plugin login
+
+# Cerrar sesión (borrar el token almacenado)
+emdash plugin logout
+```
+
+### Registro por Primera Vez
+
+Si tu ID de plugin aún no existe en el marketplace, `emdash plugin publish` lo registra automáticamente antes de subir la primera versión.
+
+### Requisitos de Versión
+
+Cada versión publicada debe tener un número semver mayor que la anterior. No puedes sobrescribir o republicar una versión existente.
+
+### Auditoría de Seguridad
+
+Cada versión publicada pasa por una auditoría de seguridad automatizada. El marketplace escanea tu `backend.js` y `admin.js` en busca de:
+
+- Patrones de exfiltración de datos
+- Recolección de credenciales a través de configuraciones
+- Código ofuscado
+- Abuso de recursos (minería de criptomonedas, etc.)
+- Actividad de red sospechosa
+
+La auditoría produce un veredicto de **aprobado**, **advertencia** o **fallo**, que se muestra en la lista del plugin en el marketplace. Dependiendo del nivel de cumplimiento del marketplace, un veredicto de **fallo** puede bloquear la publicación por completo.
+
+### Opciones
+
+```bash
+emdash plugin publish [--tarball <path>] [--build] [--dir <path>] [--registry <url>]
+```
+
+| Bandera | Valor por defecto | Descripción |
+| ---- | ------- | ----------- |
+| `--tarball` | Último `.tar.gz` en `dist/` | Ruta explícita del archivo comprimido |
+| `--build` | `false` | Ejecutar `emdash plugin bundle` antes de publicar |
+| `--dir` | Directorio actual | Directorio del plugin (usado con `--build`) |
+| `--registry` | `https://marketplace.emdashcms.com` | URL del marketplace |
+
+## Flujo de trabajo completo
+
+Este es el ciclo típico de publicación:
+
+```bash
+# 1. Haz tus cambios
+# 2. Incrementa la versión en definePlugin() y package.json
+# 3. Empaqueta y publica en un solo paso
+emdash plugin publish --build
+```
+
+O si prefieres inspeccionar el paquete primero:
+
+```bash
+# Generar el archivo comprimido
+emdash plugin bundle
+
+# Verificar la salida
+tar tzf dist/my-plugin-1.1.0.tar.gz
+
+# Publicar
+emdash plugin publish
+```

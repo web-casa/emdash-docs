@@ -1,0 +1,49 @@
+---
+title: WordPress에서 Astro로의 이전 (EmDash 활용)
+description: EmDash를 사용한 WordPress에서 Astro로의 마이그레이션 경로를 이해하세요. 팀이 이를 고려하는 이유, 변경 사항, 그리고 안전하게 이전하는 방법을 포함합니다.
+lastUpdated: 2026-04-07
+sidebar:
+  label: WordPress에서 Astro로
+---
+
+
+WordPress에서 Astro로 전환할 때 일반적으로 두 가지 질문이 제기됩니다:
+
+1. 프론트엔드를 어떻게 현대화할 것인가?
+2. 편집자들이 사용할 수 있는 CMS는 어떻게 유지할 것인가?
+
+EmDash는 두 가지를 동시에 해결한다는 점에서 흥미롭습니다. Astro는 애플리케이션 및 렌더링 레이어가 되고, EmDash는 WordPress 팀이 익숙한 콘텐츠 관리 워크플로우를 제공합니다.
+
+## 팀이 이 전환을 고려하는 이유
+
+- 프론트엔드 아키텍처에 대한 더 나은 제어
+- 더 현대적인 TypeScript 기반 개발 워크플로우
+- 편집자 친화적인 게시 개념을 유지할 수 있는 능력
+- Astro를 완전히 분리된 CMS와 함께 운영하는 것보다 적은 타협
+
+## 실제로 변경되는 사항
+
+- 테마는 Astro 레이아웃과 컴포넌트가 됩니다
+- `WP_Query`는 EmDash 콘텐츠 쿼리 함수가 됩니다
+- WordPress 포스트 타입과 분류 체계는 EmDash 컬렉션 및 분류 구조에 매핑됩니다
+- 콘텐츠 가져오기는 수동 복사-붙여넣기 대신 EmDash의 마이그레이션 도구를 통해 이루어집니다
+
+## 일반적으로 익숙하게 유지되는 사항
+
+- 편집자는 여전히 CMS UI로 작업합니다
+- 포스트, 페이지, 분류 체계, 미디어 및 탐색은 여전히 인식 가능한 개념으로 남아 있습니다
+- 마이그레이션 계획은 여전히 콘텐츠, 리디렉션, 미디어 및 분류 체계 무결성을 중심으로 이루어집니다
+
+## 권장 마이그레이션 순서
+
+1. 파일럿 Astro 프로젝트로 EmDash 평가하기
+2. [EmDash vs WordPress](/ko/emdash-vs-wordpress/) 및 [What Is EmDash?](/ko/what-is-emdash/) 검토하기
+3. 대표적인 WordPress 내보내기에서 콘텐츠 가져오기 테스트하기
+4. 리디렉션, 미디어 처리 및 사용자 정의 필드 매핑 검증하기
+5. 대규모 마이그레이션을 확정하기 전에 더 작은 사이트나 섹션 하나를 이동하기
+
+## 계속하기
+
+- [WordPress에서 EmDash로 마이그레이션](/ko/migration/from-wordpress/)
+- [WordPress 개발자를 위한 EmDash](/ko/coming-from/wordpress/)
+- [FAQ](/ko/faq/)

@@ -1,0 +1,495 @@
+---
+title: 미디어 라이브러리
+description: EmDash에서 이미지와 파일을 업로드하고 관리합니다.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+import mediaLibraryImg from "../../../../assets/screenshots/admin-media-library.png";
+
+EmDash는 이미지, 문서 및 기타 파일 관리를 위한 미디어 라이브러리를 포함합니다. 이 가이드는 콘텐츠에서 미디어 업로드, 구성 및 사용 방법을 다룹니다.
+
+## 미디어 라이브러리 접근
+
+관리자 사이드바에서 **미디어**를 클릭하여 미디어 라이브러리를 엽니다. 라이브러리는 업로드된 모든 파일을 미리보기, 파일명 및 업로드 날짜와 함께 표시합니다.
+
+<img src={mediaLibraryImg.src} alt="EmDash media library showing image grid with upload button" />
+
+## 파일 업로드
+
+### 미디어 라이브러리에서
+
+1. 관리자 사이드바에서 **미디어** 클릭
+
+2. **업로드** 클릭 또는 파일을 업로드 영역으로 드래그
+
+3. 컴퓨터에서 하나 이상의 파일 선택
+
+4. 업로드 완료 대기
+
+### 콘텐츠 편집기에서
+
+1. 리치 텍스트 편집기에서 이미지 버튼 클릭
+
+2. 미디어 선택기에서 **업로드** 클릭
+
+3. 컴퓨터에서 파일 선택
+
+4. 대체 텍스트 추가 후 **삽입** 클릭
+
+## 지원 파일 형식
+
+EmDash는 일반적인 웹 파일 형식을 지원합니다:
+
+| 카테고리  | 확장자                                                |
+| --------- | --------------------------------------------------------- |
+| 이미지    | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.avif`, `.svg` |
+| 문서 | `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx` |
+| 비디오     | `.mp4`, `.webm`, `.mov`                                   |
+| 오디오     | `.mp3`, `.wav`, `.ogg`                                    |
+
+<Aside type="caution">
+	최대 파일 크기는 스토리지 구성에 따라 다릅니다. 기본 제한은 파일당 10MB입니다.
+</Aside>
+
+## 스토리지 백엔드
+
+EmDash는 여러 스토리지 백엔드를 지원합니다. Astro 설정에서 스토리지를 구성하세요:
+
+<Tabs>
+  <TabItem label="Local Storage">
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: local({
+        directory: "./uploads",
+        baseUrl: "/_emdash/api/media/file",
+      }),
+    }),
+  ],
+});
+```
+
+파일은 `./uploads` 디렉토리에 저장됩니다. 개발 및 단일 서버 배포에 적합합니다.
+
+  </TabItem>
+  <TabItem label="Cloudflare R2">
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { r2 } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: r2({
+        binding: "MEDIA_BUCKET",
+        publicUrl: "https://media.example.com",
+      }),
+    }),
+  ],
+});
+```
+
+`wrangler.jsonc`에서 구성된 R2 버킷이 필요합니다:
+
+```
+jsonc title="wrangler.jsonc"
+{
+	"r2_buckets": [
+		{
+			"binding": "MEDIA_BUCKET",
+			"bucket_name": "my-media-bucket",
+		},
+	],
+}
+```
+
+  </TabItem>
+  <TabItem label="S3-Compatible">
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { s3 } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: s3({
+        endpoint: "https://s3.amazonaws.com",
+        bucket: "my-media-bucket",
+        accessKeyId: process.env.S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+        region: "us-east-1",
+        publicUrl: "https://media.example.com",
+      }),
+    }),
+  ],
+});
+```
+
+Cloudflare R2(S3 API 통해), MinIO 및 기타 S3 호환 서비스와 함께 작동합니다.
+
+  </TabItem>
+</Tabs>
+
+## 업로드 작동 방식
+
+EmDash는 보안 업로드를 위해 서명된 URL을 사용합니다:
+
+1. 클라이언트가 API에 업로드 URL 요청
+
+2. 서버가 만료 시간이 있는 서명된 URL 생성
+
+3. 클라이언트가 서명된 URL을 사용하여 스토리지에 직접 업로드
+
+4. 서버가 데이터베이스에 파일 메타데이터 기록
+
+이 접근 방식은 대용량 파일을 애플리케이션 서버에서 분리하고 클라우드 스토리지에 직접 업로드를 가능하게 합니다.
+
+<Aside>
+	R2 바인딩은 사전 서명된 URL을 지원하지 않습니다. R2 바인딩 어댑터를 사용할 때 업로드는
+	Worker를 통해 진행됩니다.
+</Aside>
+
+## 미디어 구성
+
+### 폴더
+
+미디어를 구성하려면 폴더를 생성하세요:
+
+1. 미디어 라이브러리에서 **새 폴더** 클릭
+
+2. 폴더 이름 입력
+
+3. **생성** 클릭
+
+4. 파일을 폴더로 드래그하여 구성
+
+### 검색
+
+검색 상자를 사용하여 파일명으로 파일을 찾으세요. 검색은 부분 파일명과 일치합니다.
+
+### 필터
+
+다음 기준으로 미디어 필터링:
+
+- **유형** - 이미지, 문서, 비디오, 오디오
+- **날짜** - 업로드 날짜 범위
+- **폴더** - 특정 폴더
+
+## 콘텐츠에서 미디어 사용
+
+### 리치 텍스트 편집기에서
+
+1. 이미지를 삽입할 위치에 커서 배치
+
+2. 도구 모음에서 이미지 버튼 클릭
+
+3. 미디어 라이브러리에서 이미지 선택 또는 새 이미지 업로드
+
+4. 대체 텍스트 입력
+
+5. **삽입** 클릭
+
+### 대표 이미지로
+
+1. 편집기에서 콘텐츠 항목 열기
+
+2. 사이드바에서 **대표 이미지** 필드 찾기
+
+3. **이미지 선택** 클릭
+
+4. 미디어 라이브러리에서 선택 또는 업로드
+
+5. **저장** 클릭
+
+### 사용자 정의 필드에서
+
+이미지 또는 파일 유형으로 구성된 필드의 경우, 필드를 클릭하여 미디어 선택기를 엽니다.
+
+## 템플릿에서 미디어 표시
+
+콘텐츠 데이터에서 미디어 URL에 접근하세요:
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <img
+    src={post.data.featured_image}
+    alt={post.data.featured_image_alt ?? ""}
+  />
+)}
+```
+
+### 반응형 이미지
+
+반응형 이미지의 경우, 외부 URL과 함께 Astro의 Image 컴포넌트를 사용하세요:
+
+### 반응형 이미지
+
+반응형 이미지의 경우, 외부 URL과 함께 Astro의 Image 컴포넌트를 사용하세요:
+
+```astro
+---
+import { Image } from "astro:assets";
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <Image
+    src={post.data.featured_image}
+    alt={post.data.featured_image_alt ?? ""}
+    width={800}
+    height={450}
+  />
+)}
+```
+
+<Aside type="tip">
+외부 URL과 함께 Image 컴포넌트를 사용하려면 `astro.config.mjs`에서 허용된 이미지 도메인을 구성하세요:
+
+```js
+export default defineConfig({
+	image: {
+		domains: ["media.example.com"],
+	},
+});
+```
+
+</Aside>
+
+## 미디어 삭제
+
+1. 삭제할 파일 선택
+
+2. **삭제** 클릭
+
+3. 삭제 확인
+
+<Aside type="caution">
+	미디어 삭제는 콘텐츠 내 참조를 제거하지 않습니다. 삭제된 파일을 사용하는 콘텐츠를
+	업데이트하거나 제거하세요.
+</Aside>
+
+## 미디어 API
+
+관리자 API를 사용하여 프로그래밍 방식으로 미디어에 접근하세요.
+
+### 파일 업로드
+
+멀티파트 폼 데이터로 미디어 업로드:
+
+```bash
+POST /_emdash/api/media
+Content-Type: multipart/form-data
+Authorization: Bearer YOUR_API_TOKEN
+
+file=<binary file data>
+```
+
+응답:
+
+```json
+{
+	"success": true,
+	"data": {
+		"item": {
+			"id": "01ABC123",
+			"filename": "hero-image.jpg",
+			"mime_type": "image/jpeg",
+			"storage_key": "media/abc123/hero-image.jpg",
+			"width": 1200,
+			"height": 800
+		}
+	}
+}
+```
+
+### 미디어 목록
+
+```bash
+GET /_emdash/api/media?prefix=images/&limit=20
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+### 미디어 삭제
+
+```bash
+DELETE /_emdash/api/media/images/hero.jpg
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+## 미디어 제공자
+
+로컬 스토리지 외에도, EmDash는 특수화된 이미지 및 비디오 호스팅을 위한 외부 미디어 제공자를 지원합니다. 미디어 제공자는 미디어 선택기에서 탭으로 나타나, 편집자가 여러 소스에서 선택할 수 있게 합니다.
+
+### 사용 가능한 제공자
+
+<Tabs>
+  <TabItem label="Cloudflare Images">
+[Cloudflare Images](https://developers.cloudflare.com/images/)는 자동 최적화, 크기 조정 및 형식 변환을 제공하는 이미지 호스팅 서비스입니다.
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareImages } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      // ... database, storage config
+      mediaProviders: [
+        cloudflareImages({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_IMAGES_TOKEN,
+          // Optional: custom delivery domain
+          deliveryDomain: "images.example.com",
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+**기능:**
+- 관리자에서 직접 이미지 탐색 및 업로드
+- 자동 이미지 최적화 및 형식 변환
+- URL 기반 변환(크기 조정, 자르기, 형식)
+- 반응형 이미지를 위한 유연한 변형
+
+</TabItem>
+<TabItem label="Cloudflare Stream">
+[Cloudflare Stream](https://developers.cloudflare.com/stream/)는 HLS/DASH 적응형 스트리밍을 제공하는 비디오 호스팅 서비스입니다.
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareStream } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      // ... database, storage config
+      mediaProviders: [
+        cloudflareStream({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_STREAM_TOKEN,
+          // Optional: player settings
+          controls: true,
+          autoplay: false,
+          loop: false,
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+**기능:**
+- 관리자에서 비디오 탐색, 검색 및 업로드
+- HLS 및 DASH 적응형 스트리밍
+- 자동 썸네일 생성
+- 대용량 파일 직접 업로드
+
+</TabItem>
+</Tabs>
+
+### 여러 제공자 사용
+
+여러 제공자를 구성할 수 있습니다. 각 제공자는 미디어 선택기에서 탭으로 나타납니다:
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareImages, cloudflareStream } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      database: d1({ binding: "DB" }),
+      storage: r2({ binding: "MEDIA" }),
+      mediaProviders: [
+        cloudflareImages({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_IMAGES_TOKEN,
+        }),
+        cloudflareStream({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_STREAM_TOKEN,
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+로컬 미디어 라이브러리("라이브러리" 탭)는 구성된 모든 제공자와 함께 항상 사용 가능합니다.
+
+### 제공자 미디어 렌더링
+
+미디어를 렌더링하려면 `Image` 컴포넌트를 사용하세요:
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { Image } from "emdash/ui";
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <Image
+    image={post.data.featured_image}
+    width={800}
+    height={450}
+  />
+)}
+```
+
+컴포넌트는 자동으로 다음을 수행합니다:
+- 저장된 값에서 제공자를 감지합니다
+- 최적화된 `<img>` 요소를 렌더링합니다
+- 제공자별 최적화를 적용합니다 (예: Cloudflare Images 변환)
+
+### MediaValue 타입
+
+미디어 필드는 제공자 정보를 포함하는 `MediaValue` 객체를 저장합니다:
+
+```ts
+interface MediaValue {
+  provider?: string;    // Provider ID, defaults to "local"
+  id: string;           // Provider-specific ID
+  src?: string;         // Direct URL (for local media or legacy data)
+  previewUrl?: string;  // Preview URL for admin display (external providers)
+  filename?: string;    // Original filename
+  mimeType?: string;    // MIME type
+  width?: number;       // Image/video width
+  height?: number;      // Image/video height
+  alt?: string;         // Alt text
+  meta?: Record<string, unknown>; // Provider-specific metadata
+}
+```
+
+이를 통해 EmDash는 미디어가 어디에 호스팅되든 관계없이 올바르게 렌더링할 수 있습니다.
+
+## 다음 단계
+
+- [콘텐츠 작업하기](/ko/guides/working-with-content/) - 콘텐츠에서 미디어 사용하기
+- [블로그 만들기](/ko/guides/create-a-blog/) - 블로그 게시물에 이미지 추가하기
+- [콘텐츠 쿼리하기](/ko/guides/querying-content/) - 템플릿에서 미디어 표시하기

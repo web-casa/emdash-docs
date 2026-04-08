@@ -1,0 +1,272 @@
+---
+title: Cloudflare에 배포하기
+description: D1과 R2를 사용하여 EmDash를 Cloudflare Workers에 배포합니다.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Cloudflare Workers는 EmDash를 위한 빠르고 전 세계적으로 분산된 런타임을 제공합니다. 이 가이드는 데이터베이스용 D1과 미디어 저장소용 R2를 사용한 배포를 다룹니다.
+
+## 사전 요구사항
+
+- Cloudflare 계정
+- Wrangler CLI 설치 (`npm install -g wrangler`)
+- Cloudflare 인증 (`wrangler login`)
+
+## 리소스 생성
+
+### 1. D1 데이터베이스 생성
+
+```bash
+wrangler d1 create emdash-db
+```
+
+출력에서 `database_id`를 기록해 두세요.
+
+### 2. R2 버킷 생성
+
+```bash
+wrangler r2 bucket create emdash-media
+```
+
+### 3. wrangler.jsonc 생성
+
+프로젝트 루트에 `wrangler.jsonc`를 생성하세요:
+
+```
+jsonc title="wrangler.jsonc"
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "my-emdash-site",
+	"compatibility_date": "2025-01-15",
+	"compatibility_flags": ["nodejs_compat"],
+
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "emdash-db",
+			"database_id": "your-database-id",
+		},
+	],
+
+	"r2_buckets": [
+		{
+			"binding": "MEDIA",
+			"bucket_name": "emdash-media",
+		},
+	],
+}
+```
+
+## EmDash 구성
+
+D1과 R2를 사용하도록 Astro 구성을 업데이트하세요:
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import cloudflare from "@astrojs/cloudflare";
+import emdash from "emdash/astro";
+import { d1, r2 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	output: "server",
+	adapter: cloudflare(),
+	integrations: [
+		emdash({
+			database: d1({ binding: "DB" }),
+			storage: r2({ binding: "MEDIA" }),
+		}),
+	],
+});
+```
+
+<Aside type="caution">
+	D1 마이그레이션은 배포 전에 Wrangler CLI를 통해 실행되어야 합니다. 런타임에서는 DDL 문이 허용되지 않습니다.
+</Aside>
+
+## 마이그레이션 실행
+
+데이터베이스 스키마를 생성하고 적용하세요.
+
+### 1. 스키마 SQL 내보내기
+
+```bash
+npx emdash init --database ./data.db
+```
+
+### 2. D1에 마이그레이션 적용
+
+```bash
+wrangler d1 migrations apply emdash-db
+```
+
+마이그레이션 파일이 없는 경우, 코어 스키마를 직접 적용하세요:
+
+```bash
+wrangler d1 execute emdash-db --file=./node_modules/emdash/migrations/0001_core.sql
+```
+
+## 배포
+
+Cloudflare Workers에 배포하세요:
+
+```bash
+wrangler deploy
+```
+
+이제 사이트가 `https://my-emdash-site.<your-subdomain>.workers.dev`에서 라이브 상태입니다.
+
+## 읽기 복제본
+
+전 세계적으로 분산된 사이트의 경우, D1 읽기 복제를 활성화하여 읽기 쿼리를 항상 기본 데이터베이스가 아닌 가까운 복제본으로 라우팅하세요. 이렇게 하면 기본 리전에서 멀리 떨어진 방문자의 지연 시간이 크게 줄어듭니다.
+
+```
+js title="astro.config.mjs"
+emdash({
+	database: d1({
+		binding: "DB",
+		session: "auto",
+	}),
+	storage: r2({ binding: "MEDIA" }),
+}),
+```
+
+Cloudflare 대시보드나 REST API를 통해 D1 데이터베이스 자체에서도 읽기 복제를 활성화해야 합니다.
+
+세션 모드와 북마크 기반 일관성 작동 방식에 대해서는 [데이터베이스 옵션 — 읽기 복제본](/ko/deployment/database/#read-replicas)을 참조하세요.
+
+## 사용자 정의 도메인
+
+Cloudflare 대시보드에서 사용자 정의 도메인을 추가하세요:
+
+1. **Workers & Pages** > 귀하의 워커로 이동
+2. **Custom Domains** > **Add Custom Domain** 클릭
+3. 도메인을 입력하고 DNS 설정 지침을 따르세요
+
+## 공개 R2 액세스
+
+미디어를 R2에서 직접 제공하려면(성능상 권장):
+
+1. Cloudflare 대시보드에서 **R2** > 귀하의 버킷으로 이동
+2. **Settings** > **Public access** 클릭
+3. 공개 액세스를 활성화하고 공개 URL을 기록해 두세요
+4. 저장소 구성을 업데이트하세요:
+
+```
+js title="astro.config.mjs"
+storage: r2({
+  binding: "MEDIA",
+  publicUrl: "https://pub-xxx.r2.dev"
+}),
+```
+
+<Aside type="tip">
+	프로덕션 환경에서는 더 나은 URL과 캐싱 제어를 위해 R2 버킷에 사용자 정의 도메인을 연결하세요.
+</Aside>
+
+## Cloudflare Access 인증
+
+귀하의 조직이 Cloudflare Access를 사용하는 경우, 패스키 대신 이를 인증 공급자로 사용할 수 있습니다. 이는 기존 ID 공급자와의 SSO를 제공합니다.
+
+```
+js title="astro.config.mjs"
+emdash({
+  database: d1({ binding: "DB" }),
+  storage: r2({ binding: "MEDIA" }),
+  auth: access({
+    teamDomain: "myteam.cloudflareaccess.com",
+    audience: "your-app-audience-tag",
+    roleMapping: {
+      "Admins": 50,
+      "Editors": 40,
+    },
+  }),
+}),
+```
+
+전체 구성 옵션은 [인증 가이드](/ko/guides/authentication#cloudflare-access)를 참조하세요.
+
+## 환경 변수
+
+EmDash는 인증 및 미리보기 기능을 위해 특정 비밀값이 필요합니다.
+
+### 필수 비밀값
+
+| 변수 | 목적 |
+| -------- | ------- |
+| `EMDASH_AUTH_SECRET` | 세션 쿠키와 인증 토큰을 서명합니다. 프로덕션 환경에 필요합니다. |
+| `EMDASH_PREVIEW_SECRET` | 초안 콘텐츠용 미리보기 URL을 서명합니다. 미리보기 기능에 필요합니다. |
+
+안전한 비밀값을 생성하세요:
+
+```bash
+npx emdash auth secret
+```
+
+Wrangler를 통해 비밀값을 설정하세요:
+
+```bash
+wrangler secret put EMDASH_AUTH_SECRET
+wrangler secret put EMDASH_PREVIEW_SECRET
+```
+
+<Aside type="caution">
+비밀값을 저장소에 커밋하지 마세요. 프로덕션 배포에는 항상 `wrangler secret`을 사용하세요.
+</Aside>
+
+구성에서 `import.meta.env`나 Cloudflare `env` 바인딩을 사용하여 환경 변수에 액세스하세요.
+
+## 미리보기 배포
+
+미리보기 브랜치를 배포하세요:
+
+```bash
+wrangler deploy --env preview
+```
+
+`wrangler.jsonc`에 환경 섹션을 추가하세요:
+
+```
+jsonc
+{
+	"env": {
+		"preview": {
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "emdash-db-preview",
+					"database_id": "your-preview-db-id",
+				},
+			],
+		},
+	},
+}
+```
+
+## 문제 해결
+
+### "D1 바인딩을 찾을 수 없음"
+
+`wrangler.jsonc`의 바인딩 이름이 데이터베이스 구성과 일치하는지 확인하세요:
+
+```js
+// Must match: d1({ binding: "DB" })
+"binding": "DB"
+```
+
+### "R2 바인딩을 찾을 수 없음"
+
+R2 버킷이 올바르게 바인딩되었는지 확인하세요:
+
+```js
+// Must match: r2({ binding: "MEDIA" })
+"binding": "MEDIA"
+```
+
+### 마이그레이션 오류
+
+D1 마이그레이션은 런타임이 아닌 Wrangler를 통해 실행됩니다. 스키마 오류가 보이면:
+
+1. 마이그레이션이 적용되었는지 확인하세요: `wrangler d1 migrations list emdash-db`
+2. 필요한 경우 다시 적용하세요: `wrangler d1 migrations apply emdash-db`

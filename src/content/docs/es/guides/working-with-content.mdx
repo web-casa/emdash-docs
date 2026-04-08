@@ -1,0 +1,284 @@
+---
+title: Trabajar con contenido
+description: Crea, edita y gestiona contenido desde el panel de administración de EmDash.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Esta guía explica cómo crear, editar y gestionar contenido desde el panel de administración de EmDash.
+
+## Acceder al administrador
+
+Abre tu navegador en `/_emdash/admin` en tu sitio. Inicia sesión con las credenciales que creaste durante la configuración.
+
+El panel muestra:
+
+- **Barra lateral** - Navegación a colecciones, medios y ajustes
+- **Lista de contenido** - Entradas en la colección seleccionada
+- **Acciones rápidas** - Crear nuevo contenido, operaciones masivas
+
+## Crear contenido
+
+1. Haz clic en el nombre de una colección en la barra lateral (ej., **Posts**)
+
+2. Haz clic en **New Post** o en el equivalente para tu colección
+
+3. Completa los campos obligatorios:
+   - **Title** - nombre visible del contenido
+   - **Slug** - identificador de URL, generado automáticamente a partir del título y editable
+
+4. Añade contenido usando el editor de texto enriquecido
+
+5. Establece metadatos en la barra lateral:
+   - **Status** - Borrador, Publicado o Archivado
+   - **Publication date** - cuándo debe publicarse
+   - **Categories and tags** - términos de taxonomía asignados
+
+6. Haz clic en **Save**
+
+<Aside>
+	Los borradores solo son visibles en el administrador. Cambia el estado a **Published** para que el contenido sea visible en
+	tu sitio.
+</Aside>
+
+## Estados del contenido
+
+Cada entrada tiene uno de tres estados:
+
+| Estado        | Visibilidad | Caso de uso         |
+| ------------- | ---------- | ---------------- |
+| **Draft**     | Solo admin | Trabajo en curso |
+| **Published** | Público     | Contenido en vivo     |
+| **Archived**  | Solo admin | Contenido retirado  |
+
+Cambia el estado usando el menú desplegable en la barra lateral del editor.
+
+## El editor de texto enriquecido
+
+El editor de EmDash soporta:
+
+- **Headings** - H2 a H6
+- **Formatting** - Negrita, cursiva, subrayado, tachado
+- **Lists** - Ordenadas y no ordenadas
+- **Links** - Internos y externos
+- **Images** - Insertar desde la biblioteca multimedia
+- **Code blocks** - Con resaltado de sintaxis
+- **Embeds** - YouTube, Vimeo, Twitter
+- **Sections** - Bloques de contenido reutilizables mediante el comando `/section`
+
+### Comandos de barra
+
+Escribe `/` para acceder a comandos de inserción rápida:
+
+| Comando                      | Acción                              |
+| ---------------------------- | ----------------------------------- |
+| `/section`                   | Insertar una sección reutilizable            |
+| `/image`                     | Insertar una imagen desde la biblioteca multimedia |
+| `/code`                      | Insertar un bloque de código                 |
+
+### Atajos de Teclado
+
+| Acción | Atajo               |
+| ------ | ---------------------- |
+| Bold   | `Ctrl/Cmd + B`         |
+| Italic | `Ctrl/Cmd + I`         |
+| Link   | `Ctrl/Cmd + K`         |
+| Undo   | `Ctrl/Cmd + Z`         |
+| Redo   | `Ctrl/Cmd + Shift + Z` |
+| Save   | `Ctrl/Cmd + S`         |
+
+### Insertar imágenes
+
+1. Haz clic en el botón de imagen en la barra de herramientas
+
+2. Selecciona una imagen existente de la biblioteca multimedia, o sube una nueva
+
+3. Añade texto alternativo (obligatorio para accesibilidad)
+
+4. Ajusta las opciones de alineación y tamaño
+
+5. Haz clic en **Insert**
+
+## Editar contenido
+
+1. Navega a la colección que contiene el contenido
+
+2. Haz clic en la entrada que quieres editar
+
+3. Realiza tus cambios
+
+4. Haz clic en **Save**
+
+Los cambios en el contenido publicado aparecen inmediatamente en tu sitio. No se requiere reconstrucción.
+
+### Historial de revisiones
+
+EmDash rastrea los cambios en el contenido. Accede al historial de revisiones desde la barra lateral del editor:
+
+1. Haz clic en **Revisions** en la barra lateral del editor
+
+2. Ve la lista de versiones anteriores con marcas de tiempo
+
+3. Haz clic en una revisión para previsualizarla
+
+4. Haz clic en **Restore** para revertir a esa versión
+
+<Aside type="caution">
+	Restaurar una revisión crea una nueva revisión con el contenido restaurado. El historial de revisiones
+	original se conserva.
+</Aside>
+
+## Operaciones masivas
+
+Realiza acciones en múltiples entradas a la vez:
+
+1. Usa las casillas de verificación para seleccionar entradas en la lista de contenido
+
+2. Haz clic en el menú desplegable **Bulk Actions**
+
+3. Selecciona una acción:
+   - **Publish** - Establecer todas las seleccionadas como publicadas
+   - **Archive** - Establecer todas las seleccionadas como archivadas
+   - **Delete** - Eliminar permanentemente las seleccionadas
+
+4. Confirma la acción
+
+## Buscar y filtrar
+
+### Búsqueda
+
+Usa el cuadro de búsqueda para encontrar contenido por título o contenido. La búsqueda no distingue entre mayúsculas y minúsculas y coincide con palabras parciales.
+
+### Filtros
+
+Filtra la lista de contenido por:
+
+- **Status** - Borrador, Publicado, Archivado
+- **Date range** - Fechas de creación o modificación
+- **Author** - Quién creó el contenido
+- **Taxonomy** - Asignaciones de categoría o etiqueta
+
+Haz clic en **Clear Filters** para restablecer.
+
+## Programar contenido
+
+Programa contenido para publicarse en una fecha futura:
+
+1. Crea o edita contenido
+
+2. Establece el estado a **Draft**
+
+3. Establece la **Publication date** a una fecha y hora futuras
+
+4. Haz clic en **Save**
+
+Cuando llegue la fecha de publicación, el contenido se publicará automáticamente.
+
+<Aside type="tip">
+	La publicación programada requiere que tu sitio sea renderizado por servidor o tenga una tarea programada que verifique
+	publicaciones pendientes.
+</Aside>
+
+## Eliminar contenido
+
+Elimina contenido desde la pantalla de edición o la lista de contenido:
+
+### Desde el Editor
+
+1. Abre el contenido que quieres eliminar
+
+2. Haz clic en **Delete** en la barra de herramientas
+
+3. Confirma la eliminación
+
+### Desde la Lista
+
+1. Selecciona entradas usando las casillas de verificación
+
+2. Haz clic en **Bulk Actions** > **Delete**
+
+3. Confirma la eliminación
+
+<Aside type="caution">
+	El contenido eliminado se elimina permanentemente y no se puede recuperar. Considera archivarlo en su lugar si
+	podrías necesitar el contenido más tarde.
+</Aside>
+
+## API de contenido
+
+Para acceso programático, usa la API de administración de EmDash:
+
+### Crear Contenido
+
+```bash
+POST /_emdash/api/content/posts
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "title": "Mi nueva entrada",
+  "slug": "my-new-post",
+  "content": "<p>Aquí va el contenido de la entrada</p>
+",
+  "status": "draft"
+}
+```
+
+### Actualizar Contenido
+
+```bash
+PUT /_emdash/api/content/posts/my-new-post
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "title": "Título actualizado",
+  "status": "published"
+}
+```
+
+### Eliminar Contenido
+
+```bash
+DELETE /_emdash/api/content/posts/my-new-post
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+## Traducir contenido
+
+Cuando [i18n está habilitado](/es/guides/internationalization/), puedes crear traducciones de cualquier entrada de contenido.
+
+### Crear una traducción
+
+1. Abre la entrada de contenido que quieres traducir
+
+2. En la barra lateral del editor, encuentra el panel **Translations**
+
+3. Haz clic en **Translate** junto al idioma objetivo
+
+4. Edita el contenido prellenado — ajusta el título, slug y cuerpo para el nuevo idioma
+
+5. Haz clic en **Save**
+
+La nueva traducción está vinculada a la entrada original y comienza como borrador. Publícala independientemente cuando la traducción esté lista.
+
+### Cambiar entre traducciones
+
+El panel Translations muestra todos los idiomas configurados. Haz clic en **Edit** junto a cualquier traducción existente para navegar directamente a ella. El idioma actual está marcado con una marca de verificación.
+
+### Filtro por idioma
+
+En la lista de contenido, usa el menú desplegable de idioma en la barra de herramientas para filtrar las entradas por idioma. Cada entrada muestra su idioma en una columna dedicada.
+
+<Aside type="tip">
+  Cada traducción tiene su propio slug, estado e historial de revisiones. Publica, programa y gestiona las traducciones de forma independiente.
+</Aside>
+
+Consulta la [guía de Internacionalización](/es/guides/internationalization/) para obtener detalles completos sobre configuración, consultas y el selector de idioma.
+
+## Próximos pasos
+
+- [Consultar Contenido](/es/guides/querying-content/) - Recupera contenido en tus plantillas
+- [Biblioteca de Medios](/es/guides/media-library/) - Sube y gestiona archivos
+- [Taxonomías](/es/guides/taxonomies/) - Organiza contenido con categorías y etiquetas
+- [Internacionalización](/es/guides/internationalization/) - Contenido multilingüe y traducciones

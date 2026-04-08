@@ -1,0 +1,139 @@
+---
+title: Instalando Plugins
+description: Instale plugins do EmDash Marketplace ou adicione-os a partir de código.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Os plugins do EmDash podem ser instalados de duas formas: a partir do marketplace via painel de administração, ou adicionados diretamente na sua configuração do Astro. Os plugins do marketplace são executados em um sandbox isolado; os plugins baseados em configuração são executados em processo.
+
+## A partir do Marketplace
+
+O painel de administração inclui um navegador de marketplace onde você pode pesquisar, instalar e gerenciar plugins.
+
+### Pré-requisitos
+
+Para instalar plugins do marketplace, seu site precisa de:
+
+1. **Executor de sandbox configurado** — Os plugins do marketplace são executados em workers V8 isolados, o que requer o runtime de sandbox:
+
+   ```typescript title="astro.config.mjs"
+   import { emdash } from "emdash/astro";
+
+   export default defineConfig({
+     integrations: [
+       emdash({
+         marketplace: "https://marketplace.emdashcms.com",
+         sandboxRunner: true,
+       }),
+     ],
+   });
+   ```
+
+2. **Acesso de administrador** — Apenas administradores podem instalar ou remover plugins.
+
+### Navegar e Instalar
+
+<Steps>
+1. Abra o painel de administração e navegue até **Plugins > Marketplace**
+2. Navegue ou pesquise por um plugin
+3. Clique no cartão do plugin para ver sua página de detalhes — README, capturas de tela, capacidades e resultados da auditoria de segurança
+4. Clique em **Instalar**
+5. Revise a caixa de diálogo de consentimento de capacidades — isso mostra o que o plugin poderá acessar
+6. Confirme a instalação
+</Steps>
+
+O plugin será baixado, armazenado no bucket R2 do seu site e carregado no executor de sandbox. Ele fica ativo imediatamente.
+
+### Consentimento de Capacidades
+
+Antes da instalação, você verá uma caixa de diálogo listando o que o plugin precisa acessar:
+
+| Capacidade | O que significa |
+| ---------- | ------------- |
+| `read:content` | Ler seu conteúdo |
+| `write:content` | Criar, atualizar e excluir conteúdo |
+| `read:media` | Acessar sua biblioteca de mídia |
+| `write:media` | Fazer upload e gerenciar mídia |
+| `network:fetch` | Fazer solicitações de rede para hosts específicos |
+
+<Aside type="caution">
+  Instale apenas plugins de autores em quem você confia. O sistema de capacidades limita o que um plugin em sandbox pode acessar, mas um plugin com `write:content` pode modificar qualquer conteúdo em seu site.
+</Aside>
+
+### Auditoria de Segurança
+
+Cada versão de plugin no marketplace passou por uma auditoria de segurança automatizada. O veredito da auditoria aparece no cartão do plugin:
+
+- **Aprovado** — Nenhum problema encontrado
+- **Aviso** — Preocupações menores sinalizadas (revise os achados)
+- **Falha** — Problemas de segurança significativos detectados
+
+Você pode visualizar o relatório completo da auditoria na página de detalhes do plugin, incluindo achados individuais e sua severidade.
+
+### Atualizações
+
+Quando uma versão mais recente de um plugin instalado estiver disponível:
+
+1. Vá para **Plugins** no painel de administração
+2. Os plugins do marketplace mostram um selo **Atualização disponível**
+3. Clique em **Atualizar** para ver o changelog e quaisquer alterações de capacidades
+4. Se a nova versão requer capacidades adicionais, você verá um diff e precisará aprovar
+5. Confirme para atualizar
+
+<Aside type="note">
+  Atualizações que adicionam novas capacidades requerem aprovação explícita. Se um plugin que anteriormente apenas lia conteúdo agora deseja fazer solicitações de rede, você verá a nova capacidade destacada antes de confirmar.
+</Aside>
+
+### Desinstalação
+
+1. Vá para **Plugins** no painel de administração
+2. Clique no plugin do marketplace que deseja remover
+3. Clique em **Desinstalar**
+4. Escolha se deseja manter ou excluir os dados armazenados do plugin
+5. Confirme
+
+O código do sandbox do plugin é removido do seu bucket R2 e ele para de ser executado imediatamente.
+
+## A partir da Configuração
+
+Para plugins confiáveis (seu próprio código, ou pacotes que você instala via npm), adicione-os diretamente à sua configuração do Astro:
+
+```
+typescript title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import { emdash } from "emdash/astro";
+import seoPlugin from "@emdash-cms/plugin-seo";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      plugins: [
+        seoPlugin({ generateSitemap: true }),
+      ],
+    }),
+  ],
+});
+```
+
+Plugins baseados em configuração:
+
+- São executados em processo (não em sandbox)
+- Têm acesso total às APIs do Node.js
+- São carregados no momento da build e em cada inicialização do servidor
+- Não podem ser instalados ou removidos da UI de administração
+
+<Aside type="tip">
+  Use plugins baseados em configuração para código próprio e plugins que você mesmo mantém. Use plugins do marketplace para extensões de terceiros onde o isolamento do sandbox oferece benefícios de segurança.
+</Aside>
+
+## Marketplace vs. Configuração: Quando Usar Cada Um
+
+| | Marketplace | Configuração |
+| --- | --- | --- |
+| **Execução** | Isolado V8 em sandbox | Em processo |
+| **Método de instalação** | UI de administração | Alteração de código + deploy |
+| **Capacidades** | Aplicadas em runtime | Apenas documentação |
+| **APIs do Node.js** | Não disponíveis | Acesso total |
+| **Melhor para** | Plugins de terceiros | Código próprio |
+| **Atualizações** | Um clique no admin | Atualização de versão + deploy |

@@ -1,0 +1,201 @@
+---
+title: プラグインの公開
+description: EmDashプラグインをバンドルし、マーケットプレイスに公開します。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+プラグインを構築したら、EmDash Marketplaceに公開して、他のサイトが管理ダッシュボードからインストールできるようにできます。
+
+## 前提条件
+
+公開前に、以下の点を確認してください：
+
+- プラグインのエントリーポイントを指す有効な `package.json` が存在し、`"."` エクスポートが設定されていること
+- `definePlugin()` を使用しており、一意の `id` と有効な semver `version` が設定されていること
+- 必要なAPIへのアクセス権を定義する `capabilities` が宣言されていること
+
+## バンドル形式
+
+公開されるプラグインは、以下の内容を含む `.tar.gz` 形式のtarballとして配布されます：
+
+| ファイル             | 必須 | 説明                            |
+| ---------------- | -------- | -------------------------------------- |
+| `manifest.json`  | はい      | `definePlugin()` から抽出されたプラグインメタデータ |
+| `backend.js`     | いいえ       | バンドルされたサンドボックスコード（自己完結型ESモジュール） |
+| `admin.js`       | いいえ       | バンドルされた管理UIコード                  |
+| `README.md`      | いいえ       | プラグインのドキュメント                   |
+| `icon.png`       | いいえ       | プラグインアイコン（256x256 PNG）              |
+| `screenshots/`   | いいえ       | 最大5枚のスクリーンショット（PNG/JPEG、最大1920x1080） |
+
+`manifest.json` は `definePlugin()` の呼び出しから自動的に生成されます。これにはプラグインID、バージョン、機能、フック名、ルート名、管理設定が含まれますが、実行可能なコードは含まれません。
+
+## バンドルの構築
+
+`emdash plugin bundle` コマンドは、プラグインソースからtarballを生成します：
+
+```bash
+cd packages/plugins/my-plugin
+emdash plugin bundle
+```
+
+このコマンドは以下の処理を行います：
+
+<Steps>
+1. `package.json` を読み取り、エントリーポイントを特定します
+2. メインエントリーポイントを tsdown でビルドし、マニフェストを抽出します
+3. `backend.js` をバンドルします（最小化、ツリーシェイク、自己完結型）
+4. `"./admin"` エクスポートが存在する場合、`admin.js` をバンドルします
+5. アセット（README、アイコン、スクリーンショット）を収集します
+6. バンドルを検証します（サイズ制限、backendにNode.js組み込みモジュールがないか）
+7. `{id}-{version}.tar.gz` を `dist/` ディレクトリに書き出します
+</Steps>
+
+### エントリーポイントの解決
+
+バンドルコマンドは `package.json` のエクスポートを通じてコードを探します：
+
+```
+json title="package.json"
+{
+  "exports": {
+    ".": { "import": "./dist/index.mjs" },
+    "./sandbox": { "import": "./dist/sandbox-entry.mjs" },
+    "./admin": { "import": "./dist/admin.mjs" }
+  }
+}
+```
+
+| エクスポート       | 目的 | ビルド方法 |
+| ------------ | ------- | -------- |
+| `"."`        | メインエントリーポイント — マニフェストの抽出に使用 | 外部依存: `emdash`, `@emdash-cms/*` |
+| `"./sandbox"` | サンドボックスで実行されるバックエンドコード | 完全に自己完結型（外部依存なし） |
+| `"./admin"`  | 管理UIコンポーネント | 完全に自己完結型 |
+
+`"./sandbox"` が存在しない場合、コマンドはフォールバックとして `src/sandbox-entry.ts` を探します。
+
+<Aside type="note">
+  バンドルコマンドは、distパスを自動的にソースにマッピングします。`"."` エクスポートが `./dist/index.mjs` を指している場合、`src/index.ts` を見つけてビルドします。
+</Aside>
+
+### オプション
+
+```bash
+emdash plugin bundle [--dir <path>] [--outDir <path>]
+```
+
+| フラグ | デフォルト | 説明 |
+| ---- | ------- | ----------- |
+| `--dir` | カレントディレクトリ | プラグインソースディレクトリ |
+| `--outDir`, `-o` | `dist` | tarballの出力ディレクトリ |
+
+### 検証
+
+バンドルコマンドは以下の点をチェックします：
+
+- **サイズ制限** — バンドル全体が5MB未満であること
+- **Node.js組み込みモジュールの禁止** — `backend.js` は `fs`、`path`、`child_process` などをインポートしてはいけません（サンドボックスコードはNode.jsではなくV8 isolateで実行されます）
+- **アイコン寸法** — `icon.png` は256x256であるべきです（異なる場合は警告を出しますが、含めます）
+- **スクリーンショット制限** — 最大5枚、最大1920x1080
+
+<Aside type="tip">
+  バックエンドコードがNode.js組み込みモジュールをインポートしている場合、バンドルは検証に失敗します。Node.js APIをWeb APIに置き換えるか、そのロジックを信頼済みプラグインに移動してください。
+</Aside>
+
+## 公開
+
+`emdash plugin publish` コマンドは、tarballをマーケットプレイスにアップロードします：
+
+```bash
+emdash plugin publish
+```
+
+このコマンドは `dist/` ディレクトリ内の最新の `.tar.gz` ファイルを見つけてアップロードします。tarballを明示的に指定したり、公開前にビルドしたりすることもできます：
+
+```bash
+# Explicit tarball path
+emdash plugin publish --tarball dist/my-plugin-1.0.0.tar.gz
+
+# まずビルドし、その後公開
+emdash plugin publish --build
+```
+
+### 認証
+
+初めて公開する際、CLIはGitHubを通じて認証を行います：
+
+<Steps>
+1. CLIがブラウザを開き、GitHubのデバイス認証ページに移動します
+2. ターミナルに表示されたコードを入力します
+3. GitHubがアクセストークンを発行します
+4. CLIはそれをマーケットプレイスのJWTと交換します（`~/.config/emdash/auth.json` に保存されます）
+</Steps>
+
+トークンの有効期限は30日間です。期限切れ後、次回公開時に再認証を求められます。
+
+認証は個別に管理することもできます：
+
+```bash
+# Log in without publishing
+emdash plugin login
+
+# ログアウト（保存されたトークンをクリア）
+emdash plugin logout
+```
+
+### 初回登録
+
+プラグインIDがマーケットプレイスにまだ存在しない場合、`emdash plugin publish` は最初のバージョンをアップロードする前に自動的に登録を行います。
+
+### バージョン要件
+
+公開される各バージョンは、前のバージョンよりも高いsemverである必要があります。既存のバージョンを上書きしたり再公開したりすることはできません。
+
+### セキュリティ監査
+
+公開されるすべてのバージョンは、自動化されたセキュリティ監査を受けます。マーケットプレイスは `backend.js` と `admin.js` をスキャンし、以下をチェックします：
+
+- データ流出パターン
+- 設定を通じた認証情報の収集
+- 難読化されたコード
+- リソースの悪用（暗号通貨マイニングなど）
+- 不審なネットワーク活動
+
+監査は **合格**、**警告**、**不合格** の判定を生成し、これはプラグインのマーケットプレイスリストに表示されます。マーケットプレイスの施行レベルに応じて、**不合格** 判定は公開を完全にブロックする場合があります。
+
+### オプション
+
+```bash
+emdash plugin publish [--tarball <path>] [--build] [--dir <path>] [--registry <url>]
+```
+
+| フラグ | デフォルト | 説明 |
+| ---- | ------- | ----------- |
+| `--tarball` | `dist/` 内の最新の `.tar.gz` | 明示的なtarballパス |
+| `--build` | `false` | 公開前に `emdash plugin bundle` を実行 |
+| `--dir` | カレントディレクトリ | プラグインディレクトリ（`--build` と併用） |
+| `--registry` | `https://marketplace.emdashcms.com` | マーケットプレイスURL |
+
+## 完全なワークフロー
+
+典型的な公開サイクルは以下の通りです：
+
+```bash
+# 1. Make your changes
+# 2. Bump the version in definePlugin() and package.json
+# 3. Bundle and publish in one step
+emdash plugin publish --build
+```
+
+または、バンドルを先に確認したい場合は：
+
+```bash
+# Build the tarball
+emdash plugin bundle
+
+# 出力を確認
+tar tzf dist/my-plugin-1.1.0.tar.gz
+
+# 公開
+emdash plugin publish
+```

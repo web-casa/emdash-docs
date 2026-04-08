@@ -1,0 +1,88 @@
+---
+title: 常见问题
+description: 评估或采用 EmDash 的实用解答与当前注意事项。
+lastUpdated: 2026-04-07
+---
+
+import FaqJsonLd from "../../../components/FaqJsonLd.astro";
+
+<FaqJsonLd />
+
+本 FAQ 汇总了官方指南、仓库 README 以及公开 GitHub issue 中较常见的问题与答案。“当前注意事项”部分反映的是截至 2026 年 4 月 7 日的公开项目信息。
+
+## 概述
+
+### 什么是 EmDash？
+
+EmDash 是一个强调类型安全内容模型的 Astro 原生 CMS。它为非开发者提供管理面板，并采用可在沙盒化 Cloudflare Worker 隔离环境中运行的插件架构。如果你熟悉 WordPress，可以把它理解为“用 Astro、TypeScript 和现代部署方式重新实现的 WordPress 理念”。
+
+请参阅 [介绍](/zh-cn/introduction/)、[为何选择 EmDash](/zh-cn/why-emdash/) 以及项目 [README](https://github.com/emdash-cms/emdash)。
+
+### EmDash 必须使用 Cloudflare 吗？
+
+不。EmDash 可以在 Cloudflare 上运行，但也可以在 Node.js 上运行，并使用 SQLite 以及本地或 S3 兼容存储。主要的例外是**沙盒化插件**：README 指出，动态 Worker 目前仅适用于付费的 Cloudflare 账户，因此该特定的插件隔离模型与 Cloudflare 平台绑定。
+
+请参阅 [部署到 Node.js](/zh-cn/deployment/nodejs/)、[部署到 Cloudflare](/zh-cn/deployment/cloudflare/) 以及 [README](https://github.com/emdash-cms/emdash/blob/main/README.md)。
+
+### 我可以在本地运行 EmDash 而不使用 Cloudflare 吗？
+
+可以。本地的入门流程使用标准的 Astro 项目，无需 Cloudflare 账户即可工作。对于本地开发或更简单的部署，Node.js + SQLite 是最直接的设置。
+
+请参阅 [入门指南](/zh-cn/getting-started/) 和 [部署到 Node.js](/zh-cn/deployment/nodejs/)。
+
+### 内容更改是否需要重新构建？
+
+不需要。EmDash 的文档围绕 Astro 实时内容集合展开，因此内容更改可以在运行时生效，无需重新构建站点。
+
+请参阅 [入门指南](/zh-cn/getting-started/)、[查询内容](/zh-cn/guides/querying-content/) 和 [架构](/zh-cn/concepts/architecture/)。
+
+### 身份验证如何工作？
+
+EmDash 优先采用通行密钥。默认流程使用 WebAuthn 通行密钥，配置后还可选择使用魔法链接和 OAuth 作为备用方案。
+
+请参阅 [身份验证](/zh-cn/guides/authentication/)。
+
+### EmDash 是否已可用于生产环境？
+
+仓库 README 目前将 EmDash 描述为 **Beta 预览阶段**。这意味着它已经可以用于实际评估和开发，但 API 和功能仍可能发生较快变化。
+
+请参阅 [README 状态部分](https://github.com/emdash-cms/emdash/blob/main/README.md#status)。
+
+如果你想先看整体介绍，再回到 FAQ，可以先阅读 [什么是 EmDash？](/zh-cn/what-is-emdash/) 和 [EmDash 与 WordPress 对比](/zh-cn/emdash-vs-wordpress/)。
+
+## 当前注意事项
+
+### `admin.settingsSchema` 是否已经能自动生成插件设置界面？
+
+目前还不可靠。插件设置指南描述了基于 schema 自动生成管理界面的能力，但 [议题 #341](https://github.com/emdash-cms/emdash/issues/341) 指出，`settingsSchema` 目前主要只完成了校验和类型定义，还不会稳定生成预期的设置表单。在该问题解决前，建议把它视为尚在完善中的能力。
+
+相关文档：[插件设置](/zh-cn/plugins/settings/)。
+
+### 菜单编辑器能否接受相对 URL，例如 `/about`？
+
+目前有一个开放的缺陷报告指出，它目前会拒绝相对 URL，因为表单使用了 `type="url"`，而浏览器验证期望带有协议方案的完整 URL。
+
+如果你的菜单工作流需要内部相对路径，请关注 [议题 #342](https://github.com/emdash-cms/emdash/issues/342)。
+
+### 插件能否为小部件区域注册自定义小部件组件？
+
+目前还不行，至少尚未作为完整的公开功能。[议题 #343](https://github.com/emdash-cms/emdash/issues/343) 请求提供注册 API 以及插件提供的小部件组件所需的运行时渲染支持。
+
+如果你的插件方案依赖可复用的小部件组件，可以先把这部分视为仍需框架层面的额外支持。
+
+### 在将 EmDash 用于生产站点之前，我应该验证什么？
+
+首先检查以下四点：
+
+-   你的目标部署模式：Cloudflare 与 Node.js
+-   你是否需要沙盒化插件，以及付费的 Cloudflare 功能是否可接受
+-   当前的插件 API 是否覆盖了你的用例，而无需依赖未解决的议题
+-   你的团队是否愿意采用一个测试预览版的 CMS
+
+对于大多数团队来说，在全面迁移之前，先进行一个小型试点项目是合适的起点。
+
+## 延伸阅读
+
+- [什么是 EmDash？](/zh-cn/what-is-emdash/)
+- [Astro CMS 该怎么选？](/zh-cn/best-astro-cms/)
+- [如何从 WordPress 迁移到 Astro + EmDash](/zh-cn/wordpress-to-astro-with-emdash/)

@@ -1,0 +1,264 @@
+---
+title: Seções
+description: Crie e use blocos de conteúdo reutilizáveis em todo o seu site.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Seções são blocos de conteúdo reutilizáveis que editores podem inserir em qualquer conteúdo através de comandos de barra. Use-os para padrões comuns como CTAs, depoimentos, grades de recursos ou qualquer conteúdo que apareça em várias páginas.
+
+## Consultando Seções
+
+### getSection
+
+Busque uma única seção pelo slug:
+
+```typescript
+import { getSection } from "emdash";
+
+const cta = await getSection("newsletter-cta");
+
+if (cta) {
+  console.log(cta.title);    // "Newsletter CTA"
+  console.log(cta.content);  // PortableTextBlock[]
+}
+```
+
+### getSections
+
+Busque múltiplas seções com filtros opcionais:
+
+```typescript
+import { getSections } from "emdash";
+
+// Obtenha todas as seções
+const { items: all } = await getSections();
+
+// Filtre por fonte
+const { items: themeSections } = await getSections({ source: "theme" });
+
+// Pesquise por título/palavras-chave
+const { items: results } = await getSections({ search: "newsletter" });
+```
+
+`getSections` retorna `{ items: Section[], nextCursor?: string }` seguindo o padrão de paginação padrão.
+
+## Estrutura da Seção
+
+```typescript
+interface Section {
+  id: string;
+  slug: string;
+  title: string;
+  description?: string;
+  keywords: string[];
+  content: PortableTextBlock[];
+  previewUrl?: string;
+  source: "theme" | "user" | "import";
+  themeId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+### Tipos de Fonte
+
+| Fonte   | Descrição                                      |
+| -------- | ------------------------------------------------ |
+| `theme`  | Definida no arquivo de seed, gerenciada pelo tema           |
+| `user`   | Criada por editores no admin                      |
+| `import` | Importada do WordPress (blocos reutilizáveis)        |
+
+## Usando Seções no Conteúdo
+
+Editores inserem seções usando o comando de barra `/section` no editor de texto rico:
+
+<Steps>
+
+1. Digite `/section` (ou `/pattern`, `/block`, `/template`)
+
+2. Pesquise ou navegue pelas seções disponíveis
+
+3. Clique para inserir o conteúdo da seção na posição do cursor
+
+</Steps>
+
+O conteúdo Portable Text da seção é copiado para o documento. Isso significa:
+
+- Alterações na seção não afetam o conteúdo já inserido
+- Editores podem personalizar o conteúdo inserido
+- O conteúdo permanece autocontido
+
+<Aside type="tip">
+  Para conteúdo que deve permanecer sincronizado, considere usar [Áreas de Widgets](/pt/guides/widgets/) com widgets de componente.
+</Aside>
+
+## Criando Seções
+
+### Na Interface de Administração
+
+1. Navegue até **Seções** na barra lateral do admin
+
+2. Clique em **Nova Seção**
+
+3. Preencha:
+   - **Título** - Nome de exibição para a seção
+   - **Slug** - Identificador de URL (gerado automaticamente a partir do título)
+   - **Descrição** - Texto de ajuda para editores
+
+4. Adicione conteúdo usando o editor de texto rico
+
+5. Opcionalmente, defina palavras-chave para facilitar a descoberta
+
+### Via Arquivos de Seed
+
+Inclua seções no arquivo de seed do seu tema:
+
+```json
+{
+  "sections": [
+    {
+      "slug": "hero-centered",
+      "title": "Centered Hero",
+      "description": "Full-width hero with centered heading and CTA",
+      "keywords": ["hero", "banner", "header"],
+      "content": [
+        {
+          "_type": "block",
+          "style": "h1",
+          "children": [{ "_type": "span", "text": "Bem-vindo ao nosso site" }]
+        },
+        {
+          "_type": "block",
+          "children": [{ "_type": "span", "text": "Your tagline goes here." }]
+        }
+      ]
+    },
+    {
+      "slug": "newsletter-cta",
+      "title": "Newsletter CTA",
+      "keywords": ["newsletter", "subscribe", "email"],
+      "content": [
+        {
+          "_type": "block",
+          "style": "h3",
+          "children": [{ "_type": "span", "text": "Subscribe to our newsletter" }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Via Importação do WordPress
+
+Blocos reutilizáveis do WordPress (tipo de post `wp_block`) são importados automaticamente como seções:
+
+- A fonte é definida como `"import"`
+- Conteúdo do Gutenberg convertido para Portable Text
+
+## Renderizando Seções Programaticamente
+
+Para conteúdo de seção renderizado no servidor fora do editor:
+
+```astro
+---
+import { getSection } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const newsletter = await getSection("newsletter-cta");
+---
+
+{newsletter && (
+  <aside class="cta-box">
+    <PortableText value={newsletter.content} />
+  </aside>
+)}
+```
+
+## Recursos da Interface de Administração
+
+A biblioteca de Seções (`/_emdash/admin/sections`) fornece:
+
+- **Visualização em grade** com prévias das seções
+- **Pesquisa** por título e palavras-chave  
+- **Filtro** por fonte
+- **Cópia rápida** do slug para a área de transferência
+- **Edição** do conteúdo e metadados da seção
+- **Exclusão** com confirmação (alerta para seções de tema)
+
+## Referência da API
+
+### `getSection(slug)`
+
+Busca uma seção pelo slug.
+
+**Parâmetros:**
+- `slug` — O identificador único da seção (string)
+
+**Retorna:** `Promise<Section | null>`
+
+### `getSections(options?)`
+
+Lista seções com filtros opcionais.
+
+**Parâmetros:**
+- `options.source` — Filtrar por fonte: `"theme"`, `"user"`, ou `"import"`
+- `options.search` — Pesquisar título e palavras-chave
+
+**Retorna:** `Promise<Section[]>`
+
+## API REST
+
+### Listar Seções
+
+```http
+GET /_emdash/api/sections
+GET /_emdash/api/sections?source=theme
+GET /_emdash/api/sections?search=newsletter
+```
+
+### Obter Seção
+
+```http
+GET /_emdash/api/sections/newsletter-cta
+```
+
+### Criar Seção
+
+```http
+POST /_emdash/api/sections
+Content-Type: application/json
+
+{
+  "slug": "my-section",
+  "title": "My Section",
+  "description": "Optional description",
+  "keywords": ["keyword1", "keyword2"],
+  "content": [...]
+}
+```
+
+### Atualizar Seção
+
+```http
+PUT /_emdash/api/sections/my-section
+Content-Type: application/json
+
+{
+  "title": "Updated Title",
+  "content": [...]
+}
+```
+
+### Excluir Seção
+
+```http
+DELETE /_emdash/api/sections/my-section
+```
+
+## Próximos Passos
+
+- [Trabalhando com Conteúdo](/pt/guides/working-with-content/) - Aprenda sobre o editor de texto rico
+- [Áreas de Widgets](/pt/guides/widgets/) - Para conteúdo dinâmico sincronizado
+- [Importação de Conteúdo](/pt/migration/content-import/) - Importe blocos reutilizáveis do WordPress

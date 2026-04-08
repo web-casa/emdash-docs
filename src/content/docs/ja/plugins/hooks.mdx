@@ -1,0 +1,517 @@
+---
+title: プラグインフック
+description: コンテンツ、メディア、プラグインのライフサイクルイベントにフックします。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+フックにより、プラグインはイベントに応じてコードを実行できます。すべてのフックはイベントオブジェクトとプラグインコンテキストを受け取ります。フックはプラグイン定義時に宣言され、実行時に動的に登録されるものではありません。
+
+## フックのシグネチャ
+
+すべてのフックハンドラーは2つの引数を受け取ります：
+
+```typescript
+async (event: EventType, ctx: PluginContext) => ReturnType;
+```
+
+- `event` — イベントに関するデータ（保存されるコンテンツ、アップロードされたメディアなど）
+- `ctx` — ストレージ、KV、ロギング、および権限制限付きAPIを含む[プラグインコンテキスト](/ja/plugins/overview/#plugin-context)
+
+## フックの設定
+
+フックは、シンプルなハンドラーとして、または完全な設定とともに宣言できます：
+
+<Tabs>
+  <TabItem label="シンプル">
+```typescript
+hooks: {
+  "content:afterSave": async (event, ctx) => {
+    ctx.log.info("Content saved");
+  }
+}
+```
+  </TabItem>
+  <TabItem label="完全な設定">
+```typescript
+hooks: {
+  "content:afterSave": {
+    priority: 100,
+    timeout: 5000,
+    dependencies: ["audit-log"],
+    errorPolicy: "continue",
+    handler: async (event, ctx) => {
+      ctx.log.info("Content saved");
+    }
+  }
+}
+```
+  </TabItem>
+</Tabs>
+
+### 設定オプション
+
+| オプション         | 型                      | デフォルト | 説明                                       |
+| ---------------- | ----------------------- | ---------- | ------------------------------------------ |
+| `priority`       | `number`                | `100`      | 実行順序。数値が小さいほど先に実行されます。 |
+| `timeout`        | `number`                | `5000`     | 最大実行時間（ミリ秒）。                   |
+| `dependencies`   | `string[]`              | `[]`       | このフックの前に実行する必要があるプラグインID。 |
+| `errorPolicy`    | `"abort" \| "continue"` | `"abort"`  | エラー時にパイプラインを停止するかどうか。 |
+| `exclusive`      | `boolean`               | `false`    | 1つのプラグインのみがアクティブなプロバイダーになれます。`email:deliver`および`comment:moderate`で使用されます。 |
+| `handler`        | `function`              | —          | フックハンドラー関数。必須です。           |
+
+<Aside type="tip">
+	通知などの重要でないフックには`errorPolicy: "continue"`を使用してください。フックの結果が重要な場合は`"abort"`（デフォルト）を使用します。
+</Aside>
+
+## ライフサイクルフック
+
+ライフサイクルフックは、プラグインのインストール、有効化、および無効化中に実行されます。
+
+### `plugin:install`
+
+プラグインがサイトに初めて追加されたときに1回実行されます。
+
+```typescript
+"plugin:install": async (_event, ctx) => {
+  ctx.log.info("Installing plugin...");
+
+  // デフォルトデータをシードする
+  await ctx.kv.set("settings:enabled", true);
+  await ctx.storage.items!.put("default", { name: "Default Item" });
+}
+```
+
+**イベント:** `{}`  
+**戻り値:** `Promise<void>`
+
+### `plugin:activate`
+
+プラグインが有効化されたとき（インストール後または再有効化時）に実行されます。
+
+```typescript
+"plugin:activate": async (_event, ctx) => {
+  ctx.log.info("Plugin activated");
+}
+```
+
+**イベント:** `{}`  
+**戻り値:** `Promise<void>`
+
+### `plugin:deactivate`
+
+プラグインが無効化されたとき（削除されていない場合）に実行されます。
+
+```typescript
+"plugin:deactivate": async (_event, ctx) => {
+  ctx.log.info("Plugin deactivated");
+  // Release resources, pause background work
+}
+```
+
+**イベント:** `{}`  
+**戻り値:** `Promise<void>`
+
+### `plugin:uninstall`
+
+プラグインがサイトから削除されたときに実行されます。
+
+```typescript
+"plugin:uninstall": async (event, ctx) => {
+  ctx.log.info("Uninstalling plugin...");
+
+  if (event.deleteData) {
+    // ユーザーがプラグインデータの削除を選択
+    const result = await ctx.storage.items!.query({ limit: 1000 });
+    await ctx.storage.items!.deleteMany(result.items.map(i => i.id));
+  }
+}
+```
+
+**イベント:** `{ deleteData: boolean }`  
+**戻り値:** `Promise<void>`
+
+<Aside type="caution">
+	`plugin:uninstall`では控えめにしてください。デフォルトではデータを保持します—ユーザーが再インストールする可能性があります。`event.deleteData`が`true`の場合のみ削除してください。
+</Aside>
+
+## コンテンツフック
+
+コンテンツフックは、作成、更新、および削除操作中に実行されます。
+
+### `content:beforeSave`
+
+コンテンツが保存される前に実行されます。変更されたコンテンツを返すか、`void`を返して変更しないままにします。スローすると保存がキャンセルされます。
+
+```typescript
+"content:beforeSave": async (event, ctx) => {
+  const { content, collection, isNew } = event;
+
+  // 検証
+  if (collection === "posts" && !content.title) {
+    throw new Error("Posts require a title");
+  }
+
+  // 変換
+  if (content.slug) {
+    content.slug = content.slug.toLowerCase().replace(/\s+/g, "-");
+  }
+
+  return content;
+}
+```
+
+**イベント:**
+
+```typescript
+{
+	content: Record<string, unknown>; // Content data being saved
+	collection: string; // Collection name
+	isNew: boolean; // True if creating, false if updating
+}
+```
+
+**戻り値:** `Promise<Record<string, unknown> | void>`
+
+### `content:afterSave`
+
+コンテンツが正常に保存された後に実行されます。通知、ロギング、外部システムへの同期などの副作用に使用します。
+
+```typescript
+"content:afterSave": async (event, ctx) => {
+  const { content, collection, isNew } = event;
+
+  ctx.log.info(`${isNew ? "Created" : "Updated"} ${collection}/${content.id}`);
+
+  // 外部同期をトリガー
+  if (ctx.http) {
+    await ctx.http.fetch("https://api.example.com/webhook", {
+      method: "POST",
+      body: JSON.stringify({ event: "content:save", id: content.id })
+    });
+  }
+}
+```
+
+**イベント:**
+
+```typescript
+{
+	content: Record<string, unknown>; // Saved content (includes id, timestamps)
+	collection: string;
+	isNew: boolean;
+}
+```
+
+**戻り値:** `Promise<void>`
+
+### `content:beforeDelete`
+
+コンテンツが削除される前に実行されます。削除をキャンセルするには`false`を返し、許可するには`true`または`void`を返します。
+
+```typescript
+"content:beforeDelete": async (event, ctx) => {
+  const { id, collection } = event;
+
+  // 保護されたコンテンツの削除を防止
+  if (collection === "pages" && id === "home") {
+    ctx.log.warn("Cannot delete home page");
+    return false;
+  }
+
+  return true;
+}
+```
+
+**イベント:**
+
+```typescript
+{
+	id: string; // Content ID being deleted
+	collection: string;
+}
+```
+
+**戻り値:** `Promise<boolean | void>`
+
+### `content:afterDelete`
+
+コンテンツが正常に削除された後に実行されます。
+
+```typescript
+"content:afterDelete": async (event, ctx) => {
+  const { id, collection } = event;
+
+  ctx.log.info(`削除済み ${collection}/${id}`);
+
+  // 関連するプラグインデータをクリーンアップ
+  await ctx.storage.cache!.delete(`${collection}:${id}`);
+}
+```
+
+**イベント:**
+
+```typescript
+{
+	id: string;
+	collection: string;
+}
+```
+
+**戻り値:** `Promise<void>`
+
+## メディアフック
+
+メディアフックは、ファイルアップロード中に実行されます。
+
+### `media:beforeUpload`
+
+ファイルがアップロードされる前に実行されます。変更されたファイル情報を返すか、`void`を返して変更しないままにします。スローするとアップロードがキャンセルされます。
+
+```typescript
+"media:beforeUpload": async (event, ctx) => {
+  const { file } = event;
+
+  // ファイルタイプを検証
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Only images are allowed");
+  }
+
+  // ファイルサイズを検証（最大10MB）
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error("File too large");
+  }
+
+  // ファイル名を変更
+  return {
+    ...file,
+    name: `${Date.now()}-${file.name}`
+  };
+}
+```
+
+**イベント:**
+
+```typescript
+{
+	file: {
+		name: string; // Original filename
+		type: string; // MIME type
+		size: number; // Size in bytes
+	}
+}
+```
+
+**戻り値:** `Promise<{ name: string; type: string; size: number } | void>`
+
+### `media:afterUpload`
+
+ファイルが正常にアップロードされた後に実行されます。
+
+```typescript
+"media:afterUpload": async (event, ctx) => {
+  const { media } = event;
+
+  ctx.log.info(`アップロード済み ${media.filename}`, {
+    id: media.id,
+    size: media.size,
+    mimeType: media.mimeType
+  });
+}
+```
+
+**イベント:**
+
+```typescript
+{
+	media: {
+		id: string;
+		filename: string;
+		mimeType: string;
+		size: number | null;
+		url: string;
+		createdAt: string;
+	}
+}
+```
+
+**戻り値:** `Promise<void>`
+
+## フックの実行順序
+
+フックは次の順序で実行されます：
+
+1. `priority`値が小さいフックが最初に実行されます
+2. 同じ優先度の場合、プラグイン登録順に実行されます
+3. `dependencies`を持つフックは、それらのプラグインが完了するまで待機します
+
+```typescript
+// Plugin A
+"content:afterSave": {
+  priority: 50,  // Runs first
+  handler: async () => {}
+}
+
+// プラグイン B
+"content:afterSave": {
+  priority: 100,  // 2番目に実行（デフォルト優先度）
+  handler: async () => {}
+}
+
+// プラグイン C
+"content:afterSave": {
+  priority: 200,
+  dependencies: ["plugin-a"],  // 優先度が低くてもAの後に実行
+  handler: async () => {}
+}
+```
+
+## エラーハンドリング
+
+フックがスローまたはタイムアウトした場合：
+
+- **`errorPolicy: "abort"`** — パイプライン全体が停止します。元の操作が失敗する可能性があります。
+- **`errorPolicy: "continue"`** — エラーがログに記録され、残りのフックは実行されます。
+
+```typescript
+"content:afterSave": {
+  timeout: 5000,
+  errorPolicy: "continue",  // Don't fail the save if this hook fails
+  handler: async (event, ctx) => {
+    // External API call that might fail
+    await ctx.http!.fetch("https://unreliable-api.com/notify");
+  }
+}
+```
+
+<Aside type="tip">
+	分析、通知、外部同期などの重要でない操作には`errorPolicy: "continue"`を使用してください。フックが失敗してもコンテンツの保存は成功します。
+</Aside>
+
+## タイムアウト
+
+フックのデフォルトタイムアウトは5000ms（5秒）です。より時間がかかる可能性のある操作にはこれを延長してください：
+
+```typescript
+"content:afterSave": {
+  timeout: 30000,  // 30 seconds
+  handler: async (event, ctx) => {
+    // Long-running operation
+  }
+}
+```
+
+<Aside type="caution">
+	Cloudflareのサンドボックスモードでは、リソース制限がアイソレートレベルで適用されます。長時間実行される
+	フックは、設定されたタイムアウトに関係なく終了される可能性があります。
+</Aside>
+
+## パブリックページフック
+
+パブリックページフックを使用すると、プラグインはレンダリングされたページの `<head>` と `<body>` に貢献できます。テンプレートは `emdash/ui` の `<EmDashHead>`、`<EmDashBodyStart>`、`<EmDashBodyEnd>` コンポーネントを使用してオプトインします。
+
+### `page:metadata`
+
+型付きメタデータを `<head>` に貢献します — メタタグ、OpenGraphプロパティ、canonical/alternateリンク、JSON-LD構造化データ。信頼済みモードとサンドボックスモードの両方で動作します。
+
+コアは貢献を検証、重複排除、レンダリングします。プラグインは生のHTMLではなく、構造化データを返します。
+
+```typescript
+"page:metadata": async (event, ctx) => {
+  if (event.page.kind !== "content") return null;
+
+  return {
+    kind: "jsonld",
+    id: `schema:${event.page.content?.collection}:${event.page.content?.id}`,
+    graph: {
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      headline: event.page.title,
+      description: event.page.description,
+    },
+  };
+}
+```
+
+**イベント:**
+
+```typescript
+{
+  page: {
+    url: string;
+    path: string;
+    locale: string | null;
+    kind: "content" | "custom";
+    pageType: string;
+    title: string | null;
+    description: string | null;
+    canonical: string | null;
+    image: string | null;
+    content?: { collection: string; id: string; slug: string | null };
+  }
+}
+```
+
+**戻り値:** `PageMetadataContribution | PageMetadataContribution[] | null`
+
+**貢献タイプ:**
+
+| 種類       | レンダリング内容                                            | 重複排除キー              |
+| ---------- | -------------------------------------------------- | ----------------------- |
+| `meta`     | `<meta name="..." content="...">`                  | `key` または `name`         |
+| `property` | `<meta property="..." content="...">`              | `key` または `property`     |
+| `link`     | `<link rel="canonical\|alternate" href="...">`     | canonical: シングルトン; alternate: `key` または `hreflang` |
+| `jsonld`   | `<script type="application/ld+json">`              | `id` (存在する場合)       |
+
+任意の重複排除キーに対して、最初の貢献が優先されます。リンクのhrefはHTTPまたはHTTPSである必要があります。
+
+### `page:fragments`
+
+生のHTML、スクリプト、またはマークアップをページの挿入ポイントに貢献します。**信頼済みプラグインのみ** — サンドボックス化されたプラグインはこのフックを使用できません。
+
+```typescript
+"page:fragments": async (event, ctx) => {
+  return {
+    kind: "external-script",
+    placement: "head",
+    src: "https://www.googletagmanager.com/gtm.js?id=GTM-XXXXX",
+    async: true,
+  };
+}
+```
+
+**戻り値:** `PageFragmentContribution | PageFragmentContribution[] | null`
+
+配置場所: `"head"`、`"body:start"`、`"body:end"`。配置場所に対応するコンポーネントを省略したテンプレートは、その配置場所をターゲットとする貢献を黙って無視します。
+
+<Aside type="caution">
+	`page:fragments` が信頼済みのみに限定されているのは、その出力がブラウザでファーストパーティコードとして実行されるためです。
+	Worker Loaderの分離は、ブラウザで実行されるスクリプトには及びません。サンドボックスで安全な貢献には `page:metadata` を使用してください。
+</Aside>
+
+## フックリファレンス
+
+| フック                    | トリガー                        | 戻り値                         | 排他的 |
+| ----------------------- | ------------------------------ | ------------------------------ | --------- |
+| `plugin:install`        | プラグインの初回インストール      | `void`                         | いいえ        |
+| `plugin:activate`       | プラグイン有効化                 | `void`                         | いいえ        |
+| `plugin:deactivate`     | プラグイン無効化                | `void`                         | いいえ        |
+| `plugin:uninstall`      | プラグイン削除                 | `void`                         | いいえ        |
+| `content:beforeSave`    | コンテンツ保存前            | 変更されたコンテンツまたは `void`     | いいえ        |
+| `content:afterSave`     | コンテンツ保存後             | `void`                         | いいえ        |
+| `content:beforeDelete`  | コンテンツ削除前          | `false` でキャンセル、それ以外は許可  | いいえ        |
+| `content:afterDelete`   | コンテンツ削除後           | `void`                         | いいえ        |
+| `media:beforeUpload`    | ファイルアップロード前             | 変更されたファイル情報または `void`   | いいえ        |
+| `media:afterUpload`     | ファイルアップロード後              | `void`                         | いいえ        |
+| `cron`                  | スケジュールタスク発火           | `void`                         | いいえ        |
+| `email:beforeSend`      | メール配信前          | 変更されたメッセージ、`false`、または `void` | いいえ  |
+| `email:deliver`         | トランスポート経由でメール配信    | `void`                         | はい       |
+| `email:afterSend`       | メール配信後           | `void`                         | いいえ        |
+| `comment:beforeCreate`  | コメント保存前          | 変更されたイベント、`false`、または `void` | いいえ    |
+| `comment:moderate`      | コメントステータス決定          | `{ status, reason? }`          | はい       |
+| `comment:afterCreate`   | コメント保存後           | `void`                         | いいえ        |
+| `comment:afterModerate` | 管理者がコメントステータス変更   | `void`                         | いいえ        |
+| `page:metadata`         | ページレンダリング                    | 貢献または `null`        | いいえ        |
+| `page:fragments`        | ページレンダリング (信頼済み)          | 貢献または `null`        | いいえ        |
+
+完全なイベントタイプとハンドラーシグネチャについては、[フックリファレンス](/ja/reference/hooks/)を参照してください。

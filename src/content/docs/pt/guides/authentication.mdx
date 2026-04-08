@@ -1,0 +1,349 @@
+---
+title: Autenticação
+description: Autenticação priorizando passkeys para o seu site EmDash.
+---
+
+import { Aside, Steps, Tabs, TabItem, Code } from "@astrojs/starlight/components";
+
+O EmDash usa autenticação por passkey como seu método de login principal. As passkeys são resistentes a phishing, não exigem senhas e funcionam entre dispositivos através do seu navegador ou gerenciador de senhas.
+
+Para implantações no Cloudflare, você pode opcionalmente usar o [Cloudflare Access](#cloudflare-access) como um provedor de autenticação alternativo.
+
+## Como Funciona
+
+As passkeys usam WebAuthn, um padrão da web que cria credenciais de chave pública armazenadas no seu dispositivo ou sincronizadas através do seu gerenciador de senhas. Quando você faz login, seu dispositivo prova a posse da credencial sem nunca enviar uma senha pela rede.
+
+Benefícios da autenticação por passkey:
+
+- **Nenhuma senha para lembrar ou vazar**
+- **Resistente a phishing** — as credenciais estão vinculadas ao domínio do seu site
+- **Sincronização entre dispositivos** — funciona com iCloud Keychain, Google Password Manager, 1Password, etc.
+- **Login rápido** — um toque com biometria ou PIN
+
+## Configuração do Primeiro Usuário
+
+Na primeira vez que você acessa o painel de administração, o Assistente de Configuração guia você pela criação da sua conta de administrador.
+
+<Steps>
+
+1. Navegue até `http://localhost:4321/_emdash/admin`
+
+2. Você será redirecionado para o Assistente de Configuração. Insira:
+   - **Título do Site** — O nome do seu site
+   - **Slogan** — Uma breve descrição
+   - **E-mail do Administrador** — Seu endereço de e-mail
+
+3. Clique em **Criar Site** para registrar sua passkey
+
+4. Seu navegador solicitará que você crie uma passkey:
+   - No macOS: Touch ID, senha do dispositivo ou chave de segurança
+   - No Windows: Windows Hello ou chave de segurança
+   - No celular: Face ID, impressão digital ou PIN
+
+5. Uma vez que sua passkey seja registrada, você estará logado e será redirecionado para o painel de administração.
+
+</Steps>
+
+<Aside>
+	Seu e-mail é armazenado, mas não verificado durante a configuração inicial. Você pode configurar o e-mail mais tarde para
+	habilitar recursos como convites e login por link mágico.
+</Aside>
+
+## Fazendo Login
+
+Após a configuração, retornar ao painel de administração aciona a autenticação por passkey:
+
+<Steps>
+
+1. Visite `/_emdash/admin`
+
+2. Se não estiver logado, você verá a página de login
+
+3. Clique em **Entrar** para autenticar
+
+4. Seu navegador solicitará sua passkey (biometria, PIN ou chave de segurança)
+
+5. Após a verificação, você é redirecionado para o painel de administração
+
+</Steps>
+
+## Fallback por Link Mágico
+
+Se você não puder usar sua passkey (ex.: dispositivo perdido), os links mágicos fornecem uma alternativa. Isso requer que o e-mail esteja configurado.
+
+<Steps>
+
+1. Na página de login, clique em **Entrar com e-mail**
+
+2. Insira seu endereço de e-mail
+
+3. Verifique sua caixa de entrada por um link de login
+
+4. Clique no link para autenticar (válido por 15 minutos)
+
+</Steps>
+
+<Aside type="caution">
+	Os links mágicos são de uso único e expiram após 15 minutos. Solicite um novo link se o seu expirou.
+</Aside>
+
+## Login OAuth
+
+O EmDash suporta login OAuth com GitHub e Google quando configurado. Os usuários podem vincular suas contas após a configuração inicial da passkey.
+
+Consulte o [guia de Configuração](/pt/reference/configuration#oauth) para instruções de configuração.
+
+## Funções de Usuário
+
+O EmDash usa controle de acesso baseado em função com cinco níveis:
+
+| Função       | Nível | Descrição                          |
+| ----------- | ----- | ---------------------------------- |
+| Assinante   | 10    | Acesso somente leitura             |
+| Colaborador | 20    | Criar conteúdo (precisa de aprovação) |
+| Autor       | 30    | Criar/editar/publicar seu próprio conteúdo |
+| Editor      | 40    | Gerenciar todo o conteúdo          |
+| Admin       | 50    | Acesso total, incluindo configurações |
+
+Cada função herda permissões de todos os níveis inferiores. O primeiro usuário é sempre criado como Admin.
+
+## Convidando Usuários
+
+Administradores podem convidar novos usuários através do painel de administração:
+
+<Steps>
+
+1. Vá para **Configurações** > **Usuários**
+
+2. Clique em **Convidar Usuário**
+
+3. Insira o e-mail do usuário e selecione uma função
+
+4. Clique em **Enviar Convite**
+
+5. O usuário recebe um e-mail com um link de convite
+
+6. Eles clicam no link e registram sua passkey
+
+</Steps>
+
+Os convites são válidos por 7 dias. Os administradores podem reenviar ou revogar convites na página Usuários.
+
+## Gerenciando Passkeys
+
+Os usuários podem gerenciar suas passkeys nas configurações da conta:
+
+- **Adicionar passkey** — Registrar passkeys adicionais para backup ou outros dispositivos
+- **Remover passkey** — Excluir passkeys que você não usa mais
+- **Renomear passkey** — Dar nomes descritivos às passkeys
+
+Cada usuário pode ter até 10 passkeys registradas.
+
+<Aside type="tip">
+	Registre passkeys em vários dispositivos (ex.: laptop e celular) para garantir que você sempre tenha uma forma de
+	fazer login.
+</Aside>
+
+## Cadastro Automático
+
+Para sites de equipe, você pode habilitar o cadastro automático para domínios de e-mail específicos:
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			auth: {
+				selfSignup: {
+					domains: ["example.com"],
+					defaultRole: "contributor",
+				},
+			},
+		}),
+	],
+});
+```
+
+Usuários com domínios de e-mail correspondentes podem se cadastrar sem um convite. Eles receberão um e-mail de verificação e registrarão uma passkey para completar o cadastro.
+
+## Configuração de Sessão
+
+As sessões usam cookies HttpOnly seguros com padrões sensatos:
+
+```
+js title="astro.config.mjs"
+emdash({
+	auth: {
+		session: {
+			maxAge: 30 * 24 * 60 * 60, // 30 days (default)
+			sliding: true, // Reset expiry on activity
+		},
+	},
+});
+```
+
+## Notas de Segurança
+
+- **As passkeys são armazenadas como chaves públicas** — a chave privada nunca sai do seu dispositivo
+- **A verificação de desafio** previne ataques de repetição
+- **Limitação de taxa** protege contra força bruta (5 tentativas/minuto/IP)
+- **As sessões são HttpOnly, Secure, SameSite=Lax** para segurança dos cookies
+- **Os tokens de link mágico são hash SHA-256** — os tokens brutos nunca são armazenados
+
+## Solução de Problemas
+
+### "Nenhuma passkey registrada"
+
+Se você vir este erro no login, sua passkey pode ter sido excluída do seu gerenciador de senhas. Peça a um administrador para enviar um link mágico ou novo convite.
+
+### "Autenticação por passkey falhou"
+
+Isso geralmente significa que a passkey foi criada para um domínio diferente. As passkeys são vinculadas ao domínio — uma passkey para `localhost:4321` não funcionará em `example.com`. Registre uma nova passkey para cada domínio.
+
+### "Sessão expirada"
+
+As sessões duram 30 dias por padrão com expiração contínua. Se você foi desconectado inesperadamente, limpe seus cookies e faça login novamente.
+
+### Perdeu todas as passkeys
+
+Se você perdeu o acesso a todas as suas passkeys registradas:
+
+1. Peça a outro administrador para enviar um link mágico (requer configuração de e-mail)
+2. Use o link mágico para fazer login
+3. Registre uma nova passkey nas configurações da conta
+
+Se você for o único administrador e o e-mail não estiver configurado, será necessário redefinir a autenticação do seu site através do banco de dados.
+
+## Cloudflare Access
+
+Ao implantar no Cloudflare, você pode usar o [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/) como seu provedor de autenticação em vez de passkeys. O Access gerencia a autenticação na borda usando seu provedor de identidade existente.
+
+<Aside>
+	Quando o Cloudflare Access está configurado, ele se torna o método de autenticação **exclusivo**.
+	Passkeys, OAuth, links mágicos e auto-cadastro são todos desativados.
+</Aside>
+
+### Por que usar o Cloudflare Access?
+
+- **Single Sign-On** — Os usuários se autenticam com o IdP da sua empresa
+- **Controle de acesso centralizado** — Gerencie quem pode acessar o admin no painel do Cloudflare
+- **Sem gerenciamento de passkeys** — Não é necessário registrar ou gerenciar passkeys
+- **Funções baseadas em grupos** — Mapeie grupos do IdP para funções do EmDash automaticamente
+
+### Configuração
+
+1. Crie um [aplicativo Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/) para seu site EmDash
+2. Anote a **Tag de Público-Alvo do Aplicativo (AUD)** nas configurações do aplicativo
+3. Configure o EmDash para usar o Access:
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import cloudflare from "@astrojs/cloudflare";
+import emdash from "emdash/astro";
+import { d1, access } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	output: "server",
+	adapter: cloudflare(),
+	integrations: [
+		emdash({
+			database: d1({ binding: "DB" }),
+			auth: access({
+				teamDomain: "myteam.cloudflareaccess.com",
+				audience: "abc123def456...", // From Access app settings
+			}),
+		}),
+	],
+});
+```
+
+### Opções de Configuração
+
+| Opção           | Tipo      | Padrão   | Descrição                                                    |
+| --------------- | --------- | -------- | ------------------------------------------------------------- |
+| `teamDomain`    | `string`  | obrigatório | Seu domínio de equipe do Access (ex: `myteam.cloudflareaccess.com`) |
+| `audience`      | `string`  | obrigatório | Tag de Público-Alvo do Aplicativo (AUD) das configurações do Access |
+| `autoProvision` | `boolean` | `true`   | Criar usuários do EmDash no primeiro login via Access       |
+| `defaultRole`   | `number`  | `30`     | Função para usuários que não correspondem a nenhum grupo (30 = Autor) |
+| `syncRoles`     | `boolean` | `false`  | Atualizar função em cada login com base nos grupos do IdP     |
+| `roleMapping`   | `object`  | —        | Mapear nomes de grupos do IdP para níveis de função           |
+| `audienceEnvVar`| `string`  | `"CF_ACCESS_AUDIENCE"` | Nome da variável de ambiente para a tag de público-alvo (alternativa à codificação fixa) |
+
+### Mapeamento de Funções
+
+Mapeie seus grupos do IdP para funções do EmDash:
+
+```
+js title="astro.config.mjs"
+emdash({
+	auth: access({
+		teamDomain: "myteam.cloudflareaccess.com",
+		audience: "abc123...",
+		roleMapping: {
+			Admins: 50, // Admin
+			"Content Editors": 40, // Editor
+			Writers: 30, // Author
+		},
+		defaultRole: 20, // Contributor for users not in any group
+	}),
+});
+```
+
+O primeiro grupo correspondente vence se um usuário pertencer a múltiplos grupos. O **primeiro usuário** a acessar o site sempre se torna Admin, independentemente dos grupos.
+
+### Comportamento de Sincronização de Funções
+
+Por padrão (`syncRoles: false`), a função de um usuário é definida no primeiro login e não muda depois. Isso permite que administradores ajustem funções manualmente no EmDash.
+
+Defina `syncRoles: true` se quiser que os grupos do IdP sejam autoritários — a função do usuário será atualizada em cada login com base em seus grupos atuais.
+
+### Como Funciona
+
+1. Usuário visita `/_emdash/admin`
+2. O Cloudflare Access intercepta e redireciona para seu IdP
+3. Usuário se autentica (SSO, MFA, etc.)
+4. O Access define um JWT assinado na requisição
+5. O EmDash valida o JWT e cria/autentica o usuário
+
+<Aside type="tip">
+	Você ainda pode desativar usuários localmente no EmDash. Um usuário desativado será rejeitado mesmo se o Access
+	permitir sua passagem.
+</Aside>
+
+### Funcionalidades Desativadas
+
+Quando o Access está ativado, estas funcionalidades ficam indisponíveis:
+
+- Página de login (`/_emdash/admin/login`)
+- Registro e gerenciamento de passkeys
+- Login via OAuth
+- Login via link mágico
+- Auto-cadastro
+- Convites de usuário
+
+O gerenciamento de usuários é feito inteiramente através das suas políticas do Cloudflare Access.
+
+### Solução de Problemas
+
+#### "Nenhum JWT do Access presente"
+
+A requisição chegou ao EmDash sem um JWT do Access. Isso significa:
+
+- O Access não está configurado para proteger seu aplicativo
+- A política do Access não está correspondendo às rotas de admin
+
+Verifique se seu aplicativo do Access cobre `/_emdash/admin/*`.
+
+#### "Incompatibilidade de público-alvo do JWT"
+
+O `audience` na sua configuração não corresponde ao JWT. Verifique novamente a Tag de Público-Alvo do Aplicativo nas configurações do seu aplicativo Access.
+
+#### "Usuário não autorizado"
+
+O usuário se autenticou via Access, mas `autoProvision` está `false` e ele não existe no EmDash. Ou:
+
+- Defina `autoProvision: true`, ou
+- Crie o usuário manualmente antes dele fazer login

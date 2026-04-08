@@ -1,0 +1,624 @@
+---
+title: CLI 참조
+description: EmDash CMS의 명령줄 인터페이스입니다.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash CLI는 EmDash CMS 인스턴스를 관리하는 명령어를 제공합니다 — 데이터베이스 설정, 타입 생성, 콘텐츠 CRUD, 스키마 관리, 미디어 및 기타 기능을 포함합니다.
+
+## 설치
+
+CLI는 `emdash` 패키지에 포함되어 있습니다:
+
+```bash
+npm install emdash
+```
+
+`npx emdash`로 명령어를 실행하거나 `package.json`에 스크립트를 추가하세요. 간결함을 위해 `em` 바이너리도 사용 가능합니다.
+
+## 인증
+
+실행 중인 EmDash 인스턴스와 통신하는 명령어들(`init`, `seed`, `export-seed`, `auth secret`을 제외한 모든 명령어)은 다음 순서로 인증을 해결합니다:
+
+1. **`--token` 플래그** — 명령줄에 명시적 토큰
+2. **`EMDASH_TOKEN` 환경 변수**
+3. **저장된 자격 증명** — `~/.config/emdash/auth.json` ( `emdash login`으로 저장됨)
+4. **개발 우회** — URL이 localhost이고 토큰을 사용할 수 없는 경우, 개발 우회 엔드포인트를 통해 자동 인증
+
+대부분의 명령어는 `--url` (기본값 `http://localhost:4321`) 및 `--token` 플래그를 허용합니다. 로컬 개발 서버를 대상으로 할 때는 토큰이 필요하지 않습니다.
+
+## 공통 플래그
+
+이 플래그들은 모든 원격 명령어에서 사용 가능합니다:
+
+| 플래그      | 별칭 | 설명                 | 기본값                  |
+| --------- | ----- | --------------------------- | ------------------------ |
+| `--url`   | `-u`  | EmDash 인스턴스 URL       | `http://localhost:4321`  |
+| `--token` | `-t`  | 인증 토큰                  | 환경 변수/저장된 자격 증명에서 |
+| `--json`  |       | JSON으로 출력 (파이핑용) | TTY에서 자동 감지   |
+
+## 출력
+
+표준 출력이 TTY일 때, CLI는 consola로 결과를 예쁘게 출력합니다. 파이프되거나 `--json`이 설정된 경우, 표준 출력에 원시 JSON을 출력합니다 — `jq`나 다른 도구에 적합합니다.
+
+## 명령어
+
+### `emdash init`
+
+핵심 스키마와 선택적 템플릿 데이터로 데이터베이스를 초기화합니다.
+
+```bash
+npx emdash init [options]
+```
+
+#### 옵션
+
+| 옵션       | 별칭 | 설명            | 기본값           |
+| ------------ | ----- | ---------------------- | ----------------- |
+| `--database` | `-d`  | 데이터베이스 파일 경로     | `./data.db`       |
+| `--cwd`      |       | 작업 디렉토리      | 현재 디렉토리  |
+| `--force`    | `-f`  | 스키마와 시드 재실행 | `false`           |
+
+#### 동작
+
+1. `package.json`에서 `emdash` 설정을 읽습니다
+2. 필요한 경우 데이터베이스 파일을 생성합니다
+3. 핵심 마이그레이션을 실행합니다 (시스템 테이블 생성)
+4. 구성된 경우 템플릿 `schema.sql`을 실행합니다
+5. 구성된 경우 템플릿 `seed.sql`을 실행합니다
+
+<Aside>
+	데이터베이스에 이미 컬렉션이 포함되어 있으면, `--force`를 사용하지 않는 한 `init`은 스키마와 시드를 건너뜁니다.
+</Aside>
+
+### `emdash dev`
+
+자동 데이터베이스 설정과 함께 개발 서버를 시작합니다.
+
+```bash
+npx emdash dev [options]
+```
+
+#### 옵션
+
+| 옵션       | 별칭 | 설명                              | 기본값           |
+| ------------ | ----- | ---------------------------------------- | ----------------- |
+| `--database` | `-d`  | 데이터베이스 파일 경로                       | `./data.db`       |
+| `--types`    | `-t`  | 시작 전 원격에서 타입 생성 | `false`         |
+| `--port`     | `-p`  | 개발 서버 포트                          | `4321`            |
+| `--cwd`      |       | 작업 디렉토리                        | 현재 디렉토리  |
+
+#### 예시
+
+```bash
+# Start dev server
+npx emdash dev
+
+# 사용자 정의 포트
+npx emdash dev --port 3000
+
+# 시작 전 원격에서 타입 생성
+npx emdash dev --types
+```
+
+#### 동작
+
+1. 보류 중인 데이터베이스 마이그레이션을 확인하고 실행합니다
+2. `--types`가 설정된 경우, 원격 인스턴스에서 TypeScript 타입을 생성합니다 (URL은 `EMDASH_URL` 환경 변수 또는 `package.json`의 `emdash.url`에서 가져옴)
+3. `EMDASH_DATABASE_URL`이 설정된 상태로 Astro 개발 서버를 시작합니다
+
+### `emdash types`
+
+실행 중인 EmDash 인스턴스의 스키마에서 TypeScript 타입을 생성합니다.
+
+```bash
+npx emdash types [options]
+```
+
+#### 옵션
+
+| 옵션     | 별칭 | 설명              | 기본값              |
+| ---------- | ----- | ------------------------ | -------------------- |
+| `--url`    | `-u`  | EmDash 인스턴스 URL    | `http://localhost:4321` |
+| `--token`  | `-t`  | 인증 토큰               | 환경 변수/저장된 자격 증명에서 |
+| `--output` | `-o`  | 타입 출력 경로    | `.emdash/types.ts` |
+| `--cwd`    |       | 작업 디렉토리        | 현재 디렉토리    |
+
+#### 예시
+
+```bash
+# Generate types from local dev server
+npx emdash types
+
+# 원격 인스턴스에서 생성
+npx emdash types --url https://my-site.pages.dev
+
+# 사용자 정의 출력 경로
+npx emdash types --output src/types/emdash.ts
+```
+
+#### 동작
+
+1. 인스턴스에서 스키마를 가져옵니다
+2. TypeScript 타입 정의를 생성합니다
+3. 출력 파일에 타입을 작성합니다
+4. 참조용으로 `schema.json`을 함께 작성합니다
+
+### `emdash login`
+
+OAuth Device Flow를 사용하여 EmDash 인스턴스에 로그인합니다.
+
+```bash
+npx emdash login [options]
+```
+
+#### 옵션
+
+| 옵션  | 별칭 | 설명           | 기본값                |
+| ------- | ----- | --------------------- | ---------------------- |
+| `--url` | `-u`  | EmDash 인스턴스 URL | `http://localhost:4321` |
+
+#### 동작
+
+1. 인스턴스에서 인증 엔드포인트를 탐색합니다
+2. localhost이고 인증이 구성되지 않은 경우, 자동으로 개발 우회를 사용합니다
+3. 그렇지 않으면 OAuth Device Flow를 시작합니다 — 코드를 표시하고 브라우저를 엽니다
+4. 인증을 폴링한 후, 자격 증명을 `~/.config/emdash/auth.json`에 저장합니다
+
+저장된 자격 증명은 동일한 인스턴스를 대상으로 하는 모든 후속 명령어에서 자동으로 사용됩니다.
+
+### `emdash logout`
+
+로그아웃하고 저장된 자격 증명을 제거합니다.
+
+```bash
+npx emdash logout [options]
+```
+
+#### 옵션
+
+| 옵션  | 별칭 | 설명           | 기본값                |
+| ------- | ----- | --------------------- | ---------------------- |
+| `--url` | `-u`  | EmDash 인스턴스 URL | `http://localhost:4321` |
+
+### `emdash whoami`
+
+현재 인증된 사용자를 표시합니다.
+
+```bash
+npx emdash whoami [options]
+```
+
+#### 옵션
+
+| 옵션    | 별칭 | 설명           | 기본값                |
+| --------- | ----- | --------------------- | ---------------------- |
+| `--url`   | `-u`  | EmDash 인스턴스 URL | `http://localhost:4321` |
+| `--token` | `-t`  | 인증 토큰            | 환경 변수/저장된 자격 증명에서  |
+| `--json`  |       | JSON으로 출력        |                        |
+
+이메일, 이름, 역할, 인증 방법 및 인스턴스 URL을 표시합니다.
+
+### `emdash content`
+
+콘텐츠 항목을 관리합니다. 모든 하위 명령어는 `EmDashClient`를 통해 원격 API를 사용합니다.
+
+#### `content list <collection>`
+
+```bash
+npx emdash content list posts
+npx emdash content list posts --status published --limit 10
+```
+
+| 옵션     | 설명          |
+| ---------- | -------------------- |
+| `--status` | 상태별 필터     |
+| `--limit`  | 최대 항목 수        |
+| `--cursor` | 페이지네이션 커서    |
+
+#### `content get <collection> <id>`
+
+```bash
+npx emdash content get posts 01ABC123
+npx emdash content get posts 01ABC123 --raw
+```
+
+| 옵션  | 설명                                      |
+| ------- | ------------------------------------------------ |
+| `--raw` | 원본 Portable Text 반환 (마크다운 변환 건너뛰기) |
+
+응답에는 `_rev` 토큰이 포함됩니다 — 이를 `content update`에 전달하여 덮어쓰기 전에 현재 상태를 확인했음을 증명하세요.
+
+#### `content create <collection>`
+
+```bash
+npx emdash content create posts --data '{"title": "Hello"}'
+npx emdash content create posts --file post.json --slug hello-world
+cat post.json | npx emdash content create posts --stdin
+```
+
+| 옵션     | 설명                    |
+| ---------- | ------------------------------ |
+| `--data`   | 콘텐츠 데이터가 담긴 JSON 문자열  |
+| `--file`   | JSON 파일에서 데이터 읽기     |
+| `--stdin`  | stdin에서 데이터 읽기           |
+| `--slug`   | 콘텐츠 슬러그                   |
+| `--status` | 초기 상태 (draft, published) |
+
+`--data`, `--file`, `--stdin` 중 정확히 하나를 통해 데이터를 제공하세요.
+
+#### `content update <collection> <id>`
+
+읽기 전에 쓰기를 요구하는 파일 편집기와 유사합니다 — 현재 상태를 확인했음을 증명하려면 이전 `get`에서 받은 `_rev` 토큰을 제공해야 합니다. 이렇게 하면 확인하지 않은 변경 사항을 실수로 덮어쓰는 것을 방지할 수 있습니다.
+
+```bash
+# 1. Read the item, note the _rev
+npx emdash content get posts 01ABC123
+
+# 2. 1단계에서 받은 _rev로 업데이트하기
+npx emdash content update posts 01ABC123 \
+  --rev MToyMDI2LTAyLTE0... \
+  --data '{"title": "Updated"}'
+```
+
+| 옵션   | 설명                            |
+| -------- | -------------------------------------- |
+| `--rev`  | `get`에서 받은 리비전 토큰 (필수)   |
+| `--data` | 콘텐츠 데이터가 담긴 JSON 문자열          |
+| `--file` | JSON 파일에서 데이터 읽기             |
+
+항목이 `get` 이후 변경된 경우, 서버는 409 Conflict를 반환합니다 — 다시 읽고 재시도하세요.
+
+#### `content delete <collection> <id>`
+
+```bash
+npx emdash content delete posts 01ABC123
+```
+
+콘텐츠 항목을 소프트 삭제합니다 (휴지통으로 이동).
+
+#### `content publish <collection> <id>`
+
+```bash
+npx emdash content publish posts 01ABC123
+```
+
+#### `content unpublish <collection> <id>`
+
+```bash
+npx emdash content unpublish posts 01ABC123
+```
+
+#### `content schedule <collection> <id>`
+
+```bash
+npx emdash content schedule posts 01ABC123 --at 2026-03-01T09:00:00Z
+```
+
+| 옵션 | 설명                     |
+| ------ | ------------------------------- |
+| `--at` | ISO 8601 날짜/시간 (필수)    |
+
+#### `content restore <collection> <id>`
+
+```bash
+npx emdash content restore posts 01ABC123
+```
+
+휴지통에 있는 콘텐츠 항목을 복원합니다.
+
+### `emdash schema`
+
+컬렉션과 필드를 관리합니다.
+
+#### `schema list`
+
+```bash
+npx emdash schema list
+```
+
+모든 컬렉션을 나열합니다.
+
+#### `schema get <collection>`
+
+```bash
+npx emdash schema get posts
+```
+
+모든 필드와 함께 컬렉션을 표시합니다.
+
+#### `schema create <collection>`
+
+```bash
+npx emdash schema create articles --label Articles
+npx emdash schema create articles --label Articles --label-singular Article --description "Blog articles"
+```
+
+| 옵션             | 설명                     |
+| ------------------ | ------------------------------- |
+| `--label`          | 컬렉션 라벨 (필수)     |
+| `--label-singular` | 단수형 라벨                  |
+| `--description`    | 컬렉션 설명          |
+
+#### `schema delete <collection>`
+
+```bash
+npx emdash schema delete articles
+npx emdash schema delete articles --force
+```
+
+| 옵션    | 설명         |
+| --------- | ------------------- |
+| `--force` | 확인 건너뛰기   |
+
+`--force`가 설정되지 않은 경우 확인을 요청합니다.
+
+#### `schema add-field <collection> <field>`
+
+```bash
+npx emdash schema add-field posts body --type portableText --label "Body Content"
+npx emdash schema add-field posts featured --type boolean --required
+```
+
+| 옵션       | 설명                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| `--type`     | 필드 유형: string, text, number, integer, boolean, datetime, image, reference, portableText, json (필수) |
+| `--label`    | 필드 라벨 (기본값: 필드 슬러그)                                                             |
+| `--required` | 필드가 필수인지 여부                                                                    |
+
+#### `schema remove-field <collection> <field>`
+
+```bash
+npx emdash schema remove-field posts featured
+```
+
+### `emdash media`
+
+미디어 항목을 관리합니다.
+
+#### `media list`
+
+```bash
+npx emdash media list
+npx emdash media list --mime image/png --limit 20
+```
+
+| 옵션     | 설명              |
+| ---------- | ------------------------ |
+| `--mime`   | MIME 타입으로 필터링      |
+| `--limit`  | 항목 수          |
+| `--cursor` | 페이지네이션 커서        |
+
+#### `media upload <file>`
+
+```bash
+npx emdash media upload ./photo.jpg
+npx emdash media upload ./photo.jpg --alt "A sunset" --caption "Taken in Bristol"
+```
+
+| 옵션      | 설명    |
+| ----------- | -------------- |
+| `--alt`     | 대체 텍스트       |
+| `--caption` | 캡션 텍스트   |
+
+#### `media get <id>`
+
+```bash
+npx emdash media get 01MEDIA123
+```
+
+#### `media delete <id>`
+
+```bash
+npx emdash media delete 01MEDIA123
+```
+
+### `emdash search`
+
+콘텐츠 전체에 대한 전체 텍스트 검색.
+
+```bash
+npx emdash search "hello world"
+npx emdash search "hello" --collection posts --limit 5
+```
+
+| 옵션         | 별칭 | 설명          |
+| -------------- | ----- | -------------------- |
+| `--collection` | `-c`  | 컬렉션으로 필터링 |
+| `--limit`      | `-l`  | 최대 결과 수      |
+
+### `emdash taxonomy`
+
+분류 체계와 용어를 관리합니다.
+
+#### `taxonomy list`
+
+```bash
+npx emdash taxonomy list
+```
+
+#### `taxonomy terms <name>`
+
+```bash
+npx emdash taxonomy terms categories
+npx emdash taxonomy terms tags --limit 50
+```
+
+| 옵션     | 별칭 | 설명       |
+| ---------- | ----- | ----------------- |
+| `--limit`  | `-l`  | 최대 용어 수     |
+| `--cursor` |       | 페이지네이션 커서 |
+
+#### `taxonomy add-term <taxonomy>`
+
+```bash
+npx emdash taxonomy add-term categories --name "Tech" --slug tech
+npx emdash taxonomy add-term categories --name "Frontend" --parent 01PARENT123
+```
+
+| 옵션     | 설명                              |
+| ---------- | ---------------------------------------- |
+| `--name`   | 용어 라벨 (필수)                    |
+| `--slug`   | 용어 슬러그 (기본값: 슬러그화된 이름)   |
+| `--parent` | 상위 용어 ID (계층적 분류 체계용) |
+
+### `emdash menu`
+
+네비게이션 메뉴를 관리합니다.
+
+#### `menu list`
+
+```bash
+npx emdash menu list
+```
+
+#### `menu get <name>`
+
+```bash
+npx emdash menu get primary
+```
+
+모든 항목과 함께 메뉴를 반환합니다.
+
+### `emdash seed`
+
+시드 파일을 데이터베이스에 적용합니다. 이 명령어는 로컬 SQLite 파일에서 직접 작동합니다 (실행 중인 서버가 필요 없음).
+
+```bash
+npx emdash seed [path] [options]
+```
+
+#### 인수
+
+| 인수 | 설명       | 기본값               |
+| -------- | ----------------- | --------------------- |
+| `path`   | 시드 파일 경로 | `.emdash/seed.json` |
+
+#### 옵션
+
+| 옵션               | 별칭  | 설명                                   | 기본값                       |
+| ------------------ | ----- | --------------------------------------- | --------------------------- |
+| `--database`       | `-d`  | 데이터베이스 파일 경로                  | `./data.db`                 |
+| `--cwd`            |       | 작업 디렉토리                           | 현재 디렉토리               |
+| `--validate`       |       | 검증만 수행, 적용하지 않음              | `false`                     |
+| `--no-content`     |       | 샘플 콘텐츠 건너뛰기                    | `false`                     |
+| `--on-conflict`    |       | 충돌 처리: skip, update, error          | `skip`                      |
+| `--uploads-dir`    |       | 미디어 업로드 디렉토리                   | `.emdash/uploads`         |
+| `--media-base-url` |       | 미디어 파일 기본 URL                    | `/_emdash/api/media/file` |
+| `--base-url`       |       | 사이트 기본 URL (절대 미디어 URL용)     |                             |
+
+#### 시드 파일 해석
+
+명령어는 다음 순서로 시드 파일을 찾습니다:
+
+1. 위치 인수 (제공된 경우)
+2. `.emdash/seed.json` (관례)
+3. `package.json`의 `emdash.seed` 필드 경로
+
+### `emdash export-seed`
+
+데이터베이스 스키마와 콘텐츠를 시드 파일로 내보냅니다. 로컬 SQLite 파일에서 직접 작동합니다.
+
+```bash
+npx emdash export-seed [options] > seed.json
+```
+
+#### 옵션
+
+| 옵션             | 별칭  | 설명                                          | 기본값           |
+| ---------------- | ----- | ---------------------------------------------------- | ----------------- |
+| `--database`     | `-d`  | 데이터베이스 파일 경로                               | `./data.db`       |
+| `--cwd`          |       | 작업 디렉토리                                        | 현재 디렉토리     |
+| `--with-content` |       | 콘텐츠 포함 (all 또는 쉼표로 구분된 컬렉션)          |                   |
+| `--no-pretty`    |       | JSON 포맷팅 비활성화                                 | `false`           |
+
+#### 출력 형식
+
+내보낸 시드 파일에는 다음이 포함됩니다:
+
+- **설정**: 사이트 제목, 태그라인, 소셜 링크
+- **컬렉션**: 모든 컬렉션 정의와 필드
+- **분류법**: 분류법 정의와 용어
+- **메뉴**: 항목이 있는 네비게이션 메뉴
+- **위젯 영역**: 위젯 영역과 위젯
+- **콘텐츠** (요청 시): `$media` 참조와 이식성을 위한 `$ref:` 구문이 있는 항목
+
+### `emdash auth secret`
+
+배포를 위한 안전한 인증 비밀키를 생성합니다.
+
+```bash
+npx emdash auth secret
+```
+
+`EMDASH_AUTH_SECRET`에 적합한 무작위 비밀키를 출력합니다.
+
+## 생성된 파일
+
+### `.emdash/types.ts`
+
+`emdash types`에 의해 생성된 TypeScript 인터페이스:
+
+```ts
+// Generated by EmDash CLI
+// Do not edit manually - run `emdash types` to regenerate
+
+import type { PortableTextBlock } from "emdash";
+
+export interface Post {
+	id: string;
+	title: string;
+	content: PortableTextBlock[];
+	publishedAt: Date | null;
+}
+```
+
+### `.emdash/schema.json`
+
+도구를 위한 원시 스키마 내보내기:
+
+```json
+{
+  "version": "a1b2c3d4",
+  "collections": [
+    {
+      "slug": "posts",
+      "label": "Posts",
+      "fields": [...]
+    }
+  ]
+}
+```
+
+## 환경 변수
+
+| 변수                      | 설명                              |
+| ------------------------- | ---------------------------------------- |
+| `EMDASH_DATABASE_URL`   | 데이터베이스 URL (`dev`에 의해 자동 설정) |
+| `EMDASH_TOKEN`          | 원격 작업을 위한 인증 토큰                |
+| `EMDASH_URL`            | `types` 및 `dev --types`용 기본 원격 URL |
+| `EMDASH_AUTH_SECRET`    | 패스키 인증을 위한 비밀키                 |
+| `EMDASH_PREVIEW_SECRET` | 미리보기 토큰 생성을 위한 비밀키          |
+
+## 패키지 스크립트
+
+```json
+{
+	"scripts": {
+		"dev": "emdash dev",
+		"init": "emdash init",
+		"types": "emdash types",
+		"seed": "emdash seed",
+		"export-seed": "emdash export-seed",
+		"db:reset": "rm -f data.db && emdash init"
+	}
+}
+```
+
+## 종료 코드
+
+| 코드 | 설명                              |
+| ---- | ---------------------------------------- |
+| `0`  | 성공                                   |
+| `1`  | 오류 (구성, 네트워크, 데이터베이스)     |

@@ -1,0 +1,259 @@
+---
+title: WordPress에서 EmDash로 마이그레이션
+description: 내보내기, 콘텐츠 가져오기, 미디어, 분류 체계 및 리디렉션 계획을 다루는 단계별 WordPress에서 EmDash 마이그레이션 가이드입니다.
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash는 WordPress에서의 완전한 마이그레이션 경로를 제공합니다. 관리자 대시보드를 통해 게시물, 페이지, 미디어 및 분류를 가져올 수 있습니다—CLI가 필요하지 않습니다.
+
+먼저 더 높은 수준의 마이그레이션 개요를 원한다면, [WordPress to Astro with EmDash](/ko/wordpress-to-astro-with-emdash/)와 [EmDash vs WordPress](/ko/emdash-vs-wordpress/)를 읽어보세요.
+
+## 시작하기 전에
+
+<CardGrid>
+	<Card title="콘텐츠 내보내기" icon="document">
+		WordPress에서 **도구 → 내보내기**로 이동하여 완전한 내보내기 파일(.xml)을 다운로드하세요.
+	</Card>
+	<Card title="사이트 백업" icon="warning">
+		마이그레이션이 성공했는지 확인할 때까지 WordPress 사이트를 계속 실행하세요.
+	</Card>
+</CardGrid>
+
+## 가져오기 방법
+
+EmDash는 WordPress 콘텐츠를 가져오는 세 가지 방법을 지원합니다:
+
+| 방법           | 최적의 용도                       | 초안 포함 | 인증 필요 |
+| ---------------- | ------------------------------ | --------------- | ------------- |
+| WXR 파일 업로드  | 완전한 마이그레이션            | 예             | 아니오            |
+| WordPress.com    | WordPress.com 호스팅 사이트     | 예             | OAuth         |
+| REST API (탐색) | 내보내기 전 콘텐츠 확인 | 아니오              | 선택 사항      |
+
+WXR 파일 업로드는 대부분의 마이그레이션에 권장됩니다. 초안, 사용자 정의 필드 및 비공개 게시물을 포함한 모든 콘텐츠를 캡처합니다.
+
+## WXR 파일 가져오기
+
+<Steps>
+
+1. **WordPress에서 내보내기**
+
+   WordPress 관리자에서 **도구 → 내보내기 → 모든 콘텐츠 → 내보내기 파일 다운로드**로 이동하세요.
+
+2. **가져오기 마법사 열기**
+
+   EmDash에서 **관리자 → 설정 → 가져오기 → WordPress**로 이동하세요.
+
+3. **내보내기 파일 업로드**
+
+   `.xml` 파일을 끌어다 놓거나 클릭하여 탐색하세요. 파일은 브라우저에서 구문 분석됩니다.
+
+4. **감지된 콘텐츠 검토**
+
+   마법사에서 발견된 내용을 표시합니다:
+
+   ```
+   Found in export:
+   ├── Posts: 127 → posts [New collection]
+   ├── Pages: 12  → pages [Add fields]
+   └── Media: 89 attachments
+   ```
+
+5. **매핑 구성**
+
+   가져올 게시물 유형을 토글하세요. EmDash는 자동으로:
+   - 매핑되지 않은 게시물 유형에 대해 새 컬렉션을 생성합니다
+   - 기존 컬렉션에 누락된 필드를 추가합니다
+   - 필드 유형 충돌에 대해 경고합니다
+
+6. **가져오기 실행**
+
+   **콘텐츠 가져오기**를 클릭하세요. 각 항목이 처리될 때 진행 상황이 표시됩니다.
+
+7. **미디어 가져오기 (선택 사항)**
+
+   콘텐츠 가져오기 후, 미디어 파일을 다운로드할지 선택하세요. EmDash는:
+   - WordPress URL에서 다운로드합니다
+   - 콘텐츠 해시로 중복 제거합니다
+   - 콘텐츠 내 URL을 자동으로 다시 작성합니다
+
+</Steps>
+
+<Aside type="tip">
+	가져오기를 다시 실행해도 안전합니다. 항목은 WordPress ID로 매칭되므로 중복이 생성되지 않습니다.
+</Aside>
+
+## 콘텐츠 변환
+
+### Gutenberg에서 Portable Text로
+
+EmDash는 Gutenberg 블록을 구조화된 콘텐츠 형식인 [Portable Text](https://github.com/portabletext/portabletext)로 변환합니다.
+
+| Gutenberg 블록  | Portable Text                | 참고                         |
+| ---------------- | ---------------------------- | ----------------------------- |
+| `core/paragraph` | `block` style="normal"       | 인라인 마크가 보존됨        |
+| `core/heading`   | `block` style="h1-h6"        | 블록 속성에서 레벨 가져옴   |
+| `core/image`     | `image` block                | 미디어 참조가 업데이트됨       |
+| `core/list`      | `block` with `listItem` type | 순서 있음 및 순서 없음         |
+| `core/quote`     | `block` style="blockquote"   | 인용문 포함됨             |
+| `core/code`      | `code` block                 | 언어 속성이 보존됨  |
+| `core/embed`     | `embed` block                | URL 및 공급자가 저장됨       |
+| `core/gallery`   | `gallery` block              | 이미지 참조 배열     |
+| `core/columns`   | `columns` block              | 중첩된 콘텐츠가 보존됨      |
+| 알 수 없는 블록   | `htmlBlock`                  | 원본 HTML이 검토를 위해 보존됨 |
+
+알 수 없는 블록은 원본 HTML 및 블록 메타데이터와 함께 `htmlBlock`으로 저장됩니다. 이를 수동으로 검토하고 변환하거나, 사용자 정의 Portable Text 컴포넌트를 생성하여 렌더링할 수 있습니다.
+
+### 클래식 편집기 콘텐츠
+
+클래식 편집기의 HTML은 Portable Text 블록으로 변환됩니다. 인라인 스타일(`<strong>`, `<em>`, `<a>`)은 스팬의 마크가 됩니다.
+
+### 상태 매핑
+
+| WordPress 상태 | EmDash 상태 |
+| ---------------- | --------------- |
+| `publish`        | `published`     |
+| `draft`          | `draft`         |
+| `pending`        | `pending`       |
+| `private`        | `private`       |
+| `future`         | `scheduled`     |
+| `trash`          | `archived`      |
+
+## 분류 가져오기
+
+카테고리와 태그는 계층 구조가 보존된 상태로 분류로 가져옵니다:
+
+```
+WordPress:                    EmDash:
+├── Categories (hierarchical) ├── taxonomies table
+│   ├── News                  │   ├── category/news
+│   │   ├── Local             │   ├── category/local (parent: news)
+│   │   └── World             │   ├── category/world (parent: news)
+│   └── Sports                │   └── category/sports
+└── Tags (flat)               └── content_taxonomies junction
+    ├── featured                  ├── tag/featured
+    └── breaking                  └── tag/breaking
+```
+
+## 사용자 정의 필드 및 ACF
+
+WordPress 게시물 메타 및 ACF 필드는 가져오기 중에 분석됩니다:
+
+<Steps>
+
+1. **분석 단계**
+
+   마법사는 사용자 정의 필드를 감지하고 EmDash 필드 유형을 제안합니다:
+
+   ```
+   Custom Fields:
+   ├── subtitle (string, 45 posts)
+   ├── _yoast_wpseo_title → seo.title (string, 127 posts)
+   ├── _thumbnail_id → featuredImage (reference, 89 posts)
+   └── price (number, 23 posts)
+   ```
+
+2. **필드 매핑**
+
+   내부 WordPress 필드(`_edit_`, `_wp_`로 시작)는 기본적으로 숨겨집니다. SEO 플러그인 필드는 `seo` 객체에 매핑됩니다.
+
+3. **유형 추론**
+
+   EmDash는 값에서 필드 유형을 추론합니다:
+   - 숫자 문자열 → `number`
+   - `"1"`, `"0"`, `"true"`, `"false"` → `boolean`
+   - ISO 날짜 → `date`
+   - 직렬화된 PHP/JSON → `json`
+   - WordPress ID (예: `_thumbnail_id`) → `reference`
+
+</Steps>
+
+<Aside>
+	ACF 반복자 필드 및 유연한 콘텐츠는 JSON으로 가져옵니다. 이 데이터를 구조화하려면 EmDash에서 일치하는 Portable Text 또는 배열
+	필드를 생성하세요.
+</Aside>
+
+## URL 리디렉션
+
+가져오기 후, EmDash는 리디렉션 맵을 생성합니다:
+
+```json
+{
+	"redirects": [
+		{ "from": "/?p=123", "to": "/posts/hello-world" },
+		{ "from": "/2024/01/hello-world/", "to": "/posts/hello-world" },
+		{ "from": "/category/news/", "to": "/categories/news" }
+	],
+	"feeds": [
+		{ "from": "/feed/", "to": "/rss.xml" },
+		{ "from": "/feed/atom/", "to": "/atom.xml" }
+	]
+}
+```
+
+이 리디렉션을 다음에 적용하세요:
+
+- Cloudflare 리디렉션 규칙
+- 호스팅 플랫폼의 리디렉션 구성
+- `astro.config.mjs`의 Astro `redirects` 옵션
+
+## 개념 매핑 참조
+
+WordPress 패턴을 EmDash에 적용할 때 이 표를 사용하세요:
+
+| WordPress               | EmDash                             | Notes                          |
+| ----------------------- | ------------------------------------ | ------------------------------ |
+| `register_post_type()`  | 관리자 UI의 컬렉션               | 대시보드 또는 API를 통해 생성   |
+| `register_taxonomy()`   | 분류 체계 또는 배열 필드              | 복잡성에 따라 다름          |
+| `register_meta()`       | 컬렉션 스키마의 필드           | 키-값이 아닌 유형 지정           |
+| `WP_Query`              | `getCollection(filters)`             | 런타임 쿼리                |
+| `get_post()`            | `getEntry(collection, id)`           | 항목 또는 null 반환          |
+| `wp_insert_post()`      | `POST /_emdash/api/content/{type}` | REST API                       |
+| `the_content`           | `<PortableText value={...} />`       | Portable Text 렌더링        |
+| `add_shortcode()`       | Portable Text 사용자 정의 블록           | 사용자 정의 컴포넌트 렌더러      |
+| `register_block_type()` | Portable Text 사용자 정의 블록           | 단축 코드와 동일             |
+| `add_menu_page()`       | 플러그인 관리자 페이지                    | `/_emdash/admin/` 아래      |
+| `add_action/filter()`   | 플러그인 훅                         | `hooks.content:beforeSave`     |
+| `wp_options`            | `ctx.kv`                             | 키-값 저장소                |
+| `wp_postmeta`           | 컬렉션 필드                    | 키-값이 아닌 구조화된 데이터      |
+| `$wpdb`                 | `ctx.storage`                        | 직접 저장소 접근          |
+| 카테고리/태그         | 분류 체계                           | 계층적 지원 유지 |
+
+## API 가져오기 (고급)
+
+WordPress 가져오기는 관리자 대시보드와 REST API를 통해 사용할 수 있습니다. 최상의 경험을 위해 관리자 대시보드 가져오기 마법사를 사용하세요 — 필드 매핑, 충돌 해결 및 진행 상황 추적을 제공합니다.
+
+가져오기 API 엔드포인트는 프로그래밍 방식 접근을 위해 `/_emdash/api/import/wordpress/` 아래에 있습니다.
+
+## 문제 해결
+
+### "XML 구문 분석 오류"
+
+내보내기 파일이 손상되었거나 불완전할 수 있습니다. WordPress에서 다시 내보내세요.
+
+### 미디어 다운로드 실패
+
+일부 이미지는 인증 뒤에 있거나 이동했을 수 있습니다. 가져오기는 계속되며, 실패한 URL은 수동 처리용으로 기록됩니다.
+
+### 필드 유형 충돌
+
+기존 컬렉션에 호환되지 않는 유형의 필드가 있는 경우, 가져오기 마법사가 충돌을 표시합니다. 다음 중 하나를 선택하세요:
+
+- EmDash 필드 이름 변경
+- WordPress 필드 매핑 변경
+- 컬렉션 삭제 및 재생성
+
+### 대용량 내보내기
+
+100MB 이상의 내보내기 파일의 경우 다음을 고려하세요:
+
+1. WordPress에서 게시물 유형을 별도로 내보내기
+2. 각 파일을 순차적으로 가져오기
+3. 안정성을 위해 `--resume` 옵션과 함께 CLI 사용
+
+## 다음 단계
+
+- **[콘텐츠 가져오기](/ko/migration/content-import/)** — 다른 가져오기 소스 및 방법
+- **[플러그인 이식](/ko/migration/plugin-porting/)** — WordPress 플러그인 기능 마이그레이션
+- **[콘텐츠 작업하기](/ko/guides/working-with-content/)** — 가져온 콘텐츠 쿼리 및 렌더링

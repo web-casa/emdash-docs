@@ -1,0 +1,246 @@
+---
+title: Opções de Armazenamento
+description: Configure o armazenamento de mídia com R2, S3 ou sistema de arquivos local.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+O EmDash armazena mídias enviadas (imagens, documentos, vídeos) em um backend de armazenamento configurável. Escolha com base na sua plataforma de implantação e requisitos.
+
+## Visão Geral
+
+| Armazenamento   | Melhor Para          | Recursos                     |
+| ---------------- | -------------------- | ---------------------------- |
+| **R2 Binding**   | Cloudflare Workers   | Zero-config, rápido          |
+| **S3**           | Qualquer plataforma  | Uploads assinados, suporte a CDN |
+| **Local**        | Desenvolvimento      | Armazenamento simples no sistema de arquivos |
+
+## Cloudflare R2 (Binding)
+
+Use R2 bindings ao implantar no Cloudflare Workers para a integração mais rápida.
+
+```js title="astro.config.mjs"
+import emdash from "emdash/astro";
+import { r2 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			storage: r2({ binding: "MEDIA" }),
+		}),
+	],
+});
+```
+
+### Configuração
+
+| Opção        | Tipo      | Descrição                                |
+| ------------- | --------- | ---------------------------------------- |
+| `binding`     | `string`  | Nome do binding R2 do `wrangler.jsonc`   |
+| `publicUrl`   | `string`  | URL pública opcional para o bucket       |
+
+### Configuração
+
+Adicione o binding R2 à sua configuração do Wrangler:
+
+<Tabs>
+  <TabItem label="wrangler.jsonc">
+    ```jsonc
+    {
+      "r2_buckets": [
+        {
+          "binding": "MEDIA",
+          "bucket_name": "emdash-media"
+        }
+      ]
+    }
+    ```
+  </TabItem>
+  <TabItem label="wrangler.toml">
+    ```toml
+    [[r2_buckets]]
+    binding = "MEDIA"
+    bucket_name = "emdash-media"
+    ```
+  </TabItem>
+</Tabs>
+
+### Acesso Público
+
+Para URLs públicas de mídia, habilite o acesso público no seu bucket R2:
+
+1. Vá para Cloudflare Dashboard > R2 > seu bucket
+2. Habilite o acesso público em Configurações
+3. Adicione a URL pública à sua configuração:
+
+```js
+storage: r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev",
+});
+```
+
+<Aside type="tip">
+	Conecte um domínio personalizado ao R2 para URLs personalizadas como `https://media.example.com`.
+</Aside>
+
+<Aside type="note">
+	R2 bindings não suportam URLs de upload assinadas. Se você precisa de uploads diretos do cliente, use o adaptador
+	S3 com credenciais R2 em vez disso.
+</Aside>
+
+## Armazenamento Compatível com S3
+
+O adaptador S3 funciona com Cloudflare R2 (via API S3), MinIO e outros serviços compatíveis com S3.
+
+```
+js title="astro.config.mjs"
+import emdash, { s3 } from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			storage: s3({
+				endpoint: process.env.S3_ENDPOINT,
+				bucket: process.env.S3_BUCKET,
+				accessKeyId: process.env.S3_ACCESS_KEY_ID,
+				secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+				region: "auto", // Optional, defaults to "auto"
+				publicUrl: process.env.S3_PUBLIC_URL, // Optional CDN URL
+			}),
+		}),
+	],
+});
+```
+
+### Configuração
+
+| Opção              | Tipo      | Descrição                     |
+| ------------------- | --------- | ----------------------------- |
+| `endpoint`          | `string`  | URL do endpoint S3            |
+| `bucket`            | `string`  | Nome do bucket                |
+| `accessKeyId`       | `string`  | Chave de acesso               |
+| `secretAccessKey`   | `string`  | Chave secreta                 |
+| `region`            | `string`  | Região (padrão: `"auto"`)     |
+| `publicUrl`         | `string`  | URL pública ou de CDN opcional |
+
+### R2 via API S3
+
+Use credenciais S3 com o R2 para recursos como URLs de upload assinadas:
+
+```js
+storage: s3({
+	endpoint: "https://<account-id>.r2.cloudflarestorage.com",
+	bucket: "emdash-media",
+	accessKeyId: process.env.R2_ACCESS_KEY_ID,
+	secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+	publicUrl: "https://pub-xxxx.r2.dev",
+});
+```
+
+Gere credenciais da API R2 no painel do Cloudflare em R2 > Gerenciar Tokens da API R2.
+
+### MinIO
+
+```js
+storage: s3({
+	endpoint: "https://minio.example.com",
+	bucket: "emdash-media",
+	accessKeyId: process.env.MINIO_ACCESS_KEY,
+	secretAccessKey: process.env.MINIO_SECRET_KEY,
+	publicUrl: "https://minio.example.com/emdash-media",
+});
+```
+
+## Sistema de Arquivos Local
+
+Use armazenamento local para desenvolvimento. Os arquivos são armazenados em um diretório no disco.
+
+```
+js title="astro.config.mjs"
+import emdash, { local } from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+### Configuração
+
+| Opção        | Tipo      | Descrição                          |
+| ------------- | --------- | ---------------------------------- |
+| `directory`   | `string`  | Caminho do diretório para armazenamento de arquivos |
+| `baseUrl`     | `string`  | URL base para servir os arquivos   |
+
+O `baseUrl` deve corresponder ao endpoint de arquivos de mídia do EmDash (`/_emdash/api/media/file`) a menos que você configure um servidor de arquivos estáticos personalizado.
+
+<Aside type="caution">
+	O armazenamento local não suporta URLs de upload assinadas. Os arquivos são enviados através do servidor, o que
+	pode ser mais lento para arquivos grandes.
+</Aside>
+
+## Configuração Baseada em Ambiente
+
+Altere os backends de armazenamento com base no ambiente:
+
+```
+js title="astro.config.mjs"
+import emdash, { s3, local } from "emdash/astro";
+import { r2 } from "@emdash-cms/cloudflare";
+
+const storage = import.meta.env.PROD
+	? r2({ binding: "MEDIA" })
+	: local({
+			directory: "./uploads",
+			baseUrl: "/_emdash/api/media/file",
+		});
+
+export default defineConfig({
+	integrations: [emdash({ storage })],
+});
+```
+
+## Uploads Assinados
+
+O adaptador S3 suporta URLs de upload assinadas, permitindo que os clientes enviem diretamente para o armazenamento sem passar pelo seu servidor. Isso melhora o desempenho para arquivos grandes.
+
+Os uploads assinados são automáticos ao usar o adaptador S3. A interface administrativa os usa quando disponíveis.
+
+Adaptadores que suportam uploads assinados:
+
+- **S3** (incluindo R2 via API S3)
+
+Adaptadores que não suportam uploads assinados:
+
+- **R2 binding** (use o adaptador S3 com credenciais R2 em vez disso)
+- **Local**
+
+## Interface de Armazenamento
+
+Todos os adaptadores de armazenamento implementam a mesma interface:
+
+```typescript
+interface Storage {
+	upload(options: {
+		key: string;
+		body: Buffer | Uint8Array | ReadableStream;
+		contentType: string;
+	}): Promise<UploadResult>;
+
+	download(key: string): Promise<DownloadResult>;
+	delete(key: string): Promise<void>;
+	exists(key: string): Promise<boolean>;
+	list(options?: ListOptions): Promise<ListResult>;
+	getSignedUploadUrl(options: SignedUploadOptions): Promise<SignedUploadUrl>;
+	getPublicUrl(key: string): string;
+}
+```
+
+Essa consistência permite alternar os backends de armazenamento sem alterar o código do aplicativo.

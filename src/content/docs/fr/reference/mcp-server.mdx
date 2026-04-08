@@ -1,0 +1,566 @@
+---
+title: Référence du serveur MCP
+description: Détails du protocole, spécifications des outils et configuration OAuth pour le serveur MCP.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash inclut un serveur [Model Context Protocol](https://modelcontextprotocol.io) (MCP) intégré à l'adresse `/_emdash/api/mcp` qui expose les opérations de gestion de contenu en tant qu'outils pour les assistants IA.
+
+<Aside>
+	Vous souhaitez connecter Claude, ChatGPT ou un autre outil d'IA à votre site ? Consultez le [guide des outils d'IA](/fr/guides/ai-tools) pour les instructions de configuration et les conseils d'utilisation.
+</Aside>
+
+Cette page couvre les détails du protocole : authentification, transport, spécifications des outils, découverte OAuth et gestion des erreurs.
+
+## Authentification
+
+Le serveur MCP prend en charge trois méthodes d'authentification :
+
+| Méthode | Fonctionnement |
+| --- | --- |
+| **OAuth 2.1 Authorization Code + PKCE** | Flux standard pour les clients MCP. L'utilisateur approuve les scopes dans le navigateur. |
+| **Personal Access Token (PAT)** | Jetons de longue durée `ec_pat_*` créés dans le panneau d'administration. |
+| **Device Flow** | Flux de type CLI où vous approuvez un code dans le navigateur. Utilisé par `emdash login`. |
+
+Les cookies de session (depuis l'interface d'administration) fonctionnent également mais ne sont pas pratiques pour les clients MCP externes.
+
+### Scopes
+
+Les jetons sont limités par des scopes pour restreindre les opérations qu'un client peut effectuer. Les scopes sont demandés lors de l'autorisation OAuth et appliqués à chaque appel d'outil.
+
+| Scope | Accorde l'accès à |
+| --- | --- |
+| `content:read` | Lister, obtenir, comparer et rechercher du contenu. Lister les termes de taxonomie et les menus. |
+| `content:write` | Créer, mettre à jour, supprimer, publier, dépublier, planifier, dupliquer et restaurer du contenu. Créer des termes de taxonomie. |
+| `media:read` | Lister et obtenir les éléments multimédias. |
+| `media:write` | Mettre à jour et supprimer les métadonnées multimédias. |
+| `schema:read` | Lister les collections et obtenir les schémas de collection. |
+| `schema:write` | Créer et supprimer des collections et des champs. |
+| `admin` | Accès complet à toutes les opérations. |
+
+Le scope `admin` accorde l'accès à tout. L'authentification basée sur les sessions (sans jeton) a également un accès complet basé sur le rôle de l'utilisateur.
+
+### Exigences de rôle
+
+En plus des scopes, certains outils nécessitent un rôle RBAC minimum :
+
+| Opération | Rôle minimum |
+| --- | --- |
+| Opérations sur le contenu | Aucun minimum (les scopes contrôlent l'accès) |
+| Lecture du schéma | Éditeur (40) |
+| Écriture du schéma | Administrateur (50) |
+
+Voir le [guide d'authentification](/fr/guides/authentication#user-roles) pour les définitions des rôles.
+
+## Transport
+
+Le serveur utilise le transport HTTP Streamable en **mode sans état**. Chaque requête est indépendante — il n'y a pas de sessions ni de connexions de longue durée.
+
+- **`POST /_emdash/api/mcp`** -- Envoyer des appels d'outils JSON-RPC
+- **`GET /_emdash/api/mcp`** -- Retourne 405 (pas de SSE en mode sans état)
+- **`DELETE /_emdash/api/mcp`** -- Retourne 405 (pas de session à fermer)
+
+Les réponses suivent le format [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Les erreurs utilisent les codes d'erreur standard JSON-RPC, avec des codes spécifiques MCP pour les échecs de scope et de permissions.
+
+## Outils
+
+Le serveur expose 33 outils répartis en sept domaines. Chaque outil retourne les résultats sous forme de contenu texte JSON, ou un message d'erreur avec `isError: true` en cas d'échec.
+
+### Outils de contenu
+
+#### `content_list`
+
+Lister les éléments de contenu d'une collection avec filtrage et pagination optionnels.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Slug de la collection (ex. `posts`, `pages`) |
+| `status` | `string` | Non | Filtre : `draft`, `published`, ou `scheduled` |
+| `limit` | `integer` | Non | Nombre maximum d'éléments à retourner (1-100, par défaut 50) |
+| `cursor` | `string` | Non | Curseur de pagination d'une réponse précédente |
+| `orderBy` | `string` | Non | Champ de tri (ex. `created_at`, `updated_at`) |
+| `order` | `string` | Non | Direction du tri : `asc` ou `desc` (par défaut `desc`) |
+| `locale` | `string` | Non | Filtrer par locale (ex. `en`, `fr`). Pertinent uniquement avec i18n. |
+
+**Scope :** `content:read` | **Lecture seule :** Oui
+
+#### `content_get`
+
+Obtenir un seul élément de contenu par ID ou slug. Retourne toutes les valeurs de champ, les métadonnées et un jeton `_rev` pour le contrôle de concurrence optimiste.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Slug de la collection |
+| `id` | `string` | Oui | ID de l'élément de contenu (ULID) ou slug |
+| `locale` | `string` | Non | Locale pour la recherche par slug. Les ID sont globalement uniques. |
+
+**Scope :** `content:read` | **Lecture seule :** Oui
+
+<Aside>
+	Le jeton `_rev` dans la réponse est utilisé pour la détection de conflits. Transmettez-le lors de la mise à jour pour vous assurer que personne d'autre n'a modifié l'élément depuis votre lecture.
+</Aside>
+
+#### `content_create`
+
+Créer un nouvel élément de contenu. L'objet `data` doit contenir les valeurs de champ correspondant au schéma de la collection — utilisez `schema_get_collection` pour vérifier les champs disponibles. Les éléments sont créés en tant que `draft` par défaut.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Slug de la collection |
+| `data` | `object` | Oui | Valeurs de champ sous forme de paires clé-valeur |
+| `slug` | `string` | Non | Slug d'URL (généré automatiquement à partir du titre si omis) |
+| `status` | `string` | Non | Statut initial : `draft` ou `published` (par défaut `draft`) |
+| `locale` | `string` | Non | Locale pour ce contenu (par défaut la locale par défaut du site) |
+| `translationOf` | `string` | Non | ID de l'élément dont ceci est une traduction |
+
+**Scope :** `content:write`
+
+#### `content_update`
+
+Mettre à jour un élément de contenu existant. Incluez uniquement les champs que vous souhaitez modifier — les champs non spécifiés restent inchangés.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Slug de la collection |
+| `id` | `string` | Oui | ID de l'élément de contenu ou slug |
+| `data` | `object` | Non | Valeurs de champ à mettre à jour |
+| `slug` | `string` | Non | Nouveau slug d'URL |
+| `status` | `string` | Non | Nouveau statut : `draft` ou `published` |
+| `_rev` | `string` | Non | Jeton de révision de `content_get` pour la détection de conflits |
+
+**Scope :** `content:write`
+
+#### `content_delete`
+
+Supprimer de manière réversible un élément de contenu en le déplaçant vers la corbeille. Utilisez `content_restore` pour annuler, ou `content_permanent_delete` pour le supprimer définitivement.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Slug de la collection |
+| `id` | `string` | Oui | ID de l'élément de contenu ou slug |
+
+**Scope :** `content:write` | **Destructif :** Oui
+
+#### `content_restore`
+
+Restaurer un élément de contenu supprimé de manière réversible depuis la corbeille.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `id` | `string` | Oui | ID ou identifiant de l'élément de contenu |
+
+**Portée :** `content:write`
+
+#### `content_permanent_delete`
+
+Supprimer définitivement et irréversiblement un élément de contenu mis à la corbeille. L'élément doit d'abord être dans la corbeille.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `id` | `string` | Oui | ID ou identifiant de l'élément de contenu |
+
+**Portée :** `content:write` | **Destructif :** Oui
+
+#### `content_publish`
+
+Publier un élément de contenu, le rendant visible sur le site. Crée une révision publiée à partir du brouillon actuel. Les modifications ultérieures créent un nouveau brouillon sans affecter la version en ligne jusqu'à une nouvelle publication.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `id` | `string` | Oui | ID ou identifiant de l'élément de contenu |
+
+**Portée :** `content:write`
+
+#### `content_unpublish`
+
+Revenir à l'état de brouillon pour un élément publié. Il ne sera plus visible sur le site en ligne mais son contenu est conservé.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `id` | `string` | Oui | ID ou identifiant de l'élément de contenu |
+
+**Portée :** `content:write`
+
+#### `content_schedule`
+
+Planifier un élément de contenu pour une publication future. Il sera automatiquement publié à la date/heure spécifiée.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `id` | `string` | Oui | ID ou identifiant de l'élément de contenu |
+| `scheduledAt` | `string` | Oui | Date et heure au format ISO 8601 (ex. `2026-06-01T09:00:00Z`) |
+
+**Portée :** `content:write`
+
+#### `content_compare`
+
+Comparer la version publiée (en ligne) d'un élément de contenu avec son brouillon actuel. Retourne les deux versions et un indicateur signalant s'il y a des différences.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `id` | `string` | Oui | ID ou identifiant de l'élément de contenu |
+
+**Portée :** `content:read` | **Lecture seule :** Oui
+
+#### `content_discard_draft`
+
+Supprimer le brouillon actuel et revenir à la dernière version publiée. Fonctionne uniquement sur les éléments qui ont été publiés au moins une fois.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `id` | `string` | Oui | ID ou identifiant de l'élément de contenu |
+
+**Portée :** `content:write` | **Destructif :** Oui
+
+#### `content_list_trashed`
+
+Lister les éléments de contenu supprimés de manière réversible dans la corbeille d'une collection.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `limit` | `integer` | Non | Nombre maximum d'éléments (1-100, par défaut 50) |
+| `cursor` | `string` | Non | Curseur de pagination |
+
+**Portée :** `content:read` | **Lecture seule :** Oui
+
+#### `content_duplicate`
+
+Créer une copie d'un élément de contenu existant. Le duplicata est créé en tant que brouillon avec "(Copie)" ajouté au titre et un identifiant généré automatiquement.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `id` | `string` | Oui | ID ou identifiant de l'élément de contenu à dupliquer |
+
+**Portée :** `content:write`
+
+#### `content_translations`
+
+Obtenir toutes les variantes linguistiques d'un élément de contenu. Retourne le groupe de traduction et un résumé de chaque version linguistique. Pertinent uniquement lorsque l'i18n est activé.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `id` | `string` | Oui | ID ou identifiant de l'élément de contenu |
+
+**Portée :** `content:read` | **Lecture seule :** Oui
+
+### Outils de Schéma
+
+<Aside type="caution">
+	Les outils de schéma modifient la structure de la base de données. La création ou la suppression de collections et de champs modifie les tables sous-jacentes. Ces opérations nécessitent le rôle Administrateur.
+</Aside>
+
+#### `schema_list_collections`
+
+Lister toutes les collections de contenu définies dans le CMS. Retourne l'identifiant, le libellé, les fonctionnalités prises en charge et les horodatages.
+
+**Aucun paramètre.**
+
+**Portée :** `schema:read` | **Rôle minimum :** Éditeur | **Lecture seule :** Oui
+
+#### `schema_get_collection`
+
+Obtenir des informations détaillées sur une collection, y compris toutes les définitions de champs. Les champs décrivent le modèle de contenu : nom, type, contraintes et règles de validation. Utilisez ceci pour comprendre ce que `content_create` et `content_update` attendent.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `slug` | `string` | Oui | Identifiant de la collection (ex. `posts`) |
+
+**Portée :** `schema:read` | **Rôle minimum :** Éditeur | **Lecture seule :** Oui
+
+#### `schema_create_collection`
+
+Créer une nouvelle collection de contenu. Cela crée une table de base de données et une définition de schéma. L'identifiant doit être alphanumérique en minuscules avec des tirets bas, commençant par une lettre.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `slug` | `string` | Oui | Identifiant unique (`/^[a-z][a-z0-9_]*$/`) |
+| `label` | `string` | Oui | Nom d'affichage (pluriel, ex. "Articles de blog") |
+| `labelSingular` | `string` | Non | Nom d'affichage au singulier |
+| `description` | `string` | Non | Description de cette collection |
+| `icon` | `string` | Non | Nom de l'icône pour l'interface d'administration |
+| `supports` | `string[]` | Non | Fonctionnalités : `drafts`, `revisions`, `preview`, `scheduling`, `search` (par défaut : `['drafts', 'revisions']`) |
+
+**Portée :** `schema:write` | **Rôle minimum :** Administrateur
+
+#### `schema_delete_collection`
+
+Supprimer une collection et sa table de base de données. Cette action est irréversible et supprime tout le contenu de la collection.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `slug` | `string` | Oui | Identifiant de la collection à supprimer |
+| `force` | `boolean` | Non | Forcer la suppression même si la collection contient du contenu |
+
+**Portée :** `schema:write` | **Rôle minimum :** Administrateur | **Destructif :** Oui
+
+#### `schema_create_field`
+
+Ajouter un nouveau champ au schéma d'une collection. Cela ajoute une colonne à la table de la base de données.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `slug` | `string` | Oui | Identifiant du champ (`/^[a-z][a-z0-9_]*$/`) |
+| `label` | `string` | Oui | Nom d'affichage |
+| `type` | `string` | Oui | Type de données (voir ci-dessous) |
+| `required` | `boolean` | Non | Indique si le champ est obligatoire |
+| `unique` | `boolean` | Non | Indique si les valeurs doivent être uniques |
+| `defaultValue` | `any` | Non | Valeur par défaut pour les nouveaux éléments |
+| `validation` | `object` | Non | Contraintes : `min`, `max`, `minLength`, `maxLength`, `pattern`, `options` |
+| `options` | `object` | Non | Configuration du widget : `collection` (pour les références), `rows` (pour textarea) |
+| `searchable` | `boolean` | Non | Inclure dans l'index de recherche en texte intégral |
+| `translatable` | `boolean` | Non | Indique si ce champ est traduisible (par défaut : vrai) |
+
+Types de champs : `string`, `text`, `number`, `integer`, `boolean`, `datetime`, `select`, `multiSelect`, `portableText`, `image`, `file`, `reference`, `json`, `slug`.
+
+Pour les types `select` et `multiSelect`, fournissez les valeurs autorisées dans `validation.options`.
+
+**Portée :** `schema:write` | **Rôle minimum :** Admin
+
+#### `schema_delete_field`
+
+Supprime un champ d'une collection. Cela supprime la colonne et toutes les données de ce champ. Irréversible.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `fieldSlug` | `string` | Oui | Identifiant du champ à supprimer |
+
+**Portée :** `schema:write` | **Rôle minimum :** Admin | **Destructif :** Oui
+
+### Outils Médias
+
+#### `media_list`
+
+Liste les fichiers multimédias téléchargés avec filtrage optionnel par type MIME et pagination.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `mimeType` | `string` | Non | Filtrer par préfixe de type MIME (ex. `image/`, `application/pdf`) |
+| `limit` | `integer` | Non | Nombre maximum d'éléments (1-100, par défaut 50) |
+| `cursor` | `string` | Non | Curseur de pagination |
+
+**Portée :** `media:read` | **Lecture seule :** Oui
+
+#### `media_get`
+
+Obtient les détails d'un seul fichier multimédia par ID. Retourne les métadonnées incluant le nom de fichier, le type MIME, la taille, les dimensions, le texte alternatif et l'URL.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | Oui | ID de l'élément multimédia |
+
+**Portée :** `media:read` | **Lecture seule :** Oui
+
+#### `media_update`
+
+Met à jour les métadonnées d'un fichier multimédia téléchargé. Le fichier lui-même ne peut pas être modifié.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | Oui | ID de l'élément multimédia |
+| `alt` | `string` | Non | Texte alternatif pour l'accessibilité |
+| `caption` | `string` | Non | Texte de légende |
+| `width` | `integer` | Non | Largeur de l'image en pixels |
+| `height` | `integer` | Non | Hauteur de l'image en pixels |
+
+**Portée :** `media:write`
+
+#### `media_delete`
+
+Supprime définitivement un fichier multimédia. Supprime l'enregistrement de la base de données et le fichier du stockage. Les contenus référençant ce média auront des références cassées.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | Oui | ID de l'élément multimédia |
+
+**Portée :** `media:write` | **Destructif :** Oui
+
+### Outil de Recherche
+
+#### `search`
+
+Recherche en texte intégral dans les collections de contenu. Les collections doivent avoir `search` dans leur liste `supports` et les champs doivent être marqués comme `searchable`.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `query` | `string` | Oui | Texte de la requête de recherche |
+| `collections` | `string[]` | Non | Limiter la recherche à des identifiants de collections spécifiques |
+| `locale` | `string` | Non | Filtrer les résultats par langue |
+| `limit` | `integer` | Non | Nombre maximum de résultats (1-50, par défaut 20) |
+
+**Portée :** `content:read` | **Lecture seule :** Oui
+
+### Outils de Taxonomie
+
+#### `taxonomy_list`
+
+Liste toutes les définitions de taxonomie (ex. catégories, étiquettes). Retourne le nom, le libellé, l'indicateur hiérarchique et les collections associées.
+
+**Aucun paramètre.**
+
+**Portée :** `content:read` | **Lecture seule :** Oui
+
+#### `taxonomy_list_terms`
+
+Liste les termes d'une taxonomie avec pagination.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `taxonomy` | `string` | Oui | Nom de la taxonomie (ex. `categories`, `tags`) |
+| `limit` | `integer` | Non | Nombre maximum d'éléments (1-100, par défaut 50) |
+| `cursor` | `string` | Non | Curseur de pagination |
+
+**Portée :** `content:read` | **Lecture seule :** Oui
+
+#### `taxonomy_create_term`
+
+Crée un nouveau terme dans une taxonomie. Pour les taxonomies hiérarchiques, spécifiez un `parentId` pour créer un terme enfant.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `taxonomy` | `string` | Oui | Nom de la taxonomie |
+| `slug` | `string` | Oui | Identifiant adapté aux URL |
+| `label` | `string` | Oui | Nom d'affichage |
+| `parentId` | `string` | Non | ID du terme parent (pour les taxonomies hiérarchiques) |
+| `description` | `string` | Non | Description du terme |
+
+**Portée :** `content:write`
+
+### Outils de Menu
+
+#### `menu_list`
+
+Liste tous les menus de navigation. Retourne le nom, le libellé et les horodatages.
+
+**Aucun paramètre.**
+
+**Portée :** `content:read` | **Lecture seule :** Oui
+
+#### `menu_get`
+
+Obtient un menu par son nom, incluant tous ses éléments dans l'ordre. Les éléments ont un libellé, une URL, un type et un parent optionnel pour l'imbrication.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | Oui | Nom du menu (ex. `main`, `footer`) |
+
+**Portée :** `content:read` | **Lecture seule :** Oui
+
+### Outils de Révision
+
+#### `revision_list`
+
+Liste l'historique des révisions pour un élément de contenu, du plus récent au plus ancien. Nécessite que la collection prenne en charge `revisions`.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `collection` | `string` | Oui | Identifiant de la collection |
+| `id` | `string` | Oui | ID ou identifiant de l'élément de contenu |
+| `limit` | `integer` | Non | Nombre maximum de révisions (1-50, par défaut 20) |
+
+**Portée :** `content:read` | **Lecture seule :** Oui
+
+#### `revision_restore`
+
+Restaure un élément de contenu à une révision précédente. Remplace le brouillon actuel par les données de la révision spécifiée. Non publié automatiquement — utilisez `content_publish` par la suite si nécessaire.
+
+| Paramètre | Type | Requis | Description |
+| --- | --- | --- | --- |
+| `revisionId` | `string` | Oui | ID de la révision à restaurer |
+
+**Portée :** `content:write`
+
+## Découverte OAuth
+
+Les clients MCP qui prennent en charge OAuth 2.1 peuvent découvrir automatiquement comment s'authentifier. Le serveur publie deux documents de métadonnées :
+
+### Métadonnées de la ressource protégée
+
+```http
+GET /.well-known/oauth-protected-resource
+```
+
+```json
+{
+  "resource": "https://example.com/_emdash/api/mcp",
+  "authorization_servers": ["https://example.com/_emdash"],
+  "scopes_supported": [
+    "content:read", "content:write",
+    "media:read", "media:write",
+    "schema:read", "schema:write",
+    "admin"
+  ],
+  "bearer_methods_supported": ["header"]
+}
+```
+
+### Métadonnées du serveur d'autorisation
+
+```http
+GET /_emdash/.well-known/oauth-authorization-server
+```
+
+```json
+{
+  "issuer": "https://example.com/_emdash",
+  "authorization_endpoint": "https://example.com/_emdash/oauth/authorize",
+  "token_endpoint": "https://example.com/_emdash/api/oauth/token",
+  "scopes_supported": ["content:read", "content:write", "..."],
+  "response_types_supported": ["code"],
+  "grant_types_supported": [
+    "authorization_code",
+    "refresh_token",
+    "urn:ietf:params:oauth:grant-type:device_code"
+  ],
+  "code_challenge_methods_supported": ["S256"],
+  "token_endpoint_auth_methods_supported": ["none"],
+  "device_authorization_endpoint": "https://example.com/_emdash/api/oauth/device/code"
+}
+```
+
+Lorsqu'une requête non authentifiée atteint le point de terminaison MCP, le serveur renvoie :
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"
+```
+
+Cela déclenche le flux de découverte standard du client MCP.
+
+## Gestion des erreurs
+
+Les erreurs d'outil sont renvoyées sous forme de contenu texte avec `isError: true` :
+
+```json
+{
+  "content": [{ "type": "text", "text": "Collection 'nonexistent' not found" }],
+  "isError": true
+}
+```
+
+Les erreurs de portée et de permission génèrent des erreurs de protocole MCP :
+
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32600,
+    "message": "Insufficient scope: requires content:write"
+  },
+  "id": 1
+}
+```
+
+Les erreurs au niveau du transport (mauvaise configuration du serveur, exceptions non gérées) renvoient le code d'erreur JSON-RPC `-32603` (Erreur interne) sans divulguer de détails d'implémentation.

@@ -1,0 +1,239 @@
+---
+import {
+	COOKIE_MAX_AGE,
+	DEFAULT_LOCALE,
+	LOCALE_COOKIE,
+	LOCALE_OPTIONS,
+	getLocalePath,
+	localeFromPath,
+} from "../lib/locale.js";
+import {
+	SITE_NAME,
+	buildBreadcrumbJsonLd,
+	buildDefaultLocalePath,
+	buildWebsiteJsonLd,
+	getSocialImageAlt,
+	isStarlight404,
+} from "../lib/seo.js";
+
+const { head, entry } = Astro.locals.starlightRoute;
+const currentPathname = Astro.url.pathname;
+const currentLocale = localeFromPath(currentPathname);
+const defaultLocalePath = buildDefaultLocalePath(currentPathname);
+const defaultPageUrl = new URL(defaultLocalePath, Astro.site);
+const ogImageUrl = new URL("/og-image.png", Astro.site).toString();
+const socialImageAlt = getSocialImageAlt(currentLocale);
+const shouldRenderStructuredData = !isStarlight404(Astro.locals.starlightRoute);
+const siteName =
+	head.find(
+		(entry) =>
+			entry.tag === "meta" &&
+			entry.attrs?.property === "og:site_name" &&
+			typeof entry.attrs?.content === "string",
+	)?.attrs?.content ?? SITE_NAME;
+const pageDescription =
+	head.find(
+		(entry) =>
+			entry.tag === "meta" &&
+			entry.attrs?.name === "description" &&
+			typeof entry.attrs?.content === "string",
+	)?.attrs?.content ?? entry.data.description ?? "";
+const hasMeta = (name, value) =>
+	head.some(
+		(entry) =>
+			entry.tag === "meta" &&
+			entry.attrs?.[name] === value,
+	);
+const hasNamedMeta = (name) =>
+	head.some(
+		(entry) =>
+			entry.tag === "meta" &&
+			entry.attrs?.name === name,
+	);
+const hasAlternate = (hreflang) =>
+	head.some(
+		(entry) =>
+			entry.tag === "link" &&
+			entry.attrs?.rel === "alternate" &&
+			entry.attrs?.hreflang === hreflang,
+	);
+const renderedHeadEntries = head
+	.filter(
+		(entry) =>
+			!(
+				entry.tag === "link" &&
+				entry.attrs?.rel === "shortcut icon" &&
+				entry.attrs?.href === "/favicon.svg"
+			),
+	)
+	.map((entry) => {
+		if (
+			entry.tag === "title" &&
+			entry.content === `${siteName} | ${siteName}`
+		) {
+			return {
+				...entry,
+				content: siteName,
+			};
+		}
+
+		return entry;
+	});
+const localeClientConfig = {
+	cookieName: LOCALE_COOKIE,
+	cookieMaxAge: COOKIE_MAX_AGE,
+	defaultLocale: DEFAULT_LOCALE,
+	locales: LOCALE_OPTIONS.map(({ locale, path, languagePrefixes }) => ({
+		locale,
+		path,
+		languagePrefixes,
+	})),
+};
+const breadcrumbJsonLd = shouldRenderStructuredData
+	? JSON.stringify(
+			buildBreadcrumbJsonLd({
+				site: Astro.site,
+				pathname: currentPathname,
+				pageTitle: entry.data.title,
+				locale: currentLocale,
+			}),
+		)
+	: null;
+const websiteJsonLd =
+	shouldRenderStructuredData && (currentPathname === "/" || currentPathname === "/zh-cn/")
+		? JSON.stringify(
+				buildWebsiteJsonLd({
+					site: Astro.site,
+					locale: currentLocale,
+					description: pageDescription,
+				}),
+			)
+		: null;
+---
+
+{renderedHeadEntries.map(({ tag: Tag, attrs, content }) => <Tag {...attrs} set:html={content} />)}
+<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="shortcut icon" href="/favicon.ico" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-title" content="HiEmdash" />
+{!hasNamedMeta("theme-color") && <meta name="theme-color" content="#ea7a1f" />}
+<link rel="manifest" href="/site.webmanifest" />
+{!hasAlternate("x-default") && (
+	<link rel="alternate" hreflang="x-default" href={defaultPageUrl.toString()} />
+)}
+{!hasMeta("property", "og:image") && <meta property="og:image" content={ogImageUrl} />}
+{!hasMeta("property", "og:image:alt") && (
+	<meta
+		property="og:image:alt"
+		content={socialImageAlt}
+	/>
+)}
+{!hasMeta("name", "twitter:image") && <meta name="twitter:image" content={ogImageUrl} />}
+{!hasMeta("name", "twitter:image:alt") && (
+	<meta
+		name="twitter:image:alt"
+		content={socialImageAlt}
+	/>
+)}
+{breadcrumbJsonLd && <script type="application/ld+json" set:html={breadcrumbJsonLd} />}
+{websiteJsonLd && <script type="application/ld+json" set:html={websiteJsonLd} />}
+
+<script is:inline define:vars={{ localeClientConfig }}>
+	(() => {
+		const config = localeClientConfig;
+		const pathname = window.location.pathname;
+
+		const localeFromPath = (currentPathname) => {
+			const nonRootLocales = config.locales
+				.filter((locale) => locale.locale !== config.defaultLocale)
+				.sort((left, right) => right.path.length - left.path.length);
+
+			for (const locale of nonRootLocales) {
+				const barePath = locale.path.endsWith("/") ? locale.path.slice(0, -1) : locale.path;
+				if (currentPathname === barePath || currentPathname.startsWith(locale.path)) {
+					return locale.locale;
+				}
+			}
+
+			return config.defaultLocale;
+		};
+
+		const matchLocaleForLanguage = (language) => {
+			const normalized = String(language || "").toLowerCase();
+			if (!normalized) {
+				return null;
+			}
+
+			if (normalized === "*") {
+				return config.defaultLocale;
+			}
+
+			const matchers = config.locales
+				.flatMap((locale) =>
+					locale.languagePrefixes.map((prefix) => ({
+						locale: locale.locale,
+						prefix,
+					})),
+				)
+				.sort((left, right) => right.prefix.length - left.prefix.length);
+
+			for (const matcher of matchers) {
+				if (
+					normalized === matcher.prefix ||
+					normalized.startsWith(`${matcher.prefix}-`)
+				) {
+					return matcher.locale;
+				}
+			}
+
+			return null;
+		};
+
+		const getLocalePath = (locale) =>
+			config.locales.find((entry) => entry.locale === locale)?.path ?? "/";
+
+		const currentLocale = localeFromPath(pathname);
+
+		const getStoredLocale = () => {
+			const match = document.cookie.match(
+				new RegExp(`(?:^|; )${config.cookieName}=([^;]+)`),
+			);
+			const value = match?.[1];
+			return config.locales.some((locale) => locale.locale === value) ? value : null;
+		};
+
+		const detectPreferredLocale = () => {
+			const languages = Array.isArray(navigator.languages) && navigator.languages.length > 0
+				? navigator.languages
+				: [navigator.language];
+
+			for (const language of languages) {
+				const locale = matchLocaleForLanguage(language);
+				if (locale) {
+					return locale;
+				}
+			}
+
+			return config.defaultLocale;
+		};
+
+		const persistLocale = (locale) => {
+			document.cookie =
+				`${config.cookieName}=${locale}; Path=/; Max-Age=${config.cookieMaxAge}; SameSite=Lax`;
+		};
+
+		if (pathname === "/") {
+			const preferredLocale = getStoredLocale() ?? detectPreferredLocale();
+			if (preferredLocale !== config.defaultLocale) {
+				persistLocale(preferredLocale);
+				window.location.replace(
+					`${getLocalePath(preferredLocale)}${window.location.search}${window.location.hash}`,
+				);
+				return;
+			}
+		}
+
+		persistLocale(currentLocale);
+	})();
+</script>

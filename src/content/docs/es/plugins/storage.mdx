@@ -1,0 +1,356 @@
+---
+title: Almacenamiento de complementos
+description: Persiste datos de complementos en colecciones de documentos con consultas indexadas.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Los plugins pueden almacenar sus propios datos en colecciones de documentos sin escribir migraciones de base de datos. Declara colecciones e índices en la definición de tu plugin, y EmDash maneja el esquema automáticamente.
+
+## Declarar almacenamiento
+
+Define las colecciones de almacenamiento en `definePlugin()`:
+
+```typescript
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "forms",
+	version: "1.0.0",
+
+	storage: {
+		submissions: {
+			indexes: [
+				"formId", // Índice de un solo campo
+				"status",
+				"createdAt",
+				["formId", "createdAt"], // Índice compuesto
+				["status", "createdAt"],
+			],
+		},
+		forms: {
+			indexes: ["slug"],
+		},
+	},
+
+	// ...
+});
+````
+
+Cada clave en `storage` es un nombre de colección. El array `indexes` lista los campos que se pueden consultar de manera eficiente.
+
+<Aside type="note">
+	El almacenamiento está limitado al plugin. Una colección `submissions` en el plugin `forms` está completamente
+	separada de `submissions` en otro plugin.
+</Aside>
+
+## API de la colección de almacenamiento
+
+Accede a las colecciones a través de `ctx.storage` en hooks y rutas:
+
+```typescript
+"content:afterSave": async (event, ctx) => {
+  const { submissions } = ctx.storage;
+
+  // Operaciones CRUD
+  await submissions.put("sub_123", { formId: "contact", email: "user@example.com" });
+  const item = await submissions.get("sub_123");
+  const exists = await submissions.exists("sub_123");
+  await submissions.delete("sub_123");
+}
+````
+
+### Referencia completa de la API
+
+```typescript
+interface StorageCollection<T = unknown> {
+	// CRUD básico
+	get(id: string): Promise<T | null>;
+	put(id: string, data: T): Promise<void>;
+	delete(id: string): Promise<boolean>;
+	exists(id: string): Promise<boolean>;
+
+	// Operaciones por lotes
+	getMany(ids: string[]): Promise<Map<string, T>>;
+	putMany(items: Array<{ id: string; data: T }>): Promise<void>;
+	deleteMany(ids: string[]): Promise<number>;
+
+	// Consulta (solo campos indexados)
+	query(options?: QueryOptions): Promise<PaginatedResult<{ id: string; data: T }>>;
+	count(where?: WhereClause): Promise<number>;
+}
+```
+
+## Consultar Datos
+
+Usa `query()` para recuperar documentos que coincidan con los criterios. Las consultas devuelven resultados paginados.
+
+```typescript
+const result = await ctx.storage.submissions.query({
+	where: {
+		formId: "contact",
+		status: "pending",
+	},
+	orderBy: { createdAt: "desc" },
+	limit: 20,
+});
+
+// result.items - Array de { id, data }
+// result.cursor - Cursor de paginación (si hay más resultados)
+// result.hasMore - Booleano que indica si hay más páginas
+```
+
+### Opciones de consulta
+
+```typescript
+interface QueryOptions {
+	where?: WhereClause;
+	orderBy?: Record<string, "asc" | "desc">;
+	limit?: number; // Por defecto: 50, máximo: 1000
+	cursor?: string; // Para la paginación
+}
+```
+
+### Operadores de la cláusula where
+
+Filtra por campos indexados usando estos operadores:
+
+<Tabs>
+  <TabItem label="Coincidencia Exacta">
+```typescript
+where: {
+  status: "pending",        // Coincidencia exacta de cadena
+  count: 5,                 // Coincidencia exacta numérica
+  archived: false           // Coincidencia exacta booleana
+}
+```
+  </TabItem>
+  <TabItem label="Rango">
+```typescript
+where: {
+  createdAt: { gte: "2024-01-01" },     // Mayor o igual que
+  score: { gt: 50, lte: 100 }           // Entre (exclusivo/inclusivo)
+}
+
+// Disponibles: gt, gte, lt, lte
+
+```
+  </TabItem>
+  <TabItem label="In">
+```typescript
+where: {
+  status: { in: ["pending", "approved"] }
+}
+```
+
+  </TabItem>
+  <TabItem label="Comienza Con">
+```typescript
+where: {
+  slug: { startsWith: "blog-" }
+}
+```
+  </TabItem>
+</Tabs>
+
+### Ordenación
+
+Ordena resultados por campos indexados:
+
+```typescript
+orderBy: { createdAt: "desc" } // Primero lo más reciente
+orderBy: { score: "asc" } // Primero la puntuación más baja
+```
+
+<Aside type="caution">
+	Solo puedes consultar y ordenar por campos indexados. Las consultas sobre campos no indexados lanzan un error. Esto
+	evita escaneos completos de tabla accidentales.
+</Aside>
+
+## Paginación
+
+Los resultados están paginados. Usa `cursor` para obtener páginas adicionales:
+
+```typescript
+async function getAllSubmissions(ctx: PluginContext) {
+	const allItems = [];
+	let cursor: string | undefined;
+
+	do {
+		const result = await ctx.storage.submissions!.query({
+			orderBy: { createdAt: "desc" },
+			limit: 100,
+			cursor,
+		});
+
+		allItems.push(...result.items);
+		cursor = result.cursor;
+	} while (cursor);
+
+	return allItems;
+}
+```
+
+### `PaginatedResult`
+
+```typescript
+interface PaginatedResult<T> {
+	items: T[];
+	cursor?: string; // Pásalo a la siguiente consulta para obtener más resultados
+	hasMore: boolean; // Indica si existen más páginas
+}
+```
+
+## Contar documentos
+
+Cuenta documentos que coincidan con los criterios:
+
+```typescript
+// Contar todo
+const total = await ctx.storage.submissions!.count();
+
+// Contar con filtro
+const pending = await ctx.storage.submissions!.count({
+	status: "pending",
+});
+```
+
+## Operaciones por lotes
+
+Para operaciones masivas, usa los métodos por lotes:
+
+```typescript
+// Obtener varios por ID
+const items = await ctx.storage.submissions!.getMany(["sub_1", "sub_2", "sub_3"]);
+// Devuelve un Map<string, T>
+
+// Insertar múltiples
+await ctx.storage.submissions!.putMany([
+	{ id: "sub_1", data: { formId: "contact", status: "new" } },
+	{ id: "sub_2", data: { formId: "contact", status: "new" } },
+]);
+
+// Eliminar múltiples
+const deletedCount = await ctx.storage.submissions!.deleteMany(["sub_1", "sub_2"]);
+```
+
+## Diseño de índices
+
+Elige índices basándote en tus patrones de consulta:
+
+| Patrón de consulta                            | Índice necesario                     |
+| ---------------------------------------- | ------------------------------------ |
+| Filtrar por `formId`                       | `"formId"`                           |
+| Filtrar por `formId`, ordenar por `createdAt` | `["formId", "createdAt"]`            |
+| Ordenar solo por `createdAt`                | `"createdAt"`                        |
+| Filtrar por `status` y `formId`          | `"status"` y `"formId"` (separados) |
+
+Los índices compuestos admiten consultas que filtran por el primer campo y opcionalmente ordenan por el segundo:
+
+```typescript
+// With index ["formId", "createdAt"]:
+
+// Esto funciona:
+query({ where: { formId: "contact" }, orderBy: { createdAt: "desc" } });
+
+// Esto también funciona (solo filtro):
+query({ where: { formId: "contact" } });
+
+// Esto NO usa el índice compuesto (orden de campos incorrecto):
+query({ where: { createdAt: { gte: "2024-01-01" } } });
+```
+
+## Seguridad de tipos
+
+Tipa tus colecciones de almacenamiento para un mejor IntelliSense:
+
+```typescript
+interface Submission {
+	formId: string;
+	email: string;
+	data: Record<string, unknown>;
+	status: "pending" | "approved" | "spam";
+	createdAt: string;
+}
+
+definePlugin({
+	id: "forms",
+	version: "1.0.0",
+
+	storage: {
+		submissions: {
+			indexes: ["formId", "status", "createdAt"],
+		},
+	},
+
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			// Convertir a colección tipada
+			const submissions = ctx.storage.submissions as StorageCollection<Submission>;
+
+			const submission: Submission = {
+				formId: "contact",
+				email: "user@example.com",
+				data: { message: "Hello" },
+				status: "pending",
+				createdAt: new Date().toISOString(),
+			};
+
+			await submissions.put(`sub_${Date.now()}`, submission);
+		},
+	},
+});
+```
+
+## Almacenamiento vs Contenido vs KV
+
+Usa el mecanismo de almacenamiento correcto para tu caso de uso:
+
+| Caso de uso                                           | Almacenamiento                               |
+| -------------------------------------------------- | ------------------------------------- |
+| Datos operativos del plugin (logs, envíos, caché) | `ctx.storage`                         |
+| Configuraciones editables por el usuario                         | `ctx.kv` con prefijo `settings:`      |
+| Estado interno del plugin                              | `ctx.kv` con prefijo `state:`         |
+| Contenido editable en la UI de administración                       | Colecciones del sitio (no almacenamiento del plugin) |
+
+<Aside type="tip">
+	El almacenamiento del plugin es para datos que el plugin posee y gestiona internamente. Si los editores de contenido necesitan ver
+	o editar los datos en la UI de administración, crea una colección del sitio en su lugar.
+</Aside>
+
+## Detalles de Implementación
+
+Internamente, el almacenamiento del plugin usa una única tabla de base de datos:
+
+```sql
+CREATE TABLE _plugin_storage (
+  plugin_id TEXT NOT NULL,
+  collection TEXT NOT NULL,
+  id TEXT NOT NULL,
+  data JSON NOT NULL,
+  created_at TEXT,
+  updated_at TEXT,
+  PRIMARY KEY (plugin_id, collection, id)
+);
+```
+
+EmDash crea índices de expresión para los campos declarados:
+
+```sql
+CREATE INDEX idx_forms_submissions_formId
+  ON _plugin_storage(json_extract(data, '$.formId'))
+  WHERE plugin_id = 'forms' AND collection = 'submissions';
+```
+
+Este diseño proporciona:
+
+- **Sin migraciones** — El esquema vive en el código del plugin
+- **Portabilidad** — Funciona en D1, libSQL, SQLite
+- **Aislamiento** — Los plugins solo pueden acceder a sus propios datos
+- **Seguridad** — Sin inyección SQL, consultas validadas
+
+## Agregar Índices
+
+Cuando agregas índices en una actualización del plugin, EmDash los crea automáticamente en el próximo inicio. Esto es seguro: los índices se pueden agregar sin migración de datos.
+
+Cuando eliminas índices, EmDash los descarta. Las consultas sobre campos no indexados fallarán con un error de validación.

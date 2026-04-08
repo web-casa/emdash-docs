@@ -1,0 +1,491 @@
+---
+title: Konfigurationsreferenz
+description: Vollständige Referenz für die Konfigurationsoptionen von EmDash.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash wird über zwei Dateien konfiguriert: `astro.config.mjs` für die Integration und `src/live.config.ts` für Live-Content-Collections.
+
+## Astro-Integration
+
+Konfigurieren Sie EmDash als Astro-Integration:
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local, r2, s3 } from "emdash/astro";
+import { sqlite, libsql, d1 } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+			plugins: [],
+		}),
+	],
+});
+```
+
+## Integrationsoptionen
+
+### `database`
+
+**Erforderlich.** Konfiguration des Datenbank-Adapters.
+
+```js
+// SQLite (Node.js)
+database: sqlite({ url: "file:./data.db" });
+
+// PostgreSQL
+database: postgres({ connectionString: process.env.DATABASE_URL });
+
+// libSQL
+database: libsql({
+	url: process.env.LIBSQL_DATABASE_URL,
+	authToken: process.env.LIBSQL_AUTH_TOKEN,
+});
+
+// Cloudflare D1 (Import aus @emdash-cms/cloudflare)
+database: d1({ binding: "DB" });
+```
+
+Details finden Sie unter [Datenbankoptionen](/de/deployment/database/).
+
+### `storage`
+
+**Erforderlich.** Konfiguration des Media-Speicher-Adapters.
+
+```js
+// Lokales Dateisystem (Entwicklung)
+storage: local({
+	directory: "./uploads",
+	baseUrl: "/_emdash/api/media/file",
+});
+
+// R2-Binding (Cloudflare Workers)
+storage: r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev", // optional
+});
+
+// S3-kompatibel (jede Plattform)
+storage: s3({
+	endpoint: "https://s3.amazonaws.com",
+	bucket: "my-bucket",
+	accessKeyId: process.env.S3_ACCESS_KEY_ID,
+	secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+	region: "us-east-1", // optional, Standard: "auto"
+	publicUrl: "https://cdn.example.com", // optional
+});
+```
+
+Details finden Sie unter [Speicheroptionen](/de/deployment/storage/).
+
+### `plugins`
+
+**Optional.** Array von EmDash-Plugins.
+
+```js
+import seoPlugin from "@emdash-cms/plugin-seo";
+
+plugins: [seoPlugin()];
+```
+
+### `auth`
+
+**Optional.** Authentifizierungskonfiguration.
+
+```js
+auth: {
+  // Konfiguration für Selbstregistrierung
+  selfSignup: {
+    domains: ["example.com"],
+    defaultRole: 20, // Contributor
+  },
+  
+  // OAuth-Anbieter
+  oauth: {
+    github: {
+      clientId: process.env.GITHUB_CLIENT_ID,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET,
+    },
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    },
+  },
+  
+  // Sitzungs-Konfiguration
+  session: {
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+    sliding: true, // Reset expiry on activity
+  },
+  
+  // Oder Cloudflare Access verwenden (exklusiver Modus)
+  cloudflareAccess: {
+    teamDomain: "myteam.cloudflareaccess.com",
+    audience: "your-app-audience-tag",
+    autoProvision: true,
+    defaultRole: 30,
+    syncRoles: false,
+    roleMapping: {
+      "Admins": 50,
+      "Editors": 40,
+    },
+  },
+}
+```
+
+#### `auth.selfSignup`
+
+Erlaubt Benutzern die Selbstregistrierung, wenn ihre E-Mail-Domain erlaubt ist.
+
+| Option        | Typ        | Standard | Beschreibung               |
+| ------------- | ---------- | ------- | ------------------------- |
+| `domains`     | `string[]` | `[]`    | Erlaubte E-Mail-Domains     |
+| `defaultRole` | `number`   | `20`    | Rolle für Selbstregistrierungen     |
+
+```js
+selfSignup: {
+  domains: ["example.com", "acme.org"],
+  defaultRole: 20, // Contributor
+}
+```
+
+#### `auth.oauth`
+
+Konfiguriert OAuth-Login-Provider.
+
+```js
+oauth: {
+  github: {
+    clientId: process.env.GITHUB_CLIENT_ID,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET,
+  },
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  },
+}
+```
+
+#### `auth.session`
+
+Sitzungskonfiguration.
+
+| Option    | Typ      | Standard           | Beschreibung                    |
+| --------- | --------- | ----------------- | ------------------------------ |
+| `maxAge`  | `number`  | `2592000` (30d)   | Sitzungslebensdauer in Sekunden    |
+| `sliding` | `boolean` | `true`            | Ablauf bei Aktivität zurücksetzen       |
+
+#### `auth.cloudflareAccess`
+
+Verwendet Cloudflare Access als Authentifizierungsprovider anstelle von Passkeys.
+
+| Option          | Typ      | Standard  | Beschreibung                    |
+| --------------- | --------- | -------- | ------------------------------ |
+| `teamDomain`    | `string`  | erforderlich | Ihre Access-Team-Domain        |
+| `audience`      | `string`  | erforderlich | Application Audience (AUD) Tag |
+| `autoProvision` | `boolean` | `true`   | Benutzer beim ersten Login erstellen    |
+| `defaultRole`   | `number`  | `30`     | Standardrolle für neue Benutzer     |
+| `syncRoles`     | `boolean` | `false`  | Rolle bei jedem Login aktualisieren      |
+| `roleMapping`   | `object`  | —        | IdP-Gruppen auf Rollen abbilden        |
+
+<Aside>
+	Wenn `cloudflareAccess` konfiguriert ist, wird es zur exklusiven Authentifizierungsmethode. Passkeys, OAuth,
+	Magic Links und Selbstregistrierung sind deaktiviert.
+</Aside>
+
+### `passkeyPublicOrigin`
+
+**Optional.** Geben Sie einen vollständigen **browserseitigen Origin** (Schema + Host + optionaler Port, **kein Pfad**) an, damit die WebAuthn-**`rpId`** und der **`origin`** mit dem übereinstimmen, was der Browser des Benutzers in `clientData.origin` sendet.
+
+Standardmäßig folgen Passkeys **`Astro.url`** / **`request.url`**. Hinter einem **TLS-terminierenden Reverse-Proxy** sieht die App oft immer noch **`http://`** auf dem internen Hop, während der Tab **`https://`**, ist oder der rekonstruierte Host nicht mit dem öffentlichen Namen übereinstimmt – was die Passkey-Überprüfung unterbricht. Setzen Sie `passkeyPublicOrigin` auf den Origin, den Benutzer in die Adressleiste eingeben (z.B. `https://cms.example.com` oder `https://cms.example.com:8443`).
+
+Die Integration **validiert** diesen Wert beim Laden: Es muss eine gültige URL mit **`http:`** oder **`https:`** Protokoll sein und wird auf **`origin`** normalisiert.
+
+```js
+emdash({
+	database: sqlite({ url: "file:./data.db" }),
+	storage: local({
+		directory: "./uploads",
+		baseUrl: "/_emdash/api/media/file",
+	}),
+	passkeyPublicOrigin: "https://cms.example.com",
+});
+```
+
+#### Reverse-Proxy und Passkeys
+
+Astro reflektiert **`X-Forwarded-*`** nur, wenn der öffentliche Host erlaubt ist. Konfigurieren Sie [**`security.allowedDomains`**](https://docs.astro.build/en/reference/configuration-reference/#securityalloweddomains) für den Hostnamen (und Schemata), den Ihre Benutzer erreichen. In **`astro dev`** fügen Sie passende **`vite.server.allowedHosts`** hinzu, damit Vite den Proxy-**`Host`**-Header akzeptiert.
+
+Beheben Sie zuerst **`allowedDomains`** (und weitergeleitete Header); verwenden Sie **`passkeyPublicOrigin`**, wenn die rekonstruierte URL **immer noch** vom Browser-Origin abweicht (typisch, wenn TLS davor terminiert wird und die Upstream-Anfrage **`http://`** bleibt).
+
+Mit TLS davor reicht es oft aus, den Dev-Server an Loopback zu binden (**`astro dev --host 127.0.0.1`**): Der Proxy verbindet sich lokal, während **`passkeyPublicOrigin`** mit dem öffentlichen HTTPS-Origin übereinstimmt.
+
+<Aside type="caution">
+	Ihr Reverse-Proxy sollte einen **portbewussten** `Host`- / `X-Forwarded-Host`-Header weiterleiten, wenn Sie nicht-standardmäßige Ports verwenden. Wenn der Proxy den Port entfernt, können **`rpId`** und Astros rekonstruierte URL falsch sein.
+</Aside>
+
+```js title="astro.config.mjs (Ausschnitt)"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	security: {
+		allowedDomains: [
+			{ hostname: "cms.example.com", protocol: "https" },
+			{ hostname: "cms.example.com", protocol: "http" },
+		],
+	},
+	vite: {
+		server: {
+			allowedHosts: ["cms.example.com"],
+		},
+	},
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+			passkeyPublicOrigin: "https://cms.example.com",
+		}),
+	],
+});
+```
+
+## Datenbank-Adapter
+
+Importieren Sie aus `emdash/db`:
+
+```js
+import { sqlite, libsql, postgres, d1 } from "emdash/db";
+```
+
+### `sqlite(config)`
+
+SQLite-Datenbank mit better-sqlite3.
+
+| Option | Typ     | Beschreibung                   |
+| ------ | -------- | ----------------------------- |
+| `url`  | `string` | Dateipfad mit `file:`-Präfix |
+
+```js
+sqlite({ url: "file:./data.db" });
+```
+
+### `libsql(config)`
+
+libSQL-Datenbank.
+
+| Option      | Typ     | Beschreibung                           |
+| ----------- | -------- | ------------------------------------- |
+| `url`       | `string` | Datenbank-URL                          |
+| `authToken` | `string` | Auth-Token (optional für lokale Dateien) |
+
+```js
+libsql({
+	url: process.env.LIBSQL_DATABASE_URL,
+	authToken: process.env.LIBSQL_AUTH_TOKEN,
+});
+```
+
+### `postgres(config)`
+
+PostgreSQL-Datenbank mit Connection-Pooling.
+
+| Option             | Typ      | Beschreibung                          |
+| ------------------ | --------- | ------------------------------------ |
+| `connectionString` | `string`  | PostgreSQL-Verbindungs-URL            |
+| `host`             | `string`  | Datenbank-Host                        |
+| `port`             | `number`  | Datenbank-Port                        |
+| `database`         | `string`  | Datenbank-Name                        |
+| `user`             | `string`  | Datenbank-Benutzer                        |
+| `password`         | `string`  | Datenbank-Passwort                    |
+| `ssl`              | `boolean` | SSL aktivieren                           |
+| `pool.min`         | `number`  | Minimale Pool-Größe (Standard: 0)       |
+| `pool.max`         | `number`  | Maximale Pool-Größe (Standard: 10)      |
+
+```js
+postgres({ connectionString: process.env.DATABASE_URL });
+```
+
+### `d1(config)`
+
+Cloudflare D1-Datenbank. Importieren Sie aus `@emdash-cms/cloudflare`.
+
+| Option           | Type     | Default              | Beschreibung                                         |
+| ---------------- | -------- | -------------------- | --------------------------------------------------- |
+| `binding`        | `string` | —                    | D1-Bindungsname aus `wrangler.jsonc`               |
+| `session`        | `string` | `"disabled"`         | Lesereplikationsmodus: `"disabled"`, `"auto"` oder `"primary-first"` |
+| `bookmarkCookie` | `string` | `"__ec_d1_bookmark"` | Cookie-Name für Sitzungs-Lesezeichen                   |
+
+```js
+// Basic
+d1({ binding: "DB" });
+
+// Mit Lesereplikaten
+d1({ binding: "DB", session: "auto" });
+```
+
+Wenn `session` auf `"auto"` oder `"primary-first"` gesetzt ist, verwendet EmDash die D1 Sessions API, um Leseabfragen an nahegelegene Replikate zu leiten. Authentifizierte Benutzer erhalten Lesezeichen-basierte "Read-Your-Writes"-Konsistenz. Weitere Details finden Sie unter [Datenbankoptionen — Lesereplikate](/de/deployment/database/#read-replicas).
+
+<Aside type="caution">
+	D1 erfordert Migrationen über die Wrangler CLI. DDL-Anweisungen sind zur Laufzeit nicht erlaubt.
+</Aside>
+
+## Speicheradapter
+
+Importieren Sie aus `emdash/astro`:
+
+```js
+import emdash, { local, r2, s3 } from "emdash/astro";
+```
+
+### `local(config)`
+
+Lokales Dateisystem-Speicher.
+
+| Option      | Type     | Beschreibung                |
+| ----------- | -------- | -------------------------- |
+| `directory` | `string` | Verzeichnispfad             |
+| `baseUrl`   | `string` | Basis-URL für das Bereitstellen von Dateien |
+
+```js
+local({
+	directory: "./uploads",
+	baseUrl: "/_emdash/api/media/file",
+});
+```
+
+### `r2(config)`
+
+Cloudflare R2-Bindung.
+
+| Option      | Type     | Beschreibung         |
+| ----------- | -------- | ------------------- |
+| `binding`   | `string` | R2-Bindungsname     |
+| `publicUrl` | `string` | Optionale öffentliche URL |
+
+```js
+r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev",
+});
+```
+
+### `s3(config)`
+
+S3-kompatibler Speicher.
+
+| Option            | Type     | Beschreibung                |
+| ----------------- | -------- | -------------------------- |
+| `endpoint`        | `string` | S3-Endpunkt-URL            |
+| `bucket`          | `string` | Bucket-Name                |
+| `accessKeyId`     | `string` | Zugriffsschlüssel                 |
+| `secretAccessKey` | `string` | Geheimer Schlüssel                 |
+| `region`          | `string` | Region (Standard: `"auto"`) |
+| `publicUrl`       | `string` | Optionale CDN-URL           |
+
+```js
+s3({
+	endpoint: "https://xxx.r2.cloudflarestorage.com",
+	bucket: "media",
+	accessKeyId: process.env.R2_ACCESS_KEY_ID,
+	secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+	publicUrl: "https://cdn.example.com",
+});
+```
+
+## Live-Kollektionen
+
+Konfigurieren Sie den EmDash-Loader in `src/live.config.ts`:
+
+```ts title="src/live.config.ts"
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({
+		loader: emdashLoader(),
+	}),
+};
+```
+
+### Loader-Optionen
+
+Die Funktion `emdashLoader()` akzeptiert optionale Konfiguration:
+
+```ts
+emdashLoader({
+	// Aktuell keine Optionen; für spätere Erweiterungen reserviert
+});
+```
+
+## Umgebungsvariablen
+
+EmDash berücksichtigt diese Umgebungsvariablen:
+
+| Variable                  | Beschreibung                              |
+| ------------------------- | ---------------------------------------- |
+| `EMDASH_DATABASE_URL`   | Datenbank-URL überschreiben                    |
+| `EMDASH_AUTH_SECRET`    | Geheimnis für Passkey-Authentifizierung        |
+| `EMDASH_PREVIEW_SECRET` | Geheimnis für die Vorschau-Token-Generierung      |
+| `EMDASH_URL`            | Remote-EmDash-URL für Schema-Synchronisation      |
+
+Generieren Sie ein Authentifizierungsgeheimnis mit:
+
+```bash
+npx emdash auth secret
+```
+
+## package.json-Konfiguration
+
+Optionale Konfiguration in `package.json`:
+
+```json title="package.json"
+{
+	"emdash": {
+		"label": "Blog-Vorlage",
+		"description": "Eine schlichte, minimalistische Blog-Vorlage",
+		"seed": ".emdash/seed.json",
+		"url": "https://my-site.pages.dev",
+		"preview": "https://emdash-blog.pages.dev"
+	}
+}
+```
+
+| Option        | Beschreibung                        |
+| ------------- | ---------------------------------- |
+| `label`       | Vorlagenname zur Anzeige          |
+| `description` | Vorlagenbeschreibung               |
+| `seed`        | Pfad zur Seed-JSON-Datei             |
+| `url`         | Remote-URL für Schema-Synchronisation         |
+| `preview`     | Demo-Site-URL für Vorlagenvorschau |
+
+## TypeScript-Konfiguration
+
+EmDash generiert Typen in `.emdash/types.ts`. Fügen Sie dies zu Ihrer `tsconfig.json` hinzu:
+
+```json title="tsconfig.json"
+{
+	"compilerOptions": {
+		"paths": {
+			"@emdash-cms/types": ["./.emdash/types.ts"]
+		}
+	}
+}
+```
+
+Generieren Sie Typen mit:
+
+```bash
+npx emdash types
+```

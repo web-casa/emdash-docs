@@ -1,0 +1,65 @@
+---
+title: HiEmdash Docs
+description: 愛好家によって作成されたサードパーティ製EmDashドキュメントサイト。初心者向けガイド、実用的なFAQ、多言語翻訳を提供します。
+lastUpdated: 2026-04-07
+template: splash
+hero:
+  tagline: コミュニティ構築のEmDashドキュメントハブ。公式ドキュメントを超えた初心者向けガイド、実用的なFAQ、多言語翻訳を提供します。
+  actions:
+    - text: はじめに
+      link: /ja/getting-started/
+      icon: right-arrow
+    - text: GitHubで見る
+      link: https://github.com/emdash-cms/emdash
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## HiEmdash Docs の目的
+
+<CardGrid stagger>
+	<Card title="初心者に優しい" icon="document">
+		公式ドキュメントを超えて、初めてEmDashを使うユーザーのためのオンボーディングガイダンスと追加のコンテキストを提供します。
+	</Card>
+	<Card title="多言語対応" icon="puzzle">
+		英語が信頼できる情報源であり、簡体字中国語の翻訳と、将来的により多くの言語に対応するための翻訳ワークフローが用意されています。
+	</Card>
+	<Card title="コミュニティノート" icon="setting">
+		また、初心者が見落としがちな一般的な質問、実践的な注意点、セットアップのヒントも収集しています。
+	</Card>
+</CardGrid>
+
+## ここで見つかるもの
+
+- **入門ガイド** — 新しいEmDashユーザーのための明確なセットアップ手順
+- **実践的なFAQ** — 公開プロジェクトの議論や一般的な課題から集められた追加の回答
+- **多言語ドキュメント** — より広いアクセスのための英語ソースコンテンツとローカライズされた翻訳
+- **移行ノート** — WordPressやAstroのみのワークフローから移行する人々のための役立つコンテキスト
+
+## 人気の記事
+
+- [EmDashとは？](/ja/what-is-emdash/) — プロジェクトの平易な言語での概要
+- [最高のAstro CMS](/ja/best-astro-cms/) — 一般的なAstro CMS要件に対するEmDashの評価
+- [EmDash vs WordPress](/ja/emdash-vs-wordpress/) — 編集、デプロイ、アーキテクチャの直接比較
+- [WordPressからAstroへ（EmDash使用）](/ja/wordpress-to-astro-with-emdash/) — 移行に焦点を当てた概要
+
+## クイックスタート
+
+```bash
+# Create a new EmDash site
+npm create astro@latest -- --template @emdash-cms/template-blog
+
+# 開発サーバーを起動
+npm run dev
+
+# 管理パネルにアクセス http://localhost:4321/_emdash/admin
+```
+
+## EmDashについて
+
+- **AstroネイティブCMS** — 後から適応させるのではなく、Astroのために構築
+- **型安全なコンテンツ** — 構造化されたコンテンツモデルと生成されたTypeScriptサポート
+- **拡張可能なアーキテクチャ** — プラグイン、フック、管理UI拡張、デプロイの柔軟性
+- **WordPressに親しみやすい概念** — メニュー、ウィジェット、分類、移行指向のワークフロー

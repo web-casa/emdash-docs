@@ -1,0 +1,457 @@
+---
+title: 分类法
+description: 使用分类、标签和自定义分类法组织内容。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+分类法是用于组织内容的分类系统。EmDash 内置了分类和标签，并支持自定义分类法以满足特定的分类需求。
+
+## 内置分类法
+
+EmDash 提供了两种默认的分类法：
+
+| 分类法       | 类型         | 描述                                           |
+| -------------- | ------------ | ----------------------------------------------------- |
+| **分类** | 层级式 | 具有父子关系的嵌套分类 |
+| **标签**       | 扁平式         | 无层级的简单标签                       |
+
+默认情况下，两者都可用于文章集合。
+
+## 管理术语
+
+### 创建术语
+
+<Tabs>
+  <TabItem label="管理仪表板">
+
+1. 转到分类法页面（例如，`/_emdash/admin/taxonomies/category`）
+
+2. 在 **添加新项** 表单中输入术语名称
+
+3. 可选设置：
+    - **别名** - URL 标识符（根据名称自动生成）
+    - **父级** - 用于层级式分类法
+    - **描述** - 术语描述
+
+4. 点击 **添加**
+
+  </TabItem>
+  <TabItem label="内容编辑器">
+
+5. 在编辑器中打开一个内容条目
+
+6. 在侧边栏中找到分类法面板
+
+7. 对于分类：勾选适用术语的复选框，或点击 **+ 添加新项**
+
+8. 对于标签：输入标签名称，用逗号分隔
+
+9. 保存内容
+
+  </TabItem>
+  <TabItem label="API">
+
+```bash
+POST /_emdash/api/taxonomies/category/terms
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "slug": "tutorials",
+  "label": "Tutorials",
+  "parentId": "term_abc",
+  "description": "How-to guides and tutorials"
+}
+```
+
+  </TabItem>
+</Tabs>
+
+### 编辑术语
+
+1. 转到分类法术语页面
+
+2. 点击术语旁边的 **编辑**
+
+3. 更新名称、别名、父级或描述
+
+4. 点击 **保存**
+
+### 删除术语
+
+1. 转到分类法术语页面
+
+2. 点击术语旁边的 **删除**
+
+3. 确认删除
+
+<Aside type="caution">
+	删除术语会将其从所有关联的内容中移除。内容本身不会被删除，仅删除术语的分配关系。
+</Aside>
+
+## 查询分类法
+
+EmDash 提供了查询分类法术语和按术语筛选内容的函数。
+
+### 获取所有术语
+
+检索某个分类法的所有术语：
+
+```ts
+import { getTaxonomyTerms } from "emdash";
+
+// Get all categories (returns tree structure)
+const categories = await getTaxonomyTerms("category");
+
+// Get all tags (returns flat list)
+const tags = await getTaxonomyTerms("tag");
+```
+
+对于层级式分类法，术语包含一个 `children` 数组：
+
+```ts
+interface TaxonomyTerm {
+	id: string;
+	name: string; // Taxonomy name ("category")
+	slug: string; // Term slug ("news")
+	label: string; // Display label ("News")
+	parentId?: string;
+	description?: string;
+	children: TaxonomyTerm[];
+	count?: number; // Number of entries with this term
+}
+```
+
+### 获取单个术语
+
+```ts
+import { getTerm } from "emdash";
+
+const category = await getTerm("category", "news");
+// Returns TaxonomyTerm or null
+```
+
+### 获取条目的术语
+
+```ts
+import { getEntryTerms } from "emdash";
+
+// Get all categories for a post
+const categories = await getEntryTerms("posts", "post-123", "category");
+
+// Get all tags for a post
+const tags = await getEntryTerms("posts", "post-123", "tag");
+```
+
+### 按术语筛选内容
+
+使用带有 `where` 筛选器的 `getEmDashCollection`：
+
+```ts
+import { getEmDashCollection } from "emdash";
+
+// Posts in the "news" category
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: "news" },
+});
+
+// Posts with the "javascript" tag
+const { entries: jsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { tag: "javascript" },
+});
+```
+
+或者使用便捷函数：
+
+```ts
+import { getEntriesByTerm } from "emdash";
+
+const newsPosts = await getEntriesByTerm("posts", "category", "news");
+```
+
+## 构建分类法页面
+
+### 分类归档
+
+创建一个列出某个分类下文章的页面：
+
+```astro title="src/pages/category/[slug].astro"
+---
+import { getTaxonomyTerms, getTerm, getEmDashCollection } from "emdash";
+import Base from "../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const categories = await getTaxonomyTerms("category");
+
+  // Flatten hierarchical tree for routing
+  function flatten(terms) {
+    return terms.flatMap((term) => [term, ...flatten(term.children)]);
+  }
+
+  return flatten(categories).map((cat) => ({
+    params: { slug: cat.slug },
+    props: { category: cat },
+  }));
+}
+
+const { category } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  where: { category: category.slug },
+});
+---
+
+<Base title={category.label}>
+  <h1>{category.label}</h1>
+  {category.description && <p>{category.description}</p>}
+  <p>{category.count} posts</p>
+
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+### 标签归档
+
+创建一个列出带有某个标签的文章的页面：
+
+```astro title="src/pages/tag/[slug].astro"
+---
+import { getTaxonomyTerms, getEmDashCollection } from "emdash";
+import Base from "../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const tags = await getTaxonomyTerms("tag");
+
+  return tags.map((tag) => ({
+    params: { slug: tag.slug },
+    props: { tag },
+  }));
+}
+
+const { tag } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  where: { tag: tag.slug },
+});
+---
+
+<Base title={`Posts tagged "${tag.label}"`}>
+  <h1>#{tag.label}</h1>
+
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+### 分类列表小部件
+
+显示带有文章数量的分类列表：
+
+```astro title="src/components/CategoryList.astro"
+---
+import { getTaxonomyTerms } from "emdash";
+
+const categories = await getTaxonomyTerms("category");
+---
+
+<nav class="category-list">
+  <h3>Categories</h3>
+  <ul>
+    {categories.map((cat) => (
+      <li>
+        <a href={`/category/${cat.slug}`}>
+          {cat.label} ({cat.count})
+        </a>
+        {cat.children.length > 0 && (
+          <ul>
+            {cat.children.map((child) => (
+              <li>
+                <a href={`/category/${child.slug}`}>
+                  {child.label} ({child.count})
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+
+### 标签云
+
+根据使用频率以不同大小显示标签：
+
+```astro title="src/components/TagCloud.astro"
+---
+import { getTaxonomyTerms } from "emdash";
+
+const tags = await getTaxonomyTerms("tag");
+
+// Calculate font sizes based on count
+const counts = tags.map((t) => t.count ?? 0);
+const maxCount = Math.max(...counts, 1);
+const minSize = 0.8;
+const maxSize = 2;
+
+function getSize(count: number) {
+  const ratio = count / maxCount;
+  return minSize + ratio * (maxSize - minSize);
+}
+---
+
+<div class="tag-cloud">
+  {tags.map((tag) => (
+    <a
+      href={`/tag/${tag.slug}`}
+      style={`font-size: ${getSize(tag.count ?? 0)}rem`}
+    >
+      {tag.label}
+    </a>
+  ))}
+</div>
+```
+
+## 在内容上显示术语
+
+在文章上显示分类和标签：
+
+```astro title="src/components/PostTerms.astro"
+---
+import { getEntryTerms } from "emdash";
+
+interface Props {
+  collection: string;
+  entryId: string;
+}
+
+const { collection, entryId } = Astro.props;
+
+const categories = await getEntryTerms(collection, entryId, "category");
+const tags = await getEntryTerms(collection, entryId, "tag");
+---
+
+<div class="post-terms">
+  {categories.length > 0 && (
+    <div class="categories">
+      <span>Posted in:</span>
+      {categories.map((cat, i) => (
+        <>
+          {i > 0 && ", "}
+          <a href={`/category/${cat.slug}`}>{cat.label}</a>
+        </>
+      ))}
+    </div>
+  )}
+
+  {tags.length > 0 && (
+    <div class="tags">
+      {tags.map((tag) => (
+        <a href={`/tag/${tag.slug}`} class="tag">
+          #{tag.label}
+        </a>
+      ))}
+    </div>
+  )}
+</div>
+```
+
+## 自定义分类法
+
+创建分类和标签之外的自定义分类法以满足特定需求。
+
+### 创建自定义分类法
+
+使用管理 API 创建分类法：
+
+```bash
+POST /_emdash/api/taxonomies
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "name": "genre",
+  "label": "Genres",
+  "labelSingular": "Genre",
+  "hierarchical": true,
+  "collections": ["books", "movies"]
+}
+```
+
+### 使用自定义分类法
+
+查询和显示自定义分类法的方式与内置分类法相同：
+
+```ts
+import { getTaxonomyTerms, getEmDashCollection } from "emdash";
+
+// Get all genres
+const genres = await getTaxonomyTerms("genre");
+
+// Get books in a genre
+const { entries: sciFiBooks } = await getEmDashCollection("books", {
+	where: { genre: "science-fiction" },
+});
+```
+
+### 分配给集合
+
+分类法指定其适用于哪些集合：
+
+```ts
+{
+  "name": "difficulty",
+  "label": "Difficulty Levels",
+  "hierarchical": false,
+  "collections": ["recipes", "tutorials"]
+}
+```
+
+## 分类法 API 参考
+
+### REST 端点
+
+| 端点                                      | 方法 | 描述               |
+| --------------------------------------------- | ------ | ------------------------- |
+| `/_emdash/api/taxonomies`                   | GET    | 列出分类法定义 |
+| `/_emdash/api/taxonomies`                   | POST   | 创建分类法           |
+| `/_emdash/api/taxonomies/:name/terms`       | GET    | 列出术语                |
+| `/_emdash/api/taxonomies/:name/terms`       | POST   | 创建术语               |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | GET    | 获取术语                  |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | PUT    | 更新术语               |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | DELETE | 删除术语               |
+
+### 将术语分配给内容
+
+```bash
+POST /_emdash/api/content/posts/post-123/terms/category
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "termIds": ["term_news", "term_featured"]
+}
+```
+
+## 后续步骤
+
+-   [创建博客](/zh-cn/guides/create-a-blog/) - 在博客中使用分类和标签
+-   [查询内容](/zh-cn/guides/querying-content/) - 按分类法术语筛选
+-   [处理内容](/zh-cn/guides/working-with-content/) - 在编辑器中分配术语

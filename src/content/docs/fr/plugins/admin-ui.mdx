@@ -1,0 +1,410 @@
+---
+title: Interface d'administration
+description: Ajoutez des pages d'administration et des widgets de tableau de bord au panneau d'administration EmDash.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Les plugins peuvent étendre le panneau d'administration avec des pages personnalisées et des widgets de tableau de bord. Ce sont des composants React qui s'affichent aux côtés des fonctionnalités d'administration principales.
+
+## Point d'entrée Admin
+
+Les plugins avec une interface d'administration exportent des composants depuis un point d'entrée `admin` :
+
+```typescript title="src/admin.tsx"
+import { SEOSettingsPage } from "../../plugins/components/SEOSettingsPage";
+import { SEODashboardWidget } from "../../plugins/components/SEODashboardWidget";
+
+// Dashboard widgets
+export const widgets = {
+	"seo-overview": SEODashboardWidget,
+};
+
+// Admin pages
+export const pages = {
+	"/settings": SEOSettingsPage,
+};
+```
+
+Configurez le point d'entrée dans `package.json` :
+
+```
+json title="package.json"
+{
+	"exports": {
+		".": "./dist/index.js",
+		"./admin": "./dist/admin.js"
+	}
+}
+```
+
+Référencez-le dans votre définition de plugin :
+
+```
+typescript title="src/index.ts"
+definePlugin({
+	id: "seo",
+	version: "1.0.0",
+
+	admin: {
+		entry: "@my-org/plugin-seo/admin",
+		pages: [{ path: "/settings", label: "SEO Settings", icon: "settings" }],
+		widgets: [{ id: "seo-overview", title: "SEO Overview", size: "half" }],
+	},
+});
+```
+
+## Pages d'administration
+
+Les pages d'administration sont des composants React qui reçoivent le contexte du plugin via des hooks.
+
+### Définition de page
+
+Définissez les pages dans `admin.pages` :
+
+```typescript
+admin: {
+	pages: [
+		{
+			path: "/settings", // URL path (relative to plugin base)
+			label: "Settings", // Sidebar label
+			icon: "settings", // Icon name (optional)
+		},
+		{
+			path: "/reports",
+			label: "Reports",
+			icon: "chart",
+		},
+	];
+}
+```
+
+Les pages sont montées à l'adresse `/_emdash/admin/plugins/<plugin-id>/<path>`.
+
+### Composant de page
+
+```
+typescript title="src/components/SettingsPage.tsx"
+import { useState, useEffect } from "react";
+import { usePluginAPI } from "@emdash-cms/admin";
+
+export function SettingsPage() {
+  const api = usePluginAPI();
+  const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get("settings").then(setSettings);
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    await api.post("settings/save", settings);
+    setSaving(false);
+  };
+
+  return (
+    <div>
+      <h1>Paramètres du plugin</h1>
+
+      <label>
+        Titre du site
+        <input
+          type="text"
+          value={settings.siteTitle || ""}
+          onChange={(e) => setSettings({ ...settings, siteTitle: e.target.value })}
+        />
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={settings.enabled ?? true}
+          onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
+        />
+        Activé
+      </label>
+
+      <button onClick={handleSave} disabled={saving}>
+        {saving ? "Saving..." : "Save Settings"}
+      </button>
+    </div>
+  );
+}
+```
+
+### Hook d'API du plugin
+
+Utilisez `usePluginAPI()` pour appeler les routes de votre plugin :
+
+```typescript
+import { usePluginAPI } from "@emdash-cms/admin";
+
+function MyComponent() {
+	const api = usePluginAPI();
+
+	// Requête GET vers une route du plugin
+	const data = await api.get("status");
+
+	// Requête POST avec un corps
+	await api.post("settings/save", { enabled: true });
+
+	// Avec des paramètres d'URL
+	const result = await api.get("history?limit=50");
+}
+```
+
+Le hook ajoute automatiquement le préfixe d'ID de plugin aux URLs des routes.
+
+## Widgets du tableau de bord
+
+Les widgets apparaissent sur le tableau de bord d'administration et fournissent des informations d'un coup d'œil.
+
+### Définition de widget
+
+Définissez les widgets dans `admin.widgets` :
+
+```typescript
+admin: {
+	widgets: [
+		{
+			id: "seo-overview", // Unique widget ID
+			title: "SEO Overview", // Widget title (optional)
+			size: "half", // "full" | "half" | "third"
+		},
+	];
+}
+```
+
+### Composant de widget
+
+```
+typescript title="src/components/SEOWidget.tsx"
+import { useState, useEffect } from "react";
+import { usePluginAPI } from "@emdash-cms/admin";
+
+export function SEOWidget() {
+  const api = usePluginAPI();
+  const [data, setData] = useState({ score: 0, issues: [] });
+
+  useEffect(() => {
+    api.get("analyze").then(setData);
+  }, []);
+
+  return (
+    <div className="widget-content">
+      <div className="score">{data.score}%</div>
+      <ul>
+        {data.issues.map((issue, i) => (
+          <li key={i}>{issue.message}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### Tailles des widgets
+
+| Taille  | Description                   |
+| ------- | ----------------------------- |
+| `full`  | Pleine largeur du tableau de bord |
+| `half`  | Demi-largeur du tableau de bord   |
+| `third` | Un tiers de la largeur du tableau de bord |
+
+Les widgets s'enroulent automatiquement en fonction de la largeur de l'écran.
+
+## Structure d'export
+
+Le point d'entrée admin exporte deux objets :
+
+```
+typescript title="src/admin.tsx"
+import { SettingsPage } from "../../plugins/components/SettingsPage";
+import { ReportsPage } from "../../plugins/components/ReportsPage";
+import { StatusWidget } from "../../plugins/components/StatusWidget";
+import { OverviewWidget } from "../../plugins/components/OverviewWidget";
+
+// Pages keyed by path
+export const pages = {
+	"/settings": SettingsPage,
+	"/reports": ReportsPage,
+};
+
+// Widgets keyed by ID
+export const widgets = {
+	status: StatusWidget,
+	overview: OverviewWidget,
+};
+```
+
+<Aside type="caution">
+	Les chemins des pages dans `pages` doivent correspondre aux valeurs `path` dans `admin.pages`. Les clés des widgets doivent correspondre aux
+	valeurs `id` dans `admin.widgets`.
+</Aside>
+
+## Utilisation des composants Admin
+
+EmDash fournit des composants pré-construits pour les modèles courants :
+
+```typescript
+import {
+  Card,
+  Button,
+  Input,
+  Select,
+  Toggle,
+  Table,
+  Pagination,
+  Alert,
+  Loading
+} from "@emdash-cms/admin";
+
+function SettingsPage() {
+  return (
+    <Card title="Settings">
+      <Input label="API Key" type="password" />
+      <Toggle label="Enabled" defaultChecked />
+      <Button variant="primary">Save</Button>
+    </Card>
+  );
+}
+```
+
+## Interface de paramètres générée automatiquement
+
+Si votre plugin n'a besoin que d'un formulaire de paramètres, utilisez `admin.settingsSchema` sans composants personnalisés :
+
+```typescript
+admin: {
+  settingsSchema: {
+    apiKey: { type: "secret", label: "API Key" },
+    enabled: { type: "boolean", label: "Enabled", default: true }
+  }
+}
+```
+
+EmDash génère automatiquement une page de paramètres. Ajoutez des pages personnalisées uniquement pour des fonctionnalités au-delà des paramètres de base.
+
+## Navigation
+
+Les pages du plugin apparaissent dans la barre latérale d'administration sous le nom du plugin. L'ordre correspond au tableau `admin.pages`.
+
+```typescript
+admin: {
+	pages: [
+		{ path: "/settings", label: "Settings", icon: "settings" }, // First
+		{ path: "/history", label: "History", icon: "history" }, // Second
+		{ path: "/reports", label: "Reports", icon: "chart" }, // Third
+	];
+}
+```
+
+## Configuration de build
+
+Les composants d'administration nécessitent un point d'entrée de build séparé. Configurez votre bundler :
+
+<Tabs>
+  <TabItem label="tsdown">
+```
+typescript title="tsdown.config.ts"
+export default {
+  entry: {
+    index: "src/index.ts",
+    admin: "src/admin.tsx"
+  },
+  format: "esm",
+  dts: true,
+  external: ["react", "react-dom", "emdash", "@emdash-cms/admin"]
+};
+```
+  </TabItem>
+  <TabItem label="tsup">
+```
+typescript title="tsup.config.ts"
+export default {
+  entry: ["src/index.ts", "src/admin.tsx"],
+  format: "esm",
+  dts: true,
+  external: ["react", "react-dom", "emdash", "@emdash-cms/admin"]
+};
+```
+  </TabItem>
+</Tabs>
+
+Gardez React et EmDash admin comme dépendances externes pour éviter de dupliquer les bundles.
+
+## Activation/Désactivation du plugin
+
+Lorsqu'un plugin est désactivé dans l'administration :
+
+- Les liens de la barre latérale sont masqués
+- Les widgets du tableau de bord ne sont pas rendus
+- Les pages d'administration renvoient une erreur 404
+- Les hooks backend s'exécutent toujours (pour la sécurité des données)
+
+Les plugins peuvent vérifier leur état d'activation :
+
+```typescript
+const enabled = await ctx.kv.get<boolean>("_emdash:enabled");
+```
+
+## Exemple : Interface d'administration complète
+
+```
+typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+
+	capabilities: ["network:fetch"],
+	allowedHosts: ["api.analytics.example.com"],
+
+	storage: {
+		events: { indexes: ["type", "createdAt"] },
+	},
+
+	admin: {
+		entry: "@my-org/plugin-analytics/admin",
+		settingsSchema: {
+			trackingId: { type: "string", label: "Tracking ID" },
+			enabled: { type: "boolean", label: "Enabled", default: true },
+		},
+		pages: [
+			{ path: "/dashboard", label: "Dashboard", icon: "chart" },
+			{ path: "/settings", label: "Settings", icon: "settings" },
+		],
+		widgets: [{ id: "events-today", title: "Events Today", size: "third" }],
+	},
+
+	routes: {
+		stats: {
+			handler: async (ctx) => {
+				const today = new Date().toISOString().split("T")[0];
+				const count = await ctx.storage.events!.count({
+					createdAt: { gte: today },
+				});
+				return { today: count };
+			},
+		},
+	},
+});
+```
+
+```
+typescript title="src/admin.tsx"
+import { EventsWidget } from "../../plugins/components/EventsWidget";
+import { DashboardPage } from "../../plugins/components/DashboardPage";
+import { SettingsPage } from "../../plugins/components/SettingsPage";
+
+export const widgets = {
+	"events-today": EventsWidget,
+};
+
+export const pages = {
+	"/dashboard": DashboardPage,
+	"/settings": SettingsPage,
+};
+```

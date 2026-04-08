@@ -1,0 +1,150 @@
+---
+title: Outils d'IA
+description: Connectez Claude, ChatGPT et d'autres assistants d'IA à votre site EmDash.
+---
+
+import { Aside, Steps, Tabs, TabItem, LinkCard } from "@astrojs/starlight/components";
+
+EmDash dispose d'un [serveur MCP intégré](https://modelcontextprotocol.io) qui permet aux assistants IA de travailler directement avec le contenu de votre site. Vous pouvez demander à Claude, ChatGPT ou d'autres outils de rédiger des articles, de mettre à jour des pages, de gérer des médias, de rechercher dans votre contenu, et plus encore — le tout par conversation naturelle.
+
+## Activer le serveur MCP
+
+Le serveur MCP est désactivé par défaut. Activez-le dans votre configuration Astro :
+
+```js title="astro.config.mjs"
+emdash({
+  mcp: true,
+})
+```
+
+## Configuration
+
+L'URL du serveur MCP de votre site est :
+
+```
+https://example.com/_emdash/api/mcp
+```
+
+Remplacez `example.com` par votre domaine. Pour le développement local, utilisez `http://localhost:4321/_emdash/api/mcp`.
+
+<Tabs>
+<TabItem label="Claude">
+
+Les connecteurs ajoutés sur [claude.ai](https://claude.ai) fonctionnent à la fois dans l'application web et Claude Desktop.
+
+<Steps>
+
+1. Allez dans [Paramètres > Connecteurs](https://claude.ai/settings/connectors)
+
+2. Cliquez sur **Ajouter un connecteur personnalisé**
+
+3. Saisissez l'URL du serveur MCP de votre site
+
+4. Cliquez sur **Ajouter** — votre navigateur s'ouvre pour vous connecter et approuver l'accès
+
+5. Démarrez une nouvelle conversation, cliquez sur **+** dans la zone de saisie du chat, puis sur **Connecteurs**, et activez votre site
+
+</Steps>
+
+Pour les plans Team et Enterprise, un Propriétaire ajoute d'abord le connecteur depuis [Paramètres d'administration > Connecteurs](https://claude.ai/admin-settings/connectors). Les membres se connectent ensuite individuellement depuis leurs propres paramètres.
+
+</TabItem>
+<TabItem label="ChatGPT">
+
+ChatGPT prend en charge les serveurs MCP sur les plans Pro, Business et Enterprise.
+
+<Steps>
+
+1. Allez dans **Paramètres > Applications et connecteurs > Paramètres avancés** et activez le **Mode développeur**
+
+2. Allez dans **Paramètres > Connecteurs > Créer**
+
+3. Saisissez un nom, une description et l'URL du serveur MCP de votre site
+
+4. Cliquez sur **Créer**
+
+5. Dans une conversation, cliquez sur **+** près du composeur, puis sur **Plus**, et sélectionnez votre connecteur
+
+</Steps>
+
+</TabItem>
+</Tabs>
+
+<Aside>
+	Vous utilisez un outil de développement comme VS Code, Cursor ou Windsurf ? Consultez la [Référence du serveur MCP](/fr/reference/mcp-server) pour les détails de configuration.
+</Aside>
+
+## Ce que vous pouvez faire
+
+Une fois connecté, vous pouvez demander à l'assistant IA d'effectuer n'importe laquelle de ces opérations en langage naturel. Vous n'avez pas besoin de connaître les noms des outils — décrivez simplement ce que vous voulez.
+
+### Contenu
+
+- **Parcourir le contenu** — "Montre-moi les 10 derniers articles de blog" ou "Trouve toutes les pages brouillons"
+- **Lire le contenu** — "Récupère l'article intitulé 'hello-world' et résume-le"
+- **Créer du contenu** — "Écris un nouvel article de blog sur notre vente d'été" ou "Crée une page brouillon pour la section À propos"
+- **Modifier le contenu** — "Mets à jour la page des tarifs pour mentionner le nouveau forfait" ou "Corrige la faute de frappe dans l'article de la FAQ"
+- **Publier et planifier** — "Publie l'article sur la vente d'été" ou "Planifie l'annonce pour le 1er juin à 9h"
+- **Comparer les versions** — "Montre-moi ce qui a changé sur la page d'accueil depuis sa dernière publication"
+- **Gérer les brouillons** — "Annule les modifications du brouillon sur la page à propos" ou "Duplique le modèle de newsletter"
+- **Traductions** — "Quelles traductions existent pour l'article de bienvenue ?" (lorsque l'i18n est activé)
+
+### Médias
+
+- **Parcourir les médias** — "Liste toutes les images téléchargées" ou "Montre-moi les PDFs dans la médiathèque"
+- **Vérifier les détails** — "Récupère les détails de cet élément média"
+- **Mettre à jour les métadonnées** — "Définis le texte alternatif de l'image principale sur 'Coucher de soleil sur la montagne'"
+- **Supprimer des fichiers** — "Supprime l'ancienne image de bannière"
+
+### Recherche
+
+- **Trouver du contenu** — "Recherche les articles mentionnant 'accessibilité'" ou "Trouve tout ce qui concerne TypeScript dans toutes les collections"
+
+### Taxonomies
+
+- **Parcourir** — "Liste toutes les catégories" ou "Montre-moi les étiquettes"
+- **Créer des termes** — "Ajoute une étiquette 'tutoriels'" ou "Crée une sous-catégorie 'Frontend' sous 'Ingénierie'"
+
+### Menus
+
+- **Voir les menus** — "Montre-moi le menu de navigation principal" ou "Qu'y a-t-il dans le menu du pied de page ?"
+
+### Schéma (Administrateur uniquement)
+
+- **Inspecter** — "Quelles collections existent ?" ou "Montre-moi les champs de la collection des articles"
+- **Créer des collections** — "Crée une nouvelle collection 'témoignages' avec des champs nom et citation"
+- **Modifier le schéma** — "Ajoute un champ booléen 'en vedette' aux articles"
+
+<Aside type="caution">
+	Les modifications de schéma (création/suppression de collections et de champs) modifient la structure de votre base de données et nécessitent des permissions d'Administrateur. L'IA vous informera si vous n'avez pas les droits suffisants.
+</Aside>
+
+### Révisions
+
+- **Voir l'historique** — "Montre l'historique des révisions pour cet article"
+- **Restaurer** — "Restaure l'article à sa version précédente"
+
+## Permissions
+
+Ce que vous pouvez faire via un outil IA dépend de votre rôle dans EmDash. L'assistant IA opère avec les mêmes permissions que vous avez dans le panneau d'administration :
+
+| Rôle | Ce que l'IA peut faire |
+| --- | --- |
+| **Administrateur** | Tout, y compris les modifications de schéma |
+| **Éditeur** | Tout le contenu, les médias, les taxonomies et les menus. Peut consulter le schéma. |
+| **Auteur** | Son propre contenu et ses propres médias |
+| **Contributeur** | Son propre contenu (pas de publication) et ses propres médias |
+
+Si vous tentez une action pour laquelle vous n'avez pas accès, l'IA vous en informera.
+
+## Conseils
+
+- **Soyez précis sur les collections.** Dites "crée un article de blog" plutôt que "crée un article" si vous avez plusieurs collections.
+- **Demandez d'abord le schéma.** Si vous n'êtes pas sûr des champs d'une collection, demandez "Quels champs possède la collection des articles ?" avant de créer ou modifier du contenu.
+- **Relisez avant de publier.** Demandez à l'IA de créer le contenu en tant que brouillon, révisez-le dans le panneau d'administration, puis demandez à l'IA de le publier — ou publiez-le vous-même.
+- **Utilisez la comparaison pour la relecture.** Avant de publier, demandez "Compare les versions en ligne et brouillon de cet article" pour voir exactement ce qui va changer.
+- **Les champs de texte enrichi utilisent Portable Text.** L'IA peut écrire du contenu pour les champs de texte enrichi, mais les mises en forme complexes sont mieux réalisées dans l'éditeur d'administration.
+
+## Pour les développeurs
+
+Le point de terminaison du serveur MCP, les méthodes d'authentification, la découverte OAuth, les paramètres des outils et la gestion des erreurs sont documentés dans la [Référence du serveur MCP](/fr/reference/mcp-server).

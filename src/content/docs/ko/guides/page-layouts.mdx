@@ -1,0 +1,147 @@
+---
+title: 페이지 레이아웃
+description: 템플릿 필드를 사용하여 편집자가 개별 페이지에 대해 다양한 레이아웃을 선택할 수 있도록 합니다.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+WordPress에는 "페이지 템플릿"이 있습니다 — 편집기 내 드롭다운을 통해 각 페이지별 레이아웃을 선택할 수 있습니다(예: 기본, 전체 너비, 랜딩 페이지). EmDash는 `select` 필드를 사용하여 동일한 패턴을 지원합니다.
+
+## 작동 방식
+
+1. 페이지 컬렉션에 `template` 선택 필드를 추가합니다
+2. 각 옵션에 대한 레이아웃 컴포넌트를 생성합니다
+3. 페이지 라우트에서 필드 값을 레이아웃에 매핑합니다
+
+별도의 시스템이 필요하지 않습니다 — 이는 EmDash의 기존 선택 필드와 Astro의 컴포넌트 모델을 사용합니다.
+
+## 필드 추가
+
+관리자 UI에서 페이지 컬렉션에 `template` 슬러그와 레이아웃 옵션(예: "기본", "전체 너비")을 가진 선택 필드를 추가합니다. 또는 시드 데이터에 포함시킵니다:
+
+```json title=".emdash/seed.json"
+{
+  "slug": "template",
+  "label": "Template",
+  "type": "select",
+  "validation": {
+    "options": ["Default", "Full Width"]
+  },
+  "defaultValue": "Default"
+}
+```
+
+## 레이아웃 컴포넌트 생성
+
+각 레이아웃은 콘텐츠를 기본 레이아웃 내에서 다른 스타일링으로 감쌉니다:
+
+```
+astro title="src/layouts/PageDefault.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../guides/Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-default">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-default {
+    max-width: var(--content-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+```
+astro title="src/layouts/PageFullWidth.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../guides/Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-wide">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-wide {
+    max-width: var(--wide-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+## 라우트 연결
+
+페이지 라우트에서 각 레이아웃을 가져오고 템플릿 값을 매핑합니다:
+
+```
+astro title="src/pages/pages/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import PageDefault from "../../../layouts/PageDefault.astro";
+import PageFullWidth from "../../../layouts/PageFullWidth.astro";
+
+const { slug } = Astro.params;
+
+if (!slug) {
+  return Astro.redirect("/404");
+}
+
+const { entry: page } = await getEmDashEntry("pages", slug);
+
+if (!page) {
+  return Astro.redirect("/404");
+}
+
+const layouts = {
+  "Default": PageDefault,
+  "Full Width": PageFullWidth,
+};
+
+const Layout = layouts[page.data.template as keyof typeof layouts] ?? PageDefault;
+---
+
+<Layout page={page} />
+```
+
+라우트는 간결하게 유지됩니다. 각 레이아웃 컴포넌트는 자체 마크업과 스타일링을 관리합니다. 레이아웃을 추가하는 것은: 컴포넌트 생성, 선택 필드에 옵션 추가, 맵에 한 줄 추가하는 것입니다.
+
+<Aside type="tip">
+"full-width" 같은 슬러그보다는 "전체 너비"와 같이 사람이 읽기 쉬운 옵션 이름을 사용하세요. 값은 저장된 값이자 관리자 드롭다운 레이블로 사용됩니다.
+</Aside>
+
+## 더 많은 레이아웃 추가
+
+WordPress 테마에서 흔히 사용되는 선택지:
+
+- **기본** — 좁은 콘텐츠 열, 읽기에 적합
+- **전체 너비** — 더 넓은 콘텐츠 영역, 사이드바 없음
+- **랜딩 페이지** — 헤더/푸터 없음, 히어로 섹션 포함
+- **사이드바** — 사이드바 위젯 영역이 있는 콘텐츠
+
+각각은 `src/layouts/` 디렉토리에 있는 또 다른 Astro 컴포넌트와 라우트의 레이아웃 맵에 추가되는 항목일 뿐입니다.

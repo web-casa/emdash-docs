@@ -1,0 +1,258 @@
+---
+title: EmDash 快速开始
+description: 安装 EmDash、完成初始化向导、发布第一篇内容，并快速了解 Astro 与 EmDash 的基础项目结构。
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+import dashboardImg from "../../../assets/screenshots/admin-dashboard.png";
+import postEditorImg from "../../../assets/screenshots/admin-post-editor.png";
+
+本指南将带你创建第一个 EmDash 站点，从安装到发布第一篇文章。
+
+如果你还在判断 EmDash 是否适合你的 Astro 项目，建议先阅读 [什么是 EmDash？](/zh-cn/what-is-emdash/) 或 [Astro CMS 该怎么选？](/zh-cn/best-astro-cms/)，再回来继续完成安装。
+
+## 先决条件
+
+- **Node.js** v22.12.0 或更高版本（不支持奇数版本）
+- **npm**、**pnpm** 或 **yarn**
+- 一个代码编辑器（推荐 VS Code）
+
+## 创建新项目
+
+<Tabs>
+<TabItem label="npm">
+```bash 
+npm create emdash@latest
+```
+</TabItem>
+<TabItem label="pnpm">
+```bash 
+pnpm create emdash@latest
+```
+</TabItem>
+<TabItem label="yarn">
+```bash 
+yarn create emdash
+```
+</TabItem>
+</Tabs>
+
+按照提示命名你的项目并设置偏好。
+
+## 启动开发服务器
+
+<Steps>
+
+1. 进入你的项目目录：
+
+   ```bash
+   cd my-emdash-site
+   ```
+
+2. 安装依赖：
+
+   ```bash
+   npm install
+   ```
+
+3. 启动开发服务器：
+
+   ```bash
+   npm run dev
+   ```
+
+4. 在浏览器中打开 `http://localhost:4321`
+
+</Steps>
+
+## 完成设置向导
+
+首次访问管理面板时，EmDash 的设置向导会引导你完成初始配置：
+
+<Steps>
+
+1. 访问 `http://localhost:4321/_emdash/admin`
+
+2. 你将被重定向到设置向导。输入：
+   - **站点标题** — 你的站点名称
+   - **标语** — 简短描述
+   - **管理员邮箱** — 你的邮箱地址
+
+3. 点击 **创建站点** 以注册你的通行密钥
+
+4. 你的浏览器将提示你使用Touch ID、Face ID、Windows Hello或安全密钥创建通行密钥
+
+</Steps>
+
+通行密钥注册成功后，你将自动登录并重定向到管理仪表板。
+
+<img src={dashboardImg.src} alt="EmDash管理仪表板，显示内容概览、近期活动和导航侧边栏" />
+
+<Aside>
+	EmDash 使用通行密钥而不是密码登录。通行密钥更安全，也能与浏览器内置的密码管理器配合使用。详情请参阅 [认证指南](/zh-cn/guides/authentication/)。
+</Aside>
+
+## 发布第一篇文章
+
+<Steps>
+
+1. 在管理侧边栏的“内容”下，点击 **文章**。
+
+2. 点击 **新建文章**。
+
+3. 输入标题，并使用富文本编辑器撰写内容。
+
+   <img src={postEditorImg.src} alt="EmDash文章编辑器，带有富文本工具栏和发布侧边栏" />
+
+4. 将状态设置为 **已发布** 并点击 **保存**。
+
+5. 访问你的站点首页即可看到文章实时发布——无需重新构建！
+
+</Steps>
+
+<Aside type="tip">
+	EmDash使用实时内容集合。更改会立即生效，无需重新构建站点。
+</Aside>
+
+## 项目结构
+
+你的 EmDash 项目遵循标准的 Astro 目录结构，只是多了几处与 EmDash 相关的配置：
+
+```
+my-emdash-site/
+├── astro.config.mjs      # Astro + EmDash configuration
+├── src/
+│   ├── live.config.ts    # Live Collections configuration
+│   ├── pages/
+│   │   ├── index.astro   # Homepage
+│   │   └── posts/
+│   │       └── [...slug].astro  # Dynamic post pages
+│   ├── layouts/
+│   │   └── Base.astro    # Base layout
+│   └── components/       # Your Astro components
+├── .emdash/
+│   ├── seed.json         # Template seed file
+│   └── types.ts          # Generated TypeScript types
+└── package.json
+```
+
+## 配置文件
+
+### astro.config.mjs
+
+这个文件用于把 EmDash 配置为 Astro 集成：
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+### src/live.config.ts
+
+这个文件用于把 EmDash 接入 Astro 的内容系统：
+
+```ts title="src/live.config.ts"
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({ loader: emdashLoader() }),
+};
+```
+
+<Aside>
+	EmDash使用单一的 `_emdash` 集合，内部路由到你的内容类型（文章、页面、产品等）。这使你的 `live.config.ts` 保持简洁。
+</Aside>
+
+### 环境变量
+
+对于生产部署，你需要设置：
+
+```bash
+# Required for authentication
+EMDASH_AUTH_SECRET=your-secret-here
+
+# Optional: for content preview
+EMDASH_PREVIEW_SECRET=your-preview-secret
+```
+
+使用以下命令生成安全的认证密钥：
+
+```bash
+npx emdash auth secret
+```
+
+## 在页面中查询内容
+
+你可以在 Astro 页面中使用 EmDash 的查询函数。这些函数遵循 Astro 的实时集合模式：查询集合返回 `{ entries, error }`，查询单条内容返回 `{ entry, error }`：
+
+```astro title="src/pages/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import Base from "../layouts/Base.astro";
+
+const { entries: posts } = await getEmDashCollection("posts");
+---
+
+<Base title="Home">
+  <h1>Latest Posts</h1>
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/posts/${post.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+对于单个条目：
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+
+if (!post) {
+  return Astro.redirect("/404");
+}
+---
+
+<h1>{post.data.title}</h1>
+```
+
+## 生成TypeScript类型
+
+为了获得完整的类型安全，请根据数据库中的内容模型生成类型：
+
+```bash
+npx emdash types
+```
+
+这会在 `.emdash/types.ts` 中生成包含所有集合接口的类型文件。随后编辑器就能自动补全字段名，并提示类型错误。
+
+## 后续步骤
+
+现在你已经拥有一个可运行的 EmDash 站点了。接下来可以继续阅读：
+
+- **[核心概念](/zh-cn/concepts/architecture/)** — 了解EmDash的内部工作原理
+- **[处理内容](/zh-cn/guides/working-with-content/)** — 学习查询和渲染内容
+- **[媒体库](/zh-cn/guides/media-library/)** — 上传和管理图片及文件
+- **[创建博客](/zh-cn/guides/create-a-blog/)** — 构建一个包含分类和标签的完整博客
+- **[部署到Cloudflare](/zh-cn/deployment/cloudflare/)** — 将你的站点部署到生产环境

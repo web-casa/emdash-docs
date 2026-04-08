@@ -1,0 +1,625 @@
+---
+title: CLI-Referenz
+description: Befehlszeilenschnittstelle für EmDash CMS.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Die EmDash CLI bietet Befehle zur Verwaltung einer EmDash CMS-Instanz – Datenbankeinrichtung, Typgenerierung, Inhalts-CRUD, Schemaverwaltung, Medien und mehr.
+
+## Installation
+
+Die CLI ist im `emdash`-Paket enthalten:
+
+```bash
+npm install emdash
+```
+
+Führen Sie Befehle mit `npx emdash` aus oder ergänzen Sie passende Skripte in `package.json`. Das Binary ist außerdem als Kurzform `em` verfügbar.
+
+## Authentifizierung
+
+Befehle, die mit einer laufenden EmDash-Instanz kommunizieren (alles außer `init`, `seed`, `export-seed` und `auth secret`), lösen die Authentifizierung in dieser Reihenfolge auf:
+
+1. **`--token` Flag** – explizites Token in der Befehlszeile
+2. **`EMDASH_TOKEN` Umgebungsvariable**
+3. **Gespeicherte Anmeldedaten** aus `~/.config/emdash/auth.json` (gespeichert durch `emdash login`)
+4. **Dev-Umgehung** – wenn die URL localhost ist und kein Token verfügbar ist, authentifiziert automatisch über den Dev-Umgehungs-Endpunkt
+
+Die meisten Befehle akzeptieren `--url` (Standard `http://localhost:4321`) und `--token` Flags. Bei einem lokalen Dev-Server wird kein Token benötigt.
+
+## Häufige Flags
+
+Diese Flags sind bei allen Remote-Befehlen verfügbar:
+
+| Flag      | Alias | Beschreibung                 | Standard                  |
+| --------- | ----- | --------------------------- | ------------------------ |
+| `--url`   | `-u`  | EmDash-Instanz-URL       | `http://localhost:4321`  |
+| `--token` | `-t`  | Authentifizierungs-Token                  | Aus Umgebung/gespeicherten Anmeldedaten    |
+| `--json`  |       | Ausgabe als JSON (für Pipes) | Automatisch von TTY erkannt   |
+
+## Ausgabe
+
+Wenn stdout ein TTY ist, gibt die CLI Ergebnisse mit consola formatiert aus. Bei Pipes oder wenn `--json` gesetzt ist, gibt sie rohes JSON an stdout aus – geeignet für `jq` oder andere Tools.
+
+## Befehle
+
+### `emdash init`
+
+Datenbank mit Kern-Schema und optionalen Template-Daten initialisieren.
+
+```bash
+npx emdash init [options]
+```
+
+#### Optionen
+
+| Option       | Alias | Beschreibung            | Standard           |
+| ------------ | ----- | ---------------------- | ----------------- |
+| `--database` | `-d`  | Datenbank-Dateipfad     | `./data.db`       |
+| `--cwd`      |       | Arbeitsverzeichnis      | Aktuelles Verzeichnis  |
+| `--force`    | `-f`  | Schema und Seed erneut ausführen | `false`           |
+
+#### Verhalten
+
+1. Liest `emdash`-Konfiguration aus `package.json`
+2. Erstellt die Datenbankdatei bei Bedarf
+3. Führt Kern-Migrationen aus (erstellt Systemtabellen)
+4. Führt Template `schema.sql` aus, falls konfiguriert
+5. Führt Template `seed.sql` aus, falls konfiguriert
+
+<Aside>
+	Wenn die Datenbank bereits Collections enthält, überspringt `init` Schema und Seed, es sei denn, `--force` wird
+	verwendet.
+</Aside>
+
+### `emdash dev`
+
+Entwicklungsserver mit automatischer Datenbankeinrichtung starten.
+
+```bash
+npx emdash dev [options]
+```
+
+#### Optionen
+
+| Option       | Alias | Beschreibung                              | Standard           |
+| ------------ | ----- | ---------------------------------------- | ----------------- |
+| `--database` | `-d`  | Datenbank-Dateipfad                       | `./data.db`       |
+| `--types`    | `-t`  | Generiere Typen von Remote-Instanz vor dem Start | `false`         |
+| `--port`     | `-p`  | Dev-Server-Port                          | `4321`            |
+| `--cwd`      |       | Arbeitsverzeichnis                        | Aktuelles Verzeichnis  |
+
+#### Beispiele
+
+```bash
+# Start dev server
+npx emdash dev
+
+# Benutzerdefinierter Port
+npx emdash dev --port 3000
+
+# Generiere Typen von Remote-Instanz vor dem Start
+npx emdash dev --types
+```
+
+#### Verhalten
+
+1. Prüft und führt ausstehende Datenbank-Migrationen aus
+2. Wenn `--types` gesetzt ist, generiert TypeScript-Typen von einer Remote-Instanz (URL aus `EMDASH_URL` Umgebung oder `emdash.url` in `package.json`)
+3. Startet Astro-Dev-Server mit gesetzter `EMDASH_DATABASE_URL`
+
+### `emdash types`
+
+Generiere TypeScript-Typen aus dem Schema einer laufenden EmDash-Instanz.
+
+```bash
+npx emdash types [options]
+```
+
+#### Optionen
+
+| Option     | Alias | Beschreibung              | Standard              |
+| ---------- | ----- | ------------------------ | -------------------- |
+| `--url`    | `-u`  | EmDash-Instanz-URL    | `http://localhost:4321` |
+| `--token`  | `-t`  | Authentifizierungs-Token               | Aus Umgebung/gespeicherten Anmeldedaten |
+| `--output` | `-o`  | Ausgabepfad für Typen    | `.emdash/types.ts` |
+| `--cwd`    |       | Arbeitsverzeichnis        | Aktuelles Verzeichnis    |
+
+#### Beispiele
+
+```bash
+# Typen vom lokalen Entwicklungsserver generieren
+npx emdash types
+
+# Generiere von Remote-Instanz
+npx emdash types --url https://my-site.pages.dev
+
+# Benutzerdefinierter Ausgabepfad
+npx emdash types --output src/types/emdash.ts
+```
+
+#### Verhalten
+
+1. Holt das Schema von der Instanz
+2. Generiert TypeScript-Typdefinitionen
+3. Schreibt Typen in die Ausgabedatei
+4. Schreibt `schema.json` daneben als Referenz
+
+### `emdash login`
+
+Bei einer EmDash-Instanz mit OAuth Device Flow anmelden.
+
+```bash
+npx emdash login [options]
+```
+
+#### Optionen
+
+| Option  | Alias | Beschreibung           | Standard                |
+| ------- | ----- | --------------------- | ---------------------- |
+| `--url` | `-u`  | EmDash-Instanz-URL | `http://localhost:4321` |
+
+#### Verhalten
+
+1. Entdeckt Authentifizierungs-Endpunkte von der Instanz
+2. Wenn localhost und keine Auth konfiguriert, verwendet automatisch Dev-Umgehung
+3. Andernfalls startet OAuth Device Flow – zeigt einen Code an und öffnet Ihren Browser
+4. Fragt auf Autorisierung ab, speichert dann Anmeldedaten in `~/.config/emdash/auth.json`
+
+Gespeicherte Anmeldedaten werden automatisch von allen nachfolgenden Befehlen für dieselbe Instanz verwendet.
+
+### `emdash logout`
+
+Abmelden und gespeicherte Anmeldedaten entfernen.
+
+```bash
+npx emdash logout [options]
+```
+
+#### Optionen
+
+| Option  | Alias | Beschreibung           | Standard                |
+| ------- | ----- | --------------------- | ---------------------- |
+| `--url` | `-u`  | EmDash-Instanz-URL | `http://localhost:4321` |
+
+### `emdash whoami`
+
+Zeigt den aktuell authentifizierten Benutzer an.
+
+```bash
+npx emdash whoami [options]
+```
+
+#### Optionen
+
+| Option    | Alias | Beschreibung           | Standard                |
+| --------- | ----- | --------------------- | ---------------------- |
+| `--url`   | `-u`  | EmDash-Instanz-URL | `http://localhost:4321` |
+| `--token` | `-t`  | Authentifizierungs-Token            | Aus Umgebung/gespeicherten Anmeldedaten  |
+| `--json`  |       | Ausgabe als JSON        |                        |
+
+Zeigt E-Mail, Name, Rolle, Authentifizierungsmethode und Instanz-URL an.
+
+### `emdash content`
+
+Inhaltselemente verwalten. Alle Unterbefehle nutzen die Remote-API über `EmDashClient`.
+
+#### `content list <collection>`
+
+```bash
+npx emdash content list posts
+npx emdash content list posts --status published --limit 10
+```
+
+| Option     | Beschreibung          |
+| ---------- | -------------------- |
+| `--status` | Nach Status filtern     |
+| `--limit`  | Maximale Elemente        |
+| `--cursor` | Paginierungs-Cursor    |
+
+#### `content get <collection> <id>`
+
+```bash
+npx emdash content get posts 01ABC123
+npx emdash content get posts 01ABC123 --raw
+```
+
+| Option  | Beschreibung                                      |
+| ------- | ------------------------------------------------ |
+| `--raw` | Gibt rohen Portable Text zurück (überspringt Markdown-Konvertierung) |
+
+Die Antwort enthält ein `_rev`-Token — übergebe es an `content update`, um zu beweisen, dass du gesehen hast, was du überschreibst.
+
+#### `content create <collection>`
+
+```bash
+npx emdash content create posts --data '{"title": "Hello"}'
+npx emdash content create posts --file post.json --slug hello-world
+cat post.json | npx emdash content create posts --stdin
+```
+
+| Option     | Beschreibung                    |
+| ---------- | ------------------------------ |
+| `--data`   | JSON-String mit Inhaltsdaten  |
+| `--file`   | Daten aus einer JSON-Datei lesen     |
+| `--stdin`  | Daten von stdin lesen           |
+| `--slug`   | Inhalts-Slug                   |
+| `--status` | Initialer Status (draft, published) |
+
+Stelle Daten über genau eine der Optionen `--data`, `--file` oder `--stdin` bereit.
+
+#### `content update <collection> <id>`
+
+Wie ein Dateieditor, der verlangt, dass du zuerst liest, bevor du schreibst — du musst das `_rev`-Token aus einem vorherigen `get` angeben, um zu beweisen, dass du den aktuellen Zustand gesehen hast. Dies verhindert das versehentliche Überschreiben von Änderungen, die du nicht gesehen hast.
+
+```bash
+# 1. Element lesen und `_rev` notieren
+npx emdash content get posts 01ABC123
+
+# 2. Update mit dem _rev aus Schritt 1
+npx emdash content update posts 01ABC123 \
+  --rev MToyMDI2LTAyLTE0... \
+	  --data '{"title": "Aktualisiert"}'
+```
+
+| Option   | Beschreibung                            |
+| -------- | -------------------------------------- |
+| `--rev`  | Revisions-Token von `get` (erforderlich)   |
+| `--data` | JSON-String mit Inhaltsdaten          |
+| `--file` | Daten aus einer JSON-Datei lesen             |
+
+Wenn sich das Element seit Ihrem `get` geändert hat, antwortet der Server mit `409 Conflict`. Lesen Sie den Eintrag erneut und versuchen Sie es noch einmal.
+
+#### `content delete <collection> <id>`
+
+```bash
+npx emdash content delete posts 01ABC123
+```
+
+Löscht das Inhaltselement weich (verschiebt es in den Papierkorb).
+
+#### `content publish <collection> <id>`
+
+```bash
+npx emdash content publish posts 01ABC123
+```
+
+#### `content unpublish <collection> <id>`
+
+```bash
+npx emdash content unpublish posts 01ABC123
+```
+
+#### `content schedule <collection> <id>`
+
+```bash
+npx emdash content schedule posts 01ABC123 --at 2026-03-01T09:00:00Z
+```
+
+| Option | Beschreibung                     |
+| ------ | ------------------------------- |
+| `--at` | ISO 8601 Datum/Uhrzeit (erforderlich)    |
+
+#### `content restore <collection> <id>`
+
+```bash
+npx emdash content restore posts 01ABC123
+```
+
+Stellt ein gelöschtes Inhaltselement wieder her.
+
+### `emdash schema`
+
+Verwalte Sammlungen und Felder.
+
+#### `schema list`
+
+```bash
+npx emdash schema list
+```
+
+Listet alle Sammlungen auf.
+
+#### `schema get <collection>`
+
+```bash
+npx emdash schema get posts
+```
+
+Zeigt eine Sammlung mit allen ihren Feldern an.
+
+#### `schema create <collection>`
+
+```bash
+npx emdash schema create articles --label Articles
+npx emdash schema create articles --label Articles --label-singular Article --description "Blog articles"
+```
+
+| Option             | Beschreibung                     |
+| ------------------ | ------------------------------- |
+| `--label`          | Sammlungsbezeichnung (erforderlich)     |
+| `--label-singular` | Singularbezeichnung                  |
+| `--description`    | Sammlungsbeschreibung          |
+
+#### `schema delete <collection>`
+
+```bash
+npx emdash schema delete articles
+npx emdash schema delete articles --force
+```
+
+| Option    | Beschreibung         |
+| --------- | ------------------- |
+| `--force` | Bestätigung überspringen   |
+
+Fordert zur Bestätigung auf, es sei denn, `--force` ist gesetzt.
+
+#### `schema add-field <collection> <field>`
+
+```bash
+npx emdash schema add-field posts body --type portableText --label "Body Content"
+npx emdash schema add-field posts featured --type boolean --required
+```
+
+| Option       | Beschreibung                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| `--type`     | Feldtyp: string, text, number, integer, boolean, datetime, image, reference, portableText, json (erforderlich) |
+| `--label`    | Feldbezeichnung (Standard ist Feld-Slug)                                                             |
+| `--required` | Ob das Feld erforderlich ist                                                                    |
+
+#### `schema remove-field <collection> <field>`
+
+```bash
+npx emdash schema remove-field posts featured
+```
+
+### `emdash media`
+
+Verwalte Medienelemente.
+
+#### `media list`
+
+```bash
+npx emdash media list
+npx emdash media list --mime image/png --limit 20
+```
+
+| Option     | Beschreibung              |
+| ---------- | ------------------------ |
+| `--mime`   | Nach MIME-Typ filtern      |
+| `--limit`  | Anzahl der Elemente          |
+| `--cursor` | Paginierungs-Cursor        |
+
+#### `media upload <file>`
+
+```bash
+npx emdash media upload ./photo.jpg
+npx emdash media upload ./photo.jpg --alt "A sunset" --caption "Taken in Bristol"
+```
+
+| Option      | Beschreibung    |
+| ----------- | -------------- |
+| `--alt`     | Alt-Text       |
+| `--caption` | Bildunterschrift   |
+
+#### `media get <id>`
+
+```bash
+npx emdash media get 01MEDIA123
+```
+
+#### `media delete <id>`
+
+```bash
+npx emdash media delete 01MEDIA123
+```
+
+### `emdash search`
+
+Volltextsuche über Inhalte hinweg.
+
+```bash
+npx emdash search "hello world"
+npx emdash search "hello" --collection posts --limit 5
+```
+
+| Option         | Alias | Beschreibung          |
+| -------------- | ----- | -------------------- |
+| `--collection` | `-c`  | Nach Sammlung filtern |
+| `--limit`      | `-l`  | Maximale Ergebnisse      |
+
+### `emdash taxonomy`
+
+Verwalte Taxonomien und Begriffe.
+
+#### `taxonomy list`
+
+```bash
+npx emdash taxonomy list
+```
+
+#### `taxonomy terms <name>`
+
+```bash
+npx emdash taxonomy terms categories
+npx emdash taxonomy terms tags --limit 50
+```
+
+| Option     | Alias | Beschreibung       |
+| ---------- | ----- | ----------------- |
+| `--limit`  | `-l`  | Maximale Begriffe     |
+| `--cursor` |       | Paginierungs-Cursor |
+
+#### `taxonomy add-term <taxonomy>`
+
+```bash
+npx emdash taxonomy add-term categories --name "Tech" --slug tech
+npx emdash taxonomy add-term categories --name "Frontend" --parent 01PARENT123
+```
+
+| Option     | Beschreibung                              |
+| ---------- | ---------------------------------------- |
+| `--name`   | Begriffslabel (erforderlich)                    |
+| `--slug`   | Begriffsslug (Standard ist slugifizierter Name)   |
+| `--parent` | Übergeordnete Begriff-ID (für hierarchische Taxonomien) |
+
+### `emdash menu`
+
+Verwalte Navigationsmenüs.
+
+#### `menu list`
+
+```bash
+npx emdash menu list
+```
+
+#### `menu get <name>`
+
+```bash
+npx emdash menu get primary
+```
+
+Gibt das Menü mit allen seinen Elementen zurück.
+
+### `emdash seed`
+
+Wende eine Seed-Datei auf die Datenbank an. Dieser Befehl arbeitet direkt auf einer lokalen SQLite-Datei (kein laufender Server erforderlich).
+
+```bash
+npx emdash seed [path] [options]
+```
+
+#### Argumente
+
+| Argument | Beschreibung       | Standard               |
+| -------- | ----------------- | --------------------- |
+| `path`   | Pfad zur Seed-Datei | `.emdash/seed.json` |
+
+#### Optionen
+
+| Option             | Alias | Beschreibung                             | Standard                     |
+| ------------------ | ----- | --------------------------------------- | --------------------------- |
+| `--database`       | `-d`  | Datenbankdateipfad                      | `./data.db`                 |
+| `--cwd`            |       | Arbeitsverzeichnis                       | Aktuelles Verzeichnis           |
+| `--validate`       |       | Nur validieren, nicht anwenden              | `false`                     |
+| `--no-content`     |       | Beispielinhalt überspringen                     | `false`                     |
+| `--on-conflict`    |       | Konfliktbehandlung: skip, update, error  | `skip`                      |
+| `--uploads-dir`    |       | Verzeichnis für Medien-Uploads             | `.emdash/uploads`         |
+| `--media-base-url` |       | Basis-URL für Mediendateien                | `/_emdash/api/media/file` |
+| `--base-url`       |       | Basis-URL der Website (für absolute Medien-URLs) |                             |
+
+#### Auflösung der Seed-Datei
+
+Der Befehl sucht nach Seed-Dateien in dieser Reihenfolge:
+
+1. Positionsargument (falls angegeben)
+2. `.emdash/seed.json` (Konvention)
+3. Pfad aus dem `package.json`-Feld `emdash.seed`
+
+### `emdash export-seed`
+
+Exportiert Datenbankschema und -inhalt als Seed-Datei. Arbeitet direkt mit einer lokalen SQLite-Datei.
+
+```bash
+npx emdash export-seed [options] > seed.json
+```
+
+#### Optionen
+
+| Option           | Alias | Beschreibung                                          | Standard           |
+| ---------------- | ----- | ---------------------------------------------------- | ----------------- |
+| `--database`     | `-d`  | Datenbankdateipfad                                   | `./data.db`       |
+| `--cwd`          |       | Arbeitsverzeichnis                                    | Aktuelles Verzeichnis |
+| `--with-content` |       | Inhalt einbeziehen (alle oder kommagetrennte Sammlungen) |                   |
+| `--no-pretty`    |       | JSON-Formatierung deaktivieren                              | `false`           |
+
+#### Ausgabeformat
+
+Die exportierte Seed-Datei enthält:
+
+- **Einstellungen**: Seitentitel, Slogan, Social-Media-Links
+- **Sammlungen**: Alle Sammlungsdefinitionen mit Feldern
+- **Taxonomien**: Taxonomiedefinitionen und Begriffe
+- **Menüs**: Navigationsmenüs mit Einträgen
+- **Widget-Bereiche**: Widget-Bereiche und Widgets
+- **Inhalt** (falls angefordert): Einträge mit `$media`-Referenzen und `$ref:`-Syntax für Portabilität
+
+### `emdash auth secret`
+
+Generiert ein sicheres Authentifizierungsgeheimnis für Ihren Deployment.
+
+```bash
+npx emdash auth secret
+```
+
+Gibt ein zufälliges Geheimnis aus, das für `EMDASH_AUTH_SECRET` geeignet ist.
+
+## Generierte Dateien
+
+### `.emdash/types.ts`
+
+TypeScript-Schnittstellen, generiert von `emdash types`:
+
+```ts
+// Generated by EmDash CLI
+// Do not edit manually - run `emdash types` to regenerate
+
+import type { PortableTextBlock } from "emdash";
+
+export interface Post {
+	id: string;
+	title: string;
+	content: PortableTextBlock[];
+	publishedAt: Date | null;
+}
+```
+
+### `.emdash/schema.json`
+
+Roh-Schema-Export für Tooling:
+
+```json
+{
+  "version": "a1b2c3d4",
+  "collections": [
+    {
+      "slug": "posts",
+      "label": "Posts",
+      "fields": [...]
+    }
+  ]
+}
+```
+
+## Umgebungsvariablen
+
+| Variable                  | Beschreibung                              |
+| ------------------------- | ---------------------------------------- |
+| `EMDASH_DATABASE_URL`   | Datenbank-URL (wird automatisch von `dev` gesetzt) |
+| `EMDASH_TOKEN`          | Authentifizierungstoken für Remote-Operationen          |
+| `EMDASH_URL`            | Standard-Remote-URL für `types` und `dev --types` |
+| `EMDASH_AUTH_SECRET`    | Geheimnis für Passkey-Authentifizierung         |
+| `EMDASH_PREVIEW_SECRET` | Geheimnis für die Generierung von Vorschau-Tokens       |
+
+## Paket-Skripte
+
+```json
+{
+	"scripts": {
+		"dev": "emdash dev",
+		"init": "emdash init",
+		"types": "emdash types",
+		"seed": "emdash seed",
+		"export-seed": "emdash export-seed",
+		"db:reset": "rm -f data.db && emdash init"
+	}
+}
+```
+
+## Exit-Codes
+
+| Code | Beschreibung                              |
+| ---- | ---------------------------------------- |
+| `0`  | Erfolg                                  |
+| `1`  | Fehler (Konfiguration, Netzwerk, Datenbank) |

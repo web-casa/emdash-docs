@@ -1,0 +1,463 @@
+---
+title: 媒体库
+description: 在 EmDash 中上传和管理图片与文件。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+import mediaLibraryImg from "../../../../assets/screenshots/admin-media-library.png";
+
+EmDash 包含一个用于管理图片、文档和其他文件的媒体库。本指南涵盖如何上传、组织以及在您的内容中使用媒体。
+
+## 访问媒体库
+
+通过点击管理侧边栏中的 **媒体** 来打开媒体库。库中会显示所有已上传文件的预览、文件名和上传日期。
+
+<img src={mediaLibraryImg.src} alt="EmDash 媒体库，显示带有上传按钮的图片网格" />
+
+## 上传文件
+
+### 从媒体库上传
+
+1. 点击管理侧边栏中的 **媒体**
+2. 点击 **上传** 或将文件拖放到上传区域
+3. 从您的电脑中选择一个或多个文件
+4. 等待上传完成
+
+### 从内容编辑器上传
+
+1. 在富文本编辑器中，点击图片按钮
+2. 在媒体选择器中点击 **上传**
+3. 从您的电脑中选择一个文件
+4. 添加替代文本并点击 **插入**
+
+## 支持的文件类型
+
+EmDash 支持常见的网页文件类型：
+
+| 类别      | 扩展名                                                       |
+| --------- | ------------------------------------------------------------ |
+| 图片      | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.avif`, `.svg`    |
+| 文档      | `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx`    |
+| 视频      | `.mp4`, `.webm`, `.mov`                                      |
+| 音频      | `.mp3`, `.wav`, `.ogg`                                       |
+
+<Aside type="caution">
+	最大文件大小取决于您的存储配置。默认限制为每个文件 10MB。
+</Aside>
+
+## 存储后端
+
+EmDash 支持多种存储后端。在您的 Astro 配置中配置存储：
+
+<Tabs>
+  <TabItem label="本地存储">
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: local({
+        directory: "./uploads",
+        baseUrl: "/_emdash/api/media/file",
+      }),
+    }),
+  ],
+});
+```
+
+文件存储在 `./uploads` 目录中。适用于开发和单服务器部署。
+
+  </TabItem>
+  <TabItem label="Cloudflare R2">
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { r2 } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: r2({
+        binding: "MEDIA_BUCKET",
+        publicUrl: "https://media.example.com",
+      }),
+    }),
+  ],
+});
+```
+
+需要在 `wrangler.jsonc` 中配置 R2 存储桶：
+
+```jsonc title="wrangler.jsonc"
+{
+	"r2_buckets": [
+		{
+			"binding": "MEDIA_BUCKET",
+			"bucket_name": "my-media-bucket",
+		},
+	],
+}
+```
+
+  </TabItem>
+  <TabItem label="S3 兼容">
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { s3 } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: s3({
+        endpoint: "https://s3.amazonaws.com",
+        bucket: "my-media-bucket",
+        accessKeyId: process.env.S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+        region: "us-east-1",
+        publicUrl: "https://media.example.com",
+      }),
+    }),
+  ],
+});
+```
+
+适用于 Cloudflare R2（通过 S3 API）、MinIO 和其他 S3 兼容服务。
+
+  </TabItem>
+</Tabs>
+
+## 上传工作原理
+
+EmDash 使用签名 URL 进行安全上传：
+
+1. 客户端向 API 请求上传 URL
+2. 服务器生成一个带有效期的签名 URL
+3. 客户端使用签名 URL 直接上传到存储
+4. 服务器在数据库中记录文件元数据
+
+这种方法使大文件不经过您的应用服务器，并支持直接上传到云存储。
+
+<Aside>
+	R2 绑定不支持预签名 URL。使用 R2 绑定适配器时，上传会经过您的 Worker。
+</Aside>
+
+## 组织媒体
+
+### 文件夹
+
+创建文件夹来组织您的媒体：
+
+1. 在媒体库中点击 **新建文件夹**
+2. 输入文件夹名称
+3. 点击 **创建**
+4. 将文件拖入文件夹中进行组织
+
+### 搜索
+
+使用搜索框按名称查找文件。搜索匹配部分文件名。
+
+### 筛选器
+
+按以下条件筛选媒体：
+
+-   **类型** - 图片、文档、视频、音频
+-   **日期** - 上传日期范围
+-   **文件夹** - 特定文件夹
+
+## 在内容中使用媒体
+
+### 在富文本编辑器中
+
+1. 将光标置于您想要插入图片的位置
+2. 点击工具栏中的图片按钮
+3. 从媒体库中选择一张图片或上传新图片
+4. 输入替代文本
+5. 点击 **插入**
+
+### 作为特色图片
+
+1. 在编辑器中打开一个内容条目
+2. 在侧边栏中找到 **特色图片** 字段
+3. 点击 **选择图片**
+4. 从媒体库中选择或上传
+5. 点击 **保存**
+
+### 在自定义字段中
+
+对于配置为图片或文件类型的字段，点击该字段可打开媒体选择器。
+
+## 在模板中显示媒体
+
+从您的内容数据中访问媒体 URL：
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <img
+    src={post.data.featured_image}
+    alt={post.data.featured_image_alt ?? ""}
+  />
+)}
+```
+
+### 响应式图片
+
+对于响应式图片，使用 Astro 的 Image 组件配合外部 URL：
+
+### 响应式图片
+
+对于响应式图片，使用 Astro 的 Image 组件配合外部 URL：
+
+```astro
+---
+import { Image } from "astro:assets";
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <Image
+    src={post.data.featured_image}
+    alt={post.data.featured_image_alt ?? ""}
+    width={800}
+    height={450}
+  />
+)}
+```
+
+<Aside type="tip">
+在 `astro.config.mjs` 中配置允许的图片域名，以便将 Image 组件与外部 URL 一起使用：
+
+```js
+export default defineConfig({
+	image: {
+		domains: ["media.example.com"],
+	},
+});
+```
+
+</Aside>
+
+## 删除媒体
+
+1. 选择要删除的文件
+2. 点击 **删除**
+3. 确认删除
+
+<Aside type="caution">
+	删除媒体不会移除您内容中对它的引用。请确保更新或移除使用了已删除文件的内容。
+</Aside>
+
+## 媒体 API
+
+使用管理 API 以编程方式访问媒体。
+
+### 上传文件
+
+以多部分表单数据形式上传媒体：
+
+```bash
+POST /_emdash/api/media
+Content-Type: multipart/form-data
+Authorization: Bearer YOUR_API_TOKEN
+
+file=<binary file data>
+```
+
+响应：
+
+```json
+{
+	"success": true,
+	"data": {
+		"item": {
+			"id": "01ABC123",
+			"filename": "hero-image.jpg",
+			"mime_type": "image/jpeg",
+			"storage_key": "media/abc123/hero-image.jpg",
+			"width": 1200,
+			"height": 800
+		}
+	}
+}
+```
+
+### 列出媒体
+
+```bash
+GET /_emdash/api/media?prefix=images/&limit=20
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+### 删除媒体
+
+```bash
+DELETE /_emdash/api/media/images/hero.jpg
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+## 媒体提供商
+
+除了本地存储，EmDash 还支持外部媒体提供商，用于专门的图片和视频托管。媒体提供商会作为选项卡出现在媒体选择器中，让编辑者可以从多个来源进行选择。
+
+### 可用提供商
+
+<Tabs>
+  <TabItem label="Cloudflare Images">
+[Cloudflare Images](https://developers.cloudflare.com/images/) 提供图片托管服务，具备自动优化、调整大小和格式转换功能。
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareImages } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      // ... database, storage config
+      mediaProviders: [
+        cloudflareImages({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_IMAGES_TOKEN,
+          // Optional: custom delivery domain
+          deliveryDomain: "images.example.com",
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+**功能：**
+- 直接从管理界面浏览和上传图片
+- 自动图片优化和格式转换
+- 基于 URL 的转换（调整大小、裁剪、格式）
+- 用于响应式图片的灵活变体
+
+</TabItem>
+<TabItem label="Cloudflare Stream">
+[Cloudflare Stream](https://developers.cloudflare.com/stream/) 提供视频托管服务，支持 HLS/DASH 自适应流。
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareStream } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      // ... database, storage config
+      mediaProviders: [
+        cloudflareStream({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_STREAM_TOKEN,
+          // Optional: player settings
+          controls: true,
+          autoplay: false,
+          loop: false,
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+**功能：**
+- 从管理界面浏览、搜索和上传视频
+- HLS 和 DASH 自适应流
+- 自动缩略图生成
+- 大文件直接上传
+
+</TabItem>
+</Tabs>
+
+### 使用多个提供商
+
+您可以配置多个提供商。每个提供商都会作为选项卡出现在媒体选择器中：
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareImages, cloudflareStream } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      database: d1({ binding: "DB" }),
+      storage: r2({ binding: "MEDIA" }),
+      mediaProviders: [
+        cloudflareImages({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_IMAGES_TOKEN,
+        }),
+        cloudflareStream({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_STREAM_TOKEN,
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+本地媒体库（"库" 选项卡）始终与任何已配置的提供商一起可用。
+
+### 渲染提供商媒体
+
+使用 `Image` 组件来渲染媒体：
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { Image } from "emdash/ui";
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <Image
+    image={post.data.featured_image}
+    width={800}
+    height={450}
+  />
+)}
+```
+
+该组件会自动：
+- 从存储的值中检测提供商
+- 渲染一个优化的 `<img>` 元素
+- 应用提供商特定的优化（例如，Cloudflare Images 转换）
+
+### MediaValue 类型
+
+媒体字段存储一个包含提供商信息的 `MediaValue` 对象：
+
+```ts
+interface MediaValue {
+  provider?: string;    // Provider ID, defaults to "local"
+  id: string;           // Provider-specific ID
+  src?: string;         // Direct URL (for local media or legacy data)
+  previewUrl?: string;  // Preview URL for admin display (external providers)
+  filename?: string;    // Original filename
+  mimeType?: string;    // MIME type
+  width?: number;       // Image/video width
+  height?: number;      // Image/video height
+  alt?: string;         // Alt text
+  meta?: Record<string, unknown>; // Provider-specific metadata
+}
+```
+
+这使得无论媒体托管在何处，EmDash 都能正确渲染媒体。
+
+## 后续步骤
+
+-   [处理内容](/zh-cn/guides/working-with-content/) - 在您的内容中使用媒体
+-   [创建博客](/zh-cn/guides/create-a-blog/) - 为博客文章添加图片
+-   [查询内容](/zh-cn/guides/querying-content/) - 在模板中显示媒体

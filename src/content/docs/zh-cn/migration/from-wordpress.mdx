@@ -1,0 +1,256 @@
+---
+title: 从 WordPress 迁移到 EmDash
+description: 一份从 WordPress 迁移到 EmDash 的分步指南，涵盖内容导出、导入、媒体、分类法以及重定向规划。
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 提供了从 WordPress 的完整迁移路径。通过管理仪表板导入您的文章、页面、媒体和分类法——无需 CLI。
+
+如果你想先看更高层的迁移路线，再决定是否继续细化，请先阅读 [如何从 WordPress 迁移到 Astro + EmDash](/zh-cn/wordpress-to-astro-with-emdash/) 和 [EmDash 与 WordPress 对比](/zh-cn/emdash-vs-wordpress/)。
+
+## 开始之前
+
+<CardGrid>
+	<Card title="导出您的内容" icon="document">
+		在 WordPress 中，转到 **工具 → 导出** 并下载完整的导出文件 (.xml)。
+	</Card>
+	<Card title="备份您的站点" icon="warning">
+		在您确认迁移成功之前，请保持您的 WordPress 站点正常运行。
+	</Card>
+</CardGrid>
+
+## 导入方法
+
+EmDash 支持三种导入 WordPress 内容的方法：
+
+| 方法               | 最适合                         | 包含草稿 | 需要认证 |
+| ------------------ | ------------------------------ | --------------- | ------------- |
+| WXR 文件上传       | 完整迁移                       | 是             | 否            |
+| WordPress.com      | WordPress.com 托管的站点       | 是             | OAuth         |
+| REST API (探测)    | 导出前检查内容                 | 否              | 可选          |
+
+对于大多数迁移，推荐使用 WXR 文件上传。它能捕获所有内容，包括草稿、自定义字段和私有文章。
+
+## WXR 文件导入
+
+<Steps>
+
+1. **从 WordPress 导出**
+
+    在您的 WordPress 管理面板，转到 **工具 → 导出 → 所有内容 → 下载导出文件**。
+
+2. **打开导入向导**
+
+    在 EmDash 中，转到 **管理 → 设置 → 导入 → WordPress**。
+
+3. **上传您的导出文件**
+
+    拖放您的 `.xml` 文件或点击浏览。文件将在您的浏览器中解析。
+
+4. **查看检测到的内容**
+
+    向导会显示找到的内容：
+
+    ```
+   Found in export:
+   ├── Posts: 127 → posts [New collection]
+   ├── Pages: 12  → pages [Add fields]
+   └── Media: 89 attachments
+   ```
+
+5. **配置映射**
+
+    切换要导入的文章类型。EmDash 会自动：
+    - 为未映射的文章类型创建新集合
+    - 向现有集合添加缺失的字段
+    - 警告字段类型冲突
+
+6. **执行导入**
+
+    点击 **导入内容**。处理每个项目时会显示进度。
+
+7. **导入媒体（可选）**
+
+    内容导入后，选择是否下载媒体文件。EmDash 会：
+    - 从您的 WordPress URL 下载
+    - 根据内容哈希去重
+    - 自动重写您内容中的 URL
+
+</Steps>
+
+<Aside type="tip">
+	重新运行导入是安全的。项目通过 WordPress ID 匹配，因此不会创建重复项。
+</Aside>
+
+## 内容转换
+
+### Gutenberg 到 Portable Text
+
+EmDash 将 Gutenberg 区块转换为 [Portable Text](https://github.com/portabletext/portabletext)，这是一种结构化内容格式。
+
+| Gutenberg 区块     | Portable Text                | 说明                         |
+| ------------------ | ---------------------------- | ----------------------------- |
+| `core/paragraph`   | `block` style="normal"       | 保留行内标记                  |
+| `core/heading`     | `block` style="h1-h6"        | 级别来自区块属性              |
+| `core/image`       | `image` block                | 媒体引用已更新                |
+| `core/list`        | `block` with `listItem` type | 有序和无序列表                |
+| `core/quote`       | `block` style="blockquote"   | 包含引用                      |
+| `core/code`        | `code` block                 | 保留语言属性                  |
+| `core/embed`       | `embed` block                | 存储 URL 和提供者             |
+| `core/gallery`     | `gallery` block              | 图像引用数组                  |
+| `core/columns`     | `columns` block              | 保留嵌套内容                  |
+| 未知区块           | `htmlBlock`                  | 保留原始 HTML 以供审查        |
+
+未知区块将作为 `htmlBlock` 存储，包含原始 HTML 和区块元数据。您可以手动审查和转换这些内容，或创建自定义的 Portable Text 组件来渲染它们。
+
+### 经典编辑器内容
+
+来自经典编辑器的 HTML 被转换为 Portable Text 区块。行内样式 (`<strong>`, `<em>`, `<a>`) 成为 span 上的标记。
+
+### 状态映射
+
+| WordPress 状态 | EmDash 状态 |
+| ---------------- | --------------- |
+| `publish`        | `published`     |
+| `draft`          | `draft`         |
+| `pending`        | `pending`       |
+| `private`        | `private`       |
+| `future`         | `scheduled`     |
+| `trash`          | `archived`      |
+
+## 分类法导入
+
+分类和标签作为分类法导入，并保留层级结构：
+
+```
+WordPress:                    EmDash:
+├── Categories (hierarchical) ├── taxonomies table
+│   ├── News                  │   ├── category/news
+│   │   ├── Local             │   ├── category/local (parent: news)
+│   │   └── World             │   ├── category/world (parent: news)
+│   └── Sports                │   └── category/sports
+└── Tags (flat)               └── content_taxonomies junction
+    ├── featured                  ├── tag/featured
+    └── breaking                  └── tag/breaking
+```
+
+## 自定义字段和 ACF
+
+WordPress 文章元数据和 ACF 字段在导入过程中会被分析：
+
+<Steps>
+
+1. **分析阶段**
+
+    向导检测自定义字段并建议 EmDash 字段类型：
+
+    ```
+   Custom Fields:
+   ├── subtitle (string, 45 posts)
+   ├── _yoast_wpseo_title → seo.title (string, 127 posts)
+   ├── _thumbnail_id → featuredImage (reference, 89 posts)
+   └── price (number, 23 posts)
+   ```
+
+2. **字段映射**
+
+    默认情况下，内部 WordPress 字段（以 `_edit_`、`_wp_` 开头）会被隐藏。SEO 插件字段映射到 `seo` 对象。
+
+3. **类型推断**
+
+    EmDash 根据值推断字段类型：
+    - 数字字符串 → `number`
+    - `"1"`、`"0"`、`"true"`、`"false"` → `boolean`
+    - ISO 日期 → `date`
+    - 序列化的 PHP/JSON → `json`
+    - WordPress ID（例如 `_thumbnail_id`） → `reference`
+
+</Steps>
+
+<Aside>
+	ACF 中继器字段和灵活内容作为 JSON 导入。在 EmDash 中创建匹配的 Portable Text 或数组字段来结构化此数据。
+</Aside>
+
+## URL 重定向
+
+导入后，EmDash 会生成一个重定向映射：
+
+```json
+{
+	"redirects": [
+		{ "from": "/?p=123", "to": "/posts/hello-world" },
+		{ "from": "/2024/01/hello-world/", "to": "/posts/hello-world" },
+		{ "from": "/category/news/", "to": "/categories/news" }
+	],
+	"feeds": [
+		{ "from": "/feed/", "to": "/rss.xml" },
+		{ "from": "/feed/atom/", "to": "/atom.xml" }
+	]
+}
+```
+
+将这些重定向应用于：
+
+- Cloudflare 重定向规则
+- 您托管平台的重定向配置
+- Astro 的 `astro.config.mjs` 中的 `redirects` 选项
+
+## 概念映射参考
+
+在将 WordPress 模式适配到 EmDash 时，请使用此表：
+
+| WordPress               | EmDash                             | 说明                          |
+| ----------------------- | ------------------------------------ | ------------------------------ |
+| `register_post_type()`  | 管理 UI 中的集合                     | 通过仪表板或 API 创建          |
+| `register_taxonomy()`   | 分类法或数组字段                     | 取决于复杂性                   |
+| `register_meta()`       | 集合模式中的字段                     | 类型化，非键值对               |
+| `WP_Query`              | `getCollection(filters)`             | 运行时查询                     |
+| `get_post()`            | `getEntry(collection, id)`           | 返回条目或 null                |
+| `wp_insert_post()`      | `POST /_emdash/api/content/{type}` | REST API                       |
+| `the_content`           | `<PortableText value={...} />`       | Portable Text 渲染             |
+| `add_shortcode()`       | Portable Text 自定义区块             | 自定义组件渲染器               |
+| `register_block_type()` | Portable Text 自定义区块             | 与短代码相同                   |
+| `add_menu_page()`       | 插件管理页面                         | 位于 `/_emdash/admin/` 下      |
+| `add_action/filter()`   | 插件钩子                             | `hooks.content:beforeSave`     |
+| `wp_options`            | `ctx.kv`                             | 键值存储                       |
+| `wp_postmeta`           | 集合字段                             | 结构化，非键值对               |
+| `$wpdb`                 | `ctx.storage`                        | 直接存储访问                   |
+| 分类/标签               | 分类法                               | 保留层级结构支持               |
+
+## API 导入（高级）
+
+WordPress 导入可通过管理仪表板和 REST API 使用。为了获得最佳体验，请使用管理仪表板导入向导——它提供字段映射、冲突解决和进度跟踪。
+
+导入 API 端点位于 `/_emdash/api/import/wordpress/` 下，用于编程访问。
+
+## 故障排除
+
+### "XML 解析错误"
+
+导出文件可能已损坏或不完整。请从 WordPress 重新导出。
+
+### 媒体下载失败
+
+某些图像可能受身份验证保护或已移动。导入将继续，失败的 URL 会被记录以供手动处理。
+
+### 字段类型冲突
+
+如果现有集合的字段类型不兼容，导入向导会显示冲突。您可以：
+- 重命名 EmDash 字段
+- 更改 WordPress 字段映射
+- 删除并重新创建集合
+
+### 大型导出
+
+对于超过 100MB 的导出，请考虑：
+1. 在 WordPress 中分别导出文章类型
+2. 依次导入每个文件
+3. 使用带有 `--resume` 的 CLI 以提高可靠性
+
+## 后续步骤
+
+-   **[内容导入](/zh-cn/migration/content-import/)** — 其他导入来源和方法
+-   **[插件移植](/zh-cn/migration/plugin-porting/)** — 迁移 WordPress 插件功能
+-   **[处理内容](/zh-cn/guides/working-with-content/)** — 查询和渲染您导入的内容

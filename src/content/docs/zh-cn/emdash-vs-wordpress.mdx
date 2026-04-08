@@ -1,0 +1,47 @@
+---
+title: EmDash 与 WordPress 对比
+description: 从编辑体验、部署方式、扩展能力和现代 Astro 站点适配度等角度，对比 EmDash 与 WordPress。
+lastUpdated: 2026-04-07
+sidebar:
+  label: EmDash 与 WordPress
+---
+
+EmDash 和 WordPress 解决的问题有重叠，但它们建立在不同的技术假设之上。
+
+WordPress 是成熟且通用的 CMS，而 EmDash 是更年轻的 Astro 原生 CMS，重点放在类型安全内容、现代前端栈，以及更接近 WordPress 的编辑工作流上。
+
+## 高层对比
+
+| 方面 | WordPress | EmDash |
+| --- | --- | --- |
+| 主要技术栈 | PHP + MySQL | Astro + TypeScript + 运行时存储 |
+| 编辑体验 | 内置后台 | 内置后台 |
+| 前端模式 | 主题与 PHP 模板 | Astro 组件与路由 |
+| 部署方式 | 传统 CMS 部署 | 更贴近 Astro 的单体部署 |
+| 类型安全 | 默认较弱 | 属于核心开发体验 |
+| 插件生态 | 成熟且庞大 | 较新但方向更聚焦 |
+
+## WordPress 更适合的情况
+
+- 你现在就依赖庞大的第三方插件生态
+- 团队已经长期运营多个成熟的 WordPress 站点
+- 项目强依赖 WooCommerce 或其他 WordPress 专属插件
+
+## EmDash 更有吸引力的情况
+
+- 你的前端本来就准备使用 Astro
+- 你希望内容在运行时更新，而不是依赖单独的 headless CMS
+- 你想保留接近 WordPress 的编辑思路，但获得更好的 TypeScript 开发体验
+- 你更喜欢一个应用而不是“CMS + 前端”拆成两套系统
+
+## 怎样理解这个选择
+
+对大多数团队来说，真正的问题不是“谁绝对更强”，而是“下一代站点更适合哪一种模型”。
+
+如果你的目标是把一个内容站点从 WordPress 迁移到 Astro，那么 EmDash 的优势在于：它既保留了熟悉的内容管理心智模型，又把实现迁移到了更现代的 Astro 技术栈。
+
+## 继续阅读
+
+- [什么是 EmDash？](/zh-cn/what-is-emdash/)
+- [如何从 WordPress 迁移到 Astro + EmDash](/zh-cn/wordpress-to-astro-with-emdash/)
+- [从 WordPress 迁移到 EmDash](/zh-cn/migration/from-wordpress/)

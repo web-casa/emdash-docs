@@ -1,0 +1,334 @@
+---
+title: Internationalisation (i18n)
+description: Traduisez le contenu en plusieurs langues avec publication par langue, slugs et repli automatique.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash s'intègre au [routage i18n intégré d'Astro](https://docs.astro.build/en/guides/internationalization/) pour fournir une gestion de contenu multilingue. Astro gère le routage des URL et la détection des locales ; EmDash gère le stockage et la récupération du contenu traduit.
+
+Chaque traduction est une entrée de contenu complète et indépendante avec son propre slug, statut et historique de révisions. La version française d'un article peut être en brouillon tandis que la version anglaise est publiée.
+
+## Configuration
+
+Activez i18n en ajoutant un bloc `i18n` à votre configuration Astro. EmDash lit cette configuration automatiquement — il n'y a pas de configuration de locale séparée dans EmDash.
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	i18n: {
+		defaultLocale: "en",
+		locales: ["en", "fr", "es"],
+		fallback: { fr: "en", es: "en" },
+	},
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+Lorsque `i18n` n'est pas présent dans la configuration Astro, toutes les fonctionnalités i18n sont désactivées et EmDash se comporte comme un CMS monolingue.
+
+## Fonctionnement des traductions
+
+EmDash utilise un modèle **une ligne par locale**. Chaque traduction est sa propre ligne dans la base de données avec son propre ID, slug et statut, liée aux autres traductions via un identifiant `translation_group` partagé.
+
+```
+ec_posts:
+id       | slug        | locale | translation_group | status
+---------|-------------|--------|-------------------|----------
+01ABC... | my-post     | en     | 01ABC...          | published
+01DEF... | mon-article | fr     | 01ABC...          | draft
+01GHI... | mi-entrada  | es     | 01ABC...          | published
+```
+
+Cette conception signifie :
+
+- **Slugs par locale** — `/blog/my-post` et `/fr/blog/mon-article` fonctionnent naturellement
+- **Publication par locale** — publiez la version anglaise tout en gardant la française en brouillon
+- **Révisions par locale** — chaque traduction a son propre historique de révisions
+- **Pas de complexité de requête inter-locale** — les requêtes de liste renvoient des entrées pour une seule locale
+
+## Interrogation du contenu traduit
+
+### Entrée unique
+
+Passez `locale` à `getEmDashEntry` pour récupérer une traduction spécifique. Lorsqu'il est omis, il utilise par défaut la locale actuelle de la requête (définie par le middleware i18n d'Astro).
+
+```
+astro title="src/pages/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug, {
+  locale: Astro.currentLocale,
+});
+
+if (!post) return Astro.redirect("/404");
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+</article>
+```
+
+### Chaîne de repli
+
+Lorsqu'aucun contenu n'existe pour la locale demandée, EmDash suit la chaîne de repli définie dans votre configuration Astro. Étant donné `fallback: { fr: "en" }` :
+
+1. Essaye la locale demandée (`fr`)
+2. Essaye la locale de repli (`en`)
+3. Essaye la locale par défaut
+
+Le repli s'applique uniquement aux requêtes d'entrée unique. Les requêtes de liste renvoient des entrées uniquement pour la locale demandée — pas de mélange inter-locale.
+
+<Aside>
+  Lorsqu'un repli est utilisé, les métadonnées de la réponse incluent `fallbackLocale` afin que votre modèle puisse afficher un avertissement "ce contenu n'est pas encore traduit".
+</Aside>
+
+### Liste de collection
+
+Filtrez une collection par locale :
+
+```
+astro title="src/pages/posts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  locale: Astro.currentLocale,
+  status: "published",
+});
+---
+
+<ul>
+  {posts.map((post) => (
+    <li><a href={`/${post.data.slug}`}>{post.data.title}</a>
+</li>
+  ))}
+</ul>
+```
+
+## Sélecteur de langue
+
+Utilisez `getTranslations` pour créer un sélecteur de langue qui pointe vers les traductions existantes de l'entrée actuelle :
+
+```
+astro title="src/components/LanguageSwitcher.astro"
+---
+import { getTranslations } from "emdash";
+import { getRelativeLocaleUrl } from "astro:i18n";
+
+interface Props {
+  collection: string;
+  entryId: string;
+}
+
+const { collection, entryId } = Astro.props;
+const { translations } = await getTranslations(collection, entryId);
+---
+
+<nav aria-label="Language">
+  <ul>
+    {translations.map((t) => (
+      <li>
+        <a
+          href={getRelativeLocaleUrl(t.locale, `/blog/${t.slug}`)}
+          aria-current={t.locale === Astro.currentLocale ? "page" : undefined}
+        >
+          {t.locale.toUpperCase()}
+        </a>
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+
+La fonction `getTranslations` renvoie toutes les variantes de locale dans le même groupe de traduction :
+
+```ts
+const { translationGroup, translations } = await getTranslations("posts", post.entry.id);
+// translations: [
+//   { locale: "en", id: "01ABC...", slug: "my-post", status: "published" },
+//   { locale: "fr", id: "01DEF...", slug: "mon-article", status: "draft" },
+// ]
+```
+
+<Aside type="tip">
+  Utilisez `getRelativeLocaleUrl` de `astro:i18n` pour construire des URL préfixées par la locale. Cela respecte votre stratégie de routage Astro (`prefix-other-locales` ou `prefix-always`).
+</Aside>
+
+## Gestion des traductions dans l'administration
+
+### Liste de contenu
+
+Lorsque i18n est activé, la liste de contenu affiche :
+
+- Une **colonne locale** affichant la locale de chaque entrée
+- Un **filtre de locale** dans la barre d'outils pour basculer entre les locales
+
+### Création de traductions
+
+Ouvrez n'importe quelle entrée de contenu dans l'éditeur. La barre latérale affiche un panneau **Traductions** listant toutes les locales configurées. Pour chaque locale :
+
+- **"Traduire"** apparaît pour les locales sans traduction — cliquez pour en créer une
+- **"Modifier"** apparaît pour les locales avec une traduction existante — cliquez pour y naviguer
+- La locale actuelle est marquée d'une coche
+
+Lors de la création d'une traduction, la nouvelle entrée est pré-remplie avec les données de la locale source et se voit attribuer un slug par défaut de `{source-slug}-{locale}`. Ajustez le slug et le contenu si nécessaire, puis enregistrez.
+
+### Publication par locale
+
+Chaque traduction a son propre statut. Publiez, dépubliez ou planifiez des traductions indépendamment. La version française peut être en brouillon tandis que la version anglaise est en ligne.
+
+## API de contenu
+
+### Paramètre locale
+
+Toutes les routes de l'API de contenu acceptent un paramètre de requête `locale` facultatif :
+
+```http
+GET /_emdash/api/content/posts?locale=fr
+GET /_emdash/api/content/posts/my-post?locale=fr
+```
+
+Lorsqu'il est omis, utilise par défaut la locale par défaut configurée.
+
+### Création de traductions via l'API
+
+Créez une traduction en passant `locale` et `translationOf` au point de terminaison de création de contenu :
+
+```http
+POST /_emdash/api/content/posts
+Content-Type: application/json
+
+{
+  "locale": "fr",
+  "translationOf": "01ABC...",
+  "data": {
+    "title": "Mon Article",
+    "slug": "mon-article"
+  }
+}
+```
+
+La nouvelle entrée partage le `translation_group` de l'entrée source et commence comme un brouillon.
+
+### Liste des traductions
+
+Récupérez toutes les traductions pour une entrée donnée :
+
+```http
+GET /_emdash/api/content/posts/01ABC.../translations
+```
+
+Renvoie l'ID du groupe de traduction et un tableau des variantes de locale avec leurs ID, slugs et statuts.
+
+## CLI
+
+La CLI prend en charge les drapeaux `--locale` sur les commandes de contenu :
+
+```bash
+# List French posts
+emdash content list posts --locale fr
+
+# Obtenir une entrée spécifique en français
+emdash content get posts my-post --locale fr
+
+# Créer une traduction française d'une entrée existante
+emdash content create posts --locale fr --translation-of 01ABC...
+```
+
+## Amorçage de contenu multilingue
+
+Les fichiers d'amorçage expriment les traductions en utilisant `locale` et `translationOf` :
+
+```
+json title=".emdash/seed.json"
+{
+  "content": {
+    "posts": [
+      {
+        "id": "welcome",
+        "slug": "welcome",
+        "locale": "en",
+        "status": "published",
+        "data": { "title": "Bienvenue" }
+      },
+      {
+        "id": "welcome-fr",
+        "slug": "bienvenue",
+        "locale": "fr",
+        "translationOf": "welcome",
+        "status": "draft",
+        "data": { "title": "Bienvenue" }
+      }
+    ]
+  }
+}
+```
+
+L'entrée de la locale source doit apparaître avant ses traductions dans le fichier d'amorçage afin que les références `translationOf` soient résolues correctement.
+
+## Traductibilité des champs
+
+Chaque champ a un paramètre `translatable` (par défaut : `true`). Lors de la création d'une traduction :
+
+- **Champs traduisibles** sont pré-remplis à partir de la locale source pour édition
+- **Champs non traduisibles** sont copiés et maintenus synchronisés sur toutes les traductions du groupe
+
+Les champs système comme `status`, `published_at` et `author_id` sont toujours par locale et jamais synchronisés.
+
+<Aside>
+  Les champs non traduisibles sont utiles pour les valeurs qui doivent rester cohérentes entre les locales, comme une référence produit (SKU) ou un numéro d'ordre de tri.
+</Aside>
+
+## Stratégie d'URL
+
+EmDash ne gère pas les URLs de localisation — Astro s'occupe du routage. Modèles courants :
+
+```
+# prefix-other-locales (Astro default)
+/blog/my-post          → en (default locale, no prefix)
+/fr/blog/mon-article   → fr
+
+# prefix-always
+/en/blog/my-post       → en
+/fr/blog/mon-article   → fr
+```
+
+Utilisez `getRelativeLocaleUrl` depuis `astro:i18n` pour construire des URLs correctes quel que soit le mode de routage.
+
+## Importation de Contenu Multilingue
+
+### WordPress avec WPML ou Polylang
+
+La source d'importation du plugin WordPress détecte automatiquement WPML et Polylang. Lorsqu'ils sont détectés, le contenu importé inclut des métadonnées de localisation et de groupe de traduction, préservant ainsi la structure multilingue.
+
+### Fichiers WXR
+
+Les exportations WXR n'incluent pas les métadonnées WPML/Polylang. Importez-les comme une seule localisation et créez les traductions manuellement, ou utilisez le drapeau `--locale` pour assigner une localisation à tous les éléments importés :
+
+```bash
+# Import a French WXR export
+emdash import wordpress export-fr.xml --execute --locale fr
+
+# Correspondance avec le contenu anglais existant par slug
+emdash import wordpress export-fr.xml --execute --locale fr --translation-of-locale en
+```
+
+## Prochaines Étapes
+
+- [Interrogation du Contenu](/fr/guides/querying-content/) — Référence complète de l'API de requête
+- [Travailler avec le Contenu](/fr/guides/working-with-content/) — Gestion du contenu dans l'admin
+- [Routage i18n d'Astro](https://docs.astro.build/en/guides/internationalization/) — Configuration du routage d'Astro

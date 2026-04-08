@@ -1,0 +1,566 @@
+---
+title: Referência do Servidor MCP
+description: Detalhes do protocolo, especificações de ferramentas e configuração OAuth para o servidor MCP.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+O EmDash inclui um servidor [Model Context Protocol](https://modelcontextprotocol.io) (MCP) integrado em `/_emdash/api/mcp` que expõe operações de gerenciamento de conteúdo como ferramentas para assistentes de IA.
+
+<Aside>
+	Procurando conectar Claude, ChatGPT ou outra ferramenta de IA ao seu site? Consulte o [guia de Ferramentas de IA](/pt/guides/ai-tools) para instruções de configuração e dicas de uso.
+</Aside>
+
+Esta página cobre os detalhes do protocolo: autenticação, transporte, especificações das ferramentas, descoberta OAuth e tratamento de erros.
+
+## Autenticação
+
+O servidor MCP suporta três métodos de autenticação:
+
+| Método | Como funciona |
+| --- | --- |
+| **OAuth 2.1 Authorization Code + PKCE** | Fluxo padrão para clientes MCP. O usuário aprova os escopos no navegador. |
+| **Personal Access Token (PAT)** | Tokens de longa duração `ec_pat_*` criados no painel de administração. |
+| **Device Flow** | Fluxo estilo CLI onde você aprova um código no navegador. Usado por `emdash login`. |
+
+Cookies de sessão (da interface de administração) também funcionam, mas não são práticos para clientes MCP externos.
+
+### Escopos
+
+Os tokens têm escopo para limitar quais operações um cliente pode realizar. Os escopos são solicitados durante a autorização OAuth e aplicados em cada chamada de ferramenta.
+
+| Escopo | Concede acesso a |
+| --- | --- |
+| `content:read` | Listar, obter, comparar e pesquisar conteúdo. Listar termos de taxonomia e menus. |
+| `content:write` | Criar, atualizar, excluir, publicar, despublicar, agendar, duplicar e restaurar conteúdo. Criar termos de taxonomia. |
+| `media:read` | Listar e obter itens de mídia. |
+| `media:write` | Atualizar e excluir metadados de mídia. |
+| `schema:read` | Listar coleções e obter esquemas de coleção. |
+| `schema:write` | Criar e excluir coleções e campos. |
+| `admin` | Acesso total a todas as operações. |
+
+O escopo `admin` concede acesso a tudo. A autenticação baseada em sessão (sem token) também tem acesso total com base na função do usuário.
+
+### Requisitos de Função
+
+Além dos escopos, algumas ferramentas exigem uma função RBAC mínima:
+
+| Operação | Função mínima |
+| --- | --- |
+| Operações de conteúdo | Nenhum mínimo (os escopos controlam o acesso) |
+| Leitura de esquema | Editor (40) |
+| Escrita de esquema | Admin (50) |
+
+Consulte o [guia de Autenticação](/pt/guides/authentication#user-roles) para definições de função.
+
+## Transporte
+
+O servidor usa o transporte HTTP Streamable no **modo stateless**. Cada solicitação é independente — não há sessões ou conexões de longa duração.
+
+- **`POST /_emdash/api/mcp`** -- Enviar chamadas de ferramenta JSON-RPC
+- **`GET /_emdash/api/mcp`** -- Retorna 405 (sem SSE no modo stateless)
+- **`DELETE /_emdash/api/mcp`** -- Retorna 405 (nenhuma sessão para fechar)
+
+As respostas seguem o formato [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Os erros usam códigos de erro padrão do JSON-RPC, com códigos específicos do MCP para falhas de escopo e permissão.
+
+## Ferramentas
+
+O servidor expõe 33 ferramentas em sete domínios. Cada ferramenta retorna resultados como conteúdo de texto JSON ou uma mensagem de erro com `isError: true` em caso de falha.
+
+### Ferramentas de Conteúdo
+
+#### `content_list`
+
+Lista itens de conteúdo em uma coleção com filtragem e paginação opcionais.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção (ex: `posts`, `pages`) |
+| `status` | `string` | Não | Filtro: `draft`, `published` ou `scheduled` |
+| `limit` | `integer` | Não | Máximo de itens a retornar (1-100, padrão 50) |
+| `cursor` | `string` | Não | Cursor de paginação de uma resposta anterior |
+| `orderBy` | `string` | Não | Campo para ordenar (ex: `created_at`, `updated_at`) |
+| `order` | `string` | Não | Direção da ordenação: `asc` ou `desc` (padrão `desc`) |
+| `locale` | `string` | Não | Filtrar por localidade (ex: `en`, `fr`). Apenas relevante com i18n. |
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+#### `content_get`
+
+Obtém um único item de conteúdo por ID ou slug. Retorna todos os valores dos campos, metadados e um token `_rev` para concorrência otimista.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID do item de conteúdo (ULID) ou slug |
+| `locale` | `string` | Não | Localidade para pesquisa por slug. IDs são globalmente únicos. |
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+<Aside>
+	O token `_rev` na resposta é usado para detecção de conflitos. Passe-o de volta ao atualizar para garantir que ninguém mais modificou o item desde que você o leu.
+</Aside>
+
+#### `content_create`
+
+Cria um novo item de conteúdo. O objeto `data` deve conter valores de campo correspondentes ao esquema da coleção — use `schema_get_collection` para verificar quais campos estão disponíveis. Os itens são criados como `draft` por padrão.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `data` | `object` | Sim | Valores dos campos como pares chave-valor |
+| `slug` | `string` | Não | Slug da URL (gerado automaticamente a partir do título se omitido) |
+| `status` | `string` | Não | Status inicial: `draft` ou `published` (padrão `draft`) |
+| `locale` | `string` | Não | Localidade para este conteúdo (padrão é o padrão do site) |
+| `translationOf` | `string` | Não | ID do item do qual esta é uma tradução |
+
+**Escopo:** `content:write`
+
+#### `content_update`
+
+Atualiza um item de conteúdo existente. Inclua apenas os campos que deseja alterar — os campos não especificados permanecem inalterados.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID do item de conteúdo ou slug |
+| `data` | `object` | Não | Valores dos campos para atualizar |
+| `slug` | `string` | Não | Novo slug da URL |
+| `status` | `string` | Não | Novo status: `draft` ou `published` |
+| `_rev` | `string` | Não | Token de revisão de `content_get` para detecção de conflitos |
+
+**Escopo:** `content:write`
+
+#### `content_delete`
+
+Exclui suavemente um item de conteúdo movendo-o para a lixeira. Use `content_restore` para desfazer ou `content_permanent_delete` para removê-lo permanentemente.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID do item de conteúdo ou slug |
+
+**Escopo:** `content:write` | **Destrutivo:** Sim
+
+#### `content_restore`
+
+Restaurar um item de conteúdo excluído temporariamente da lixeira.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID ou slug do item de conteúdo |
+
+**Escopo:** `content:write`
+
+#### `content_permanent_delete`
+
+Excluir permanentemente e de forma irreversível um item de conteúdo da lixeira. O item deve estar primeiro na lixeira.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID ou slug do item de conteúdo |
+
+**Escopo:** `content:write` | **Destrutivo:** Sim
+
+#### `content_publish`
+
+Publicar um item de conteúdo, tornando-o visível no site. Cria uma revisão publicada a partir do rascunho atual. Edições posteriores criam um novo rascunho sem afetar a versão ao vivo até ser republicado.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID ou slug do item de conteúdo |
+
+**Escopo:** `content:write`
+
+#### `content_unpublish`
+
+Reverter um item publicado para o status de rascunho. Ele não será mais visível no site ao vivo, mas seu conteúdo será preservado.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID ou slug do item de conteúdo |
+
+**Escopo:** `content:write`
+
+#### `content_schedule`
+
+Agendar um item de conteúdo para publicação futura. Ele será automaticamente publicado na data/hora especificada.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID ou slug do item de conteúdo |
+| `scheduledAt` | `string` | Sim | Data e hora no formato ISO 8601 (ex: `2026-06-01T09:00:00Z`) |
+
+**Escopo:** `content:write`
+
+#### `content_compare`
+
+Comparar a versão publicada (ao vivo) de um item de conteúdo com seu rascunho atual. Retorna ambas as versões e um indicador se há alterações.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID ou slug do item de conteúdo |
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+#### `content_discard_draft`
+
+Descartar o rascunho atual e reverter para a última versão publicada. Funciona apenas em itens que foram publicados pelo menos uma vez.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID ou slug do item de conteúdo |
+
+**Escopo:** `content:write` | **Destrutivo:** Sim
+
+#### `content_list_trashed`
+
+Listar itens de conteúdo excluídos temporariamente na lixeira de uma coleção.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `limit` | `integer` | Não | Número máximo de itens (1-100, padrão 50) |
+| `cursor` | `string` | Não | Cursor de paginação |
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+#### `content_duplicate`
+
+Criar uma cópia de um item de conteúdo existente. A duplicata é criada como um rascunho com "(Cópia)" anexado ao título e um slug gerado automaticamente.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID ou slug do item de conteúdo a duplicar |
+
+**Escopo:** `content:write`
+
+#### `content_translations`
+
+Obter todas as variantes de localidade de um item de conteúdo. Retorna o grupo de tradução e um resumo de cada versão de localidade. Relevante apenas quando o i18n está ativado.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID ou slug do item de conteúdo |
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+### Ferramentas de Esquema
+
+<Aside type="caution">
+	As ferramentas de esquema modificam a estrutura do banco de dados. Criar ou excluir coleções e campos altera as tabelas subjacentes. Essas operações exigem a função de Administrador.
+</Aside>
+
+#### `schema_list_collections`
+
+Listar todas as coleções de conteúdo definidas no CMS. Retorna slug, rótulo, recursos suportados e timestamps.
+
+**Sem parâmetros.**
+
+**Escopo:** `schema:read` | **Função mínima:** Editor | **Somente leitura:** Sim
+
+#### `schema_get_collection`
+
+Obter informações detalhadas sobre uma coleção, incluindo todas as definições de campo. Os campos descrevem o modelo de conteúdo: nome, tipo, restrições e regras de validação. Use isso para entender o que `content_create` e `content_update` esperam.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `slug` | `string` | Sim | Slug da coleção (ex: `posts`) |
+
+**Escopo:** `schema:read` | **Função mínima:** Editor | **Somente leitura:** Sim
+
+#### `schema_create_collection`
+
+Criar uma nova coleção de conteúdo. Isso cria uma tabela de banco de dados e uma definição de esquema. O slug deve ser alfanumérico em minúsculas com sublinhados, começando com uma letra.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `slug` | `string` | Sim | Identificador único (`/^[a-z][a-z0-9_]*$/`) |
+| `label` | `string` | Sim | Nome de exibição (plural, ex: "Posts do Blog") |
+| `labelSingular` | `string` | Não | Nome de exibição no singular |
+| `description` | `string` | Não | Descrição desta coleção |
+| `icon` | `string` | Não | Nome do ícone para a interface de administração |
+| `supports` | `string[]` | Não | Recursos: `drafts`, `revisions`, `preview`, `scheduling`, `search` (padrão: `['drafts', 'revisions']`) |
+
+**Escopo:** `schema:write` | **Função mínima:** Admin
+
+#### `schema_delete_collection`
+
+Excluir uma coleção e sua tabela de banco de dados. Isso é irreversível e exclui todo o conteúdo da coleção.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `slug` | `string` | Sim | Slug da coleção a excluir |
+| `force` | `boolean` | Não | Forçar exclusão mesmo se a coleção tiver conteúdo |
+
+**Escopo:** `schema:write` | **Função mínima:** Admin | **Destrutivo:** Sim
+
+#### `schema_create_field`
+
+Adicionar um novo campo ao esquema de uma coleção. Isso adiciona uma coluna à tabela do banco de dados.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `slug` | `string` | Sim | Identificador do campo (`/^[a-z][a-z0-9_]*$/`) |
+| `label` | `string` | Sim | Nome de exibição |
+| `type` | `string` | Sim | Tipo de dados (veja abaixo) |
+| `required` | `boolean` | Não | Se o campo é obrigatório |
+| `unique` | `boolean` | Não | Se os valores devem ser únicos |
+| `defaultValue` | `any` | Não | Valor padrão para novos itens |
+| `validation` | `object` | Não | Restrições: `min`, `max`, `minLength`, `maxLength`, `pattern`, `options` |
+| `options` | `object` | Não | Configuração do widget: `collection` (para referências), `rows` (para textarea) |
+| `searchable` | `boolean` | Não | Incluir no índice de busca de texto completo |
+| `translatable` | `boolean` | Não | Se este campo é traduzível (padrão verdadeiro) |
+
+Tipos de campo: `string`, `text`, `number`, `integer`, `boolean`, `datetime`, `select`, `multiSelect`, `portableText`, `image`, `file`, `reference`, `json`, `slug`.
+
+Para os tipos `select` e `multiSelect`, forneça os valores permitidos em `validation.options`.
+
+**Escopo:** `schema:write` | **Função mínima:** Admin
+
+#### `schema_delete_field`
+
+Remove um campo de uma coleção. Isso exclui a coluna e apaga todos os dados nesse campo. Irreversível.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `fieldSlug` | `string` | Sim | Slug do campo a ser removido |
+
+**Escopo:** `schema:write` | **Função mínima:** Admin | **Destrutivo:** Sim
+
+### Ferramentas de Mídia
+
+#### `media_list`
+
+Lista arquivos de mídia enviados com filtragem opcional por tipo MIME e paginação.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `mimeType` | `string` | Não | Filtrar por prefixo de tipo MIME (ex: `image/`, `application/pdf`) |
+| `limit` | `integer` | Não | Máximo de itens (1-100, padrão 50) |
+| `cursor` | `string` | Não | Cursor de paginação |
+
+**Escopo:** `media:read` | **Somente leitura:** Sim
+
+#### `media_get`
+
+Obtém detalhes de um único arquivo de mídia por ID. Retorna metadados incluindo nome do arquivo, tipo MIME, tamanho, dimensões, texto alternativo e URL.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `id` | `string` | Sim | ID do item de mídia |
+
+**Escopo:** `media:read` | **Somente leitura:** Sim
+
+#### `media_update`
+
+Atualiza metadados de um arquivo de mídia enviado. O arquivo em si não pode ser alterado.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `id` | `string` | Sim | ID do item de mídia |
+| `alt` | `string` | Não | Texto alternativo para acessibilidade |
+| `caption` | `string` | Não | Texto da legenda |
+| `width` | `integer` | Não | Largura da imagem em pixels |
+| `height` | `integer` | Não | Altura da imagem em pixels |
+
+**Escopo:** `media:write`
+
+#### `media_delete`
+
+Exclui permanentemente um arquivo de mídia. Remove o registro do banco de dados e o arquivo do armazenamento. Conteúdo que referencia esta mídia terá referências quebradas.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `id` | `string` | Sim | ID do item de mídia |
+
+**Escopo:** `media:write` | **Destrutivo:** Sim
+
+### Ferramenta de Busca
+
+#### `search`
+
+Busca de texto completo em coleções de conteúdo. As coleções devem ter `search` em sua lista `supports` e os campos devem estar marcados como `searchable`.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `query` | `string` | Sim | Texto da consulta de busca |
+| `collections` | `string[]` | Não | Limitar a busca a slugs de coleções específicas |
+| `locale` | `string` | Não | Filtrar resultados por localidade |
+| `limit` | `integer` | Não | Máximo de resultados (1-50, padrão 20) |
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+### Ferramentas de Taxonomia
+
+#### `taxonomy_list`
+
+Lista todas as definições de taxonomia (ex: categorias, tags). Retorna nome, rótulo, se é hierárquica e coleções associadas.
+
+**Sem parâmetros.**
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+#### `taxonomy_list_terms`
+
+Lista termos em uma taxonomia com paginação.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `taxonomy` | `string` | Sim | Nome da taxonomia (ex: `categories`, `tags`) |
+| `limit` | `integer` | Não | Máximo de itens (1-100, padrão 50) |
+| `cursor` | `string` | Não | Cursor de paginação |
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+#### `taxonomy_create_term`
+
+Cria um novo termo em uma taxonomia. Para taxonomias hierárquicas, especifique um `parentId` para criar um termo filho.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `taxonomy` | `string` | Sim | Nome da taxonomia |
+| `slug` | `string` | Sim | Identificador seguro para URL |
+| `label` | `string` | Sim | Nome de exibição |
+| `parentId` | `string` | Não | ID do termo pai (para taxonomias hierárquicas) |
+| `description` | `string` | Não | Descrição do termo |
+
+**Escopo:** `content:write`
+
+### Ferramentas de Menu
+
+#### `menu_list`
+
+Lista todos os menus de navegação. Retorna nome, rótulo e timestamps.
+
+**Sem parâmetros.**
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+#### `menu_get`
+
+Obtém um menu pelo nome incluindo todos os seus itens em ordem. Os itens têm um rótulo, URL, tipo e opcionalmente um pai para aninhamento.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `name` | `string` | Sim | Nome do menu (ex: `main`, `footer`) |
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+### Ferramentas de Revisão
+
+#### `revision_list`
+
+Lista o histórico de revisões para um item de conteúdo, do mais recente para o mais antigo. Requer que a coleção suporte `revisions`.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `collection` | `string` | Sim | Slug da coleção |
+| `id` | `string` | Sim | ID ou slug do item de conteúdo |
+| `limit` | `integer` | Não | Máximo de revisões (1-50, padrão 20) |
+
+**Escopo:** `content:read` | **Somente leitura:** Sim
+
+#### `revision_restore`
+
+Restaura um item de conteúdo para uma revisão anterior. Substitui o rascunho atual pelos dados da revisão especificada. Não é publicado automaticamente — use `content_publish` depois, se necessário.
+
+| Parâmetro | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `revisionId` | `string` | Sim | ID da revisão a ser restaurada |
+
+**Escopo:** `content:write`
+
+## Descoberta OAuth
+
+Os clientes MCP que suportam OAuth 2.1 podem descobrir automaticamente como autenticar. O servidor publica dois documentos de metadados:
+
+### Metadados do Recurso Protegido
+
+```http
+GET /.well-known/oauth-protected-resource
+```
+
+```json
+{
+  "resource": "https://example.com/_emdash/api/mcp",
+  "authorization_servers": ["https://example.com/_emdash"],
+  "scopes_supported": [
+    "content:read", "content:write",
+    "media:read", "media:write",
+    "schema:read", "schema:write",
+    "admin"
+  ],
+  "bearer_methods_supported": ["header"]
+}
+```
+
+### Metadados do Servidor de Autorização
+
+```http
+GET /_emdash/.well-known/oauth-authorization-server
+```
+
+```json
+{
+  "issuer": "https://example.com/_emdash",
+  "authorization_endpoint": "https://example.com/_emdash/oauth/authorize",
+  "token_endpoint": "https://example.com/_emdash/api/oauth/token",
+  "scopes_supported": ["content:read", "content:write", "..."],
+  "response_types_supported": ["code"],
+  "grant_types_supported": [
+    "authorization_code",
+    "refresh_token",
+    "urn:ietf:params:oauth:grant-type:device_code"
+  ],
+  "code_challenge_methods_supported": ["S256"],
+  "token_endpoint_auth_methods_supported": ["none"],
+  "device_authorization_endpoint": "https://example.com/_emdash/api/oauth/device/code"
+}
+```
+
+Quando uma solicitação não autenticada atinge o endpoint MCP, o servidor retorna:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"
+```
+
+Isso aciona o fluxo padrão de descoberta do cliente MCP.
+
+## Tratamento de Erros
+
+Erros de ferramenta são retornados como conteúdo de texto com `isError: true`:
+
+```json
+{
+  "content": [{ "type": "text", "text": "Collection 'nonexistent' not found" }],
+  "isError": true
+}
+```
+
+Erros de escopo e permissão lançam erros de protocolo MCP:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32600,
+    "message": "Insufficient scope: requires content:write"
+  },
+  "id": 1
+}
+```
+
+Erros de nível de transporte (configuração incorreta do servidor, exceções não tratadas) retornam o código de erro JSON-RPC `-32603` (Erro interno) sem vazar detalhes de implementação.

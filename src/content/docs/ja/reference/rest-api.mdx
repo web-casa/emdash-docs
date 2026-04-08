@@ -1,0 +1,1023 @@
+---
+title: REST API リファレンス
+description: コンテンツ、メディア、スキーマ管理のためのHTTPエンドポイント。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDashは、コンテンツ管理、メディアアップロード、スキーマ操作のためのREST APIを `/_emdash/api/` で公開しています。
+
+## 認証
+
+APIリクエストにはBearerトークンによる認証が必要です:
+
+```http
+Authorization: Bearer <token>
+```
+
+トークンは管理インターフェースまたはプログラムで生成できます。
+
+## レスポンス形式
+
+すべてのレスポンスは一貫した形式に従います:
+
+```json
+// Success
+{
+  "success": true,
+  "data": { ... }
+}
+
+// エラー
+{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "人間が読めるメッセージ",
+    "details": { ... }
+  }
+}
+```
+
+## コンテンツエンドポイント
+
+### コンテンツ一覧
+
+```http
+GET /_emdash/api/content/:collection
+```
+
+#### パラメータ
+
+| パラメータ    | 型       | 説明                             |
+| ------------ | -------- | --------------------------------------- |
+| `collection` | `string` | コレクションスラッグ (パス)                  |
+| `cursor`     | `string` | ページネーションカーソル (クエリ)               |
+| `limit`      | `number` | ページあたりのアイテム数 (クエリ, デフォルト: 50)     |
+| `status`     | `string` | ステータスによるフィルタ (クエリ)                |
+| `orderBy`    | `string` | ソート対象フィールド (クエリ)                |
+| `order`      | `string` | ソート方向: `asc` または `desc` (クエリ) |
+
+#### レスポンス
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "01HXK5MZSN...",
+        "type": "posts",
+        "slug": "hello-world",
+        "data": { "title": "はじめまして", ... },
+        "status": "published",
+        "createdAt": "2025-01-24T12:00:00Z",
+        "updatedAt": "2025-01-24T12:00:00Z"
+      }
+    ],
+    "nextCursor": "eyJpZCI6..."
+  }
+}
+```
+
+### コンテンツ取得
+
+```http
+GET /_emdash/api/content/:collection/:id
+```
+
+#### レスポンス
+
+```json
+{
+  "success": true,
+  "data": {
+    "item": {
+      "id": "01HXK5MZSN...",
+      "type": "posts",
+      "slug": "hello-world",
+      "data": { "title": "はじめまして", ... },
+      "status": "published",
+      "createdAt": "2025-01-24T12:00:00Z",
+      "updatedAt": "2025-01-24T12:00:00Z"
+    }
+  }
+}
+```
+
+### コンテンツ作成
+
+```http
+POST /_emdash/api/content/:collection
+Content-Type: application/json
+```
+
+#### リクエストボディ
+
+```json
+{
+  "data": {
+    "title": "New Post",
+    "content": [...]
+  },
+  "slug": "new-post",
+  "status": "draft"
+}
+```
+
+#### レスポンス
+
+```json
+{
+  "success": true,
+  "data": {
+    "item": { ... }
+  }
+}
+```
+
+### コンテンツ更新
+
+```http
+PUT /_emdash/api/content/:collection/:id
+Content-Type: application/json
+```
+
+#### リクエストボディ
+
+```json
+{
+	"data": {
+		"title": "Updated Title"
+	},
+	"status": "published"
+}
+```
+
+### コンテンツ削除
+
+```http
+DELETE /_emdash/api/content/:collection/:id
+```
+
+#### レスポンス
+
+```json
+{
+	"success": true,
+	"data": {
+		"success": true
+	}
+}
+```
+
+## メディアエンドポイント
+
+### メディア一覧
+
+```http
+GET /_emdash/api/media
+```
+
+#### パラメータ
+
+| パラメータ  | 型       | 説明                  |
+| ---------- | -------- | ---------------------------- |
+| `cursor`   | `string` | ページネーションカーソル            |
+| `limit`    | `number` | ページあたりのアイテム数 (デフォルト: 20) |
+| `mimeType` | `string` | MIMEタイププレフィックスによるフィルタ   |
+
+#### レスポンス
+
+```json
+{
+	"success": true,
+	"data": {
+		"items": [
+			{
+				"id": "01HXK5MZSN...",
+				"filename": "photo.jpg",
+				"mimeType": "image/jpeg",
+				"size": 102400,
+				"width": 1920,
+				"height": 1080,
+				"url": "https://cdn.example.com/photo.jpg",
+				"createdAt": "2025-01-24T12:00:00Z"
+			}
+		],
+		"nextCursor": "eyJpZCI6..."
+	}
+}
+```
+
+### メディア取得
+
+```http
+GET /_emdash/api/media/:id
+```
+
+### メディア作成
+
+```http
+POST /_emdash/api/media
+Content-Type: application/json
+```
+
+#### リクエストボディ
+
+```json
+{
+	"filename": "photo.jpg",
+	"mimeType": "image/jpeg",
+	"size": 102400,
+	"width": 1920,
+	"height": 1080,
+	"storageKey": "uploads/photo.jpg"
+}
+```
+
+<Aside>
+	このエンドポイントはアップロード後にメディアメタデータを記録します。実際のファイルをアップロードするには、アップロードエンドポイントまたは署名付きURLを使用してください。
+</Aside>
+
+### メディア更新
+
+```http
+PUT /_emdash/api/media/:id
+Content-Type: application/json
+```
+
+#### リクエストボディ
+
+```json
+{
+	"alt": "Photo description",
+	"caption": "Photo caption"
+}
+```
+
+### メディア削除
+
+```http
+DELETE /_emdash/api/media/:id
+```
+
+### メディアファイル取得
+
+```http
+GET /_emdash/api/media/file/:key
+```
+
+実際のファイルコンテンツを提供します。ローカルストレージのみ対応。
+
+## リビジョンエンドポイント
+
+### リビジョン一覧
+
+```http
+GET /_emdash/api/content/:collection/:entryId/revisions
+```
+
+#### パラメータ
+
+| パラメータ | 型       | 説明                           |
+| --------- | -------- | ------------------------------------- |
+| `limit`   | `number` | 返却する最大リビジョン数 (デフォルト: 50) |
+
+#### レスポンス
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "01HXK5MZSN...",
+        "collection": "posts",
+        "entryId": "01HXK5MZSN...",
+        "data": { ... },
+        "createdAt": "2025-01-24T12:00:00Z"
+      }
+    ],
+    "total": 5
+  }
+}
+```
+
+### リビジョン取得
+
+```http
+GET /_emdash/api/revisions/:revisionId
+```
+
+### リビジョン復元
+
+```http
+POST /_emdash/api/revisions/:revisionId/restore
+```
+
+コンテンツをこのリビジョンの状態に復元し、新しいリビジョンを作成します。
+
+## スキーマエンドポイント
+
+### コレクション一覧
+
+```http
+GET /_emdash/api/schema/collections
+```
+
+#### レスポンス
+
+```json
+{
+	"success": true,
+	"data": {
+		"items": [
+			{
+				"id": "01HXK5MZSN...",
+				"slug": "posts",
+				"label": "Posts",
+				"labelSingular": "Post",
+				"supports": ["drafts", "revisions", "preview"]
+			}
+		]
+	}
+}
+```
+
+### コレクション取得
+
+```http
+GET /_emdash/api/schema/collections/:slug
+```
+
+#### パラメータ
+
+| パラメータ       | 型        | 説明                       |
+| --------------- | --------- | --------------------------------- |
+| `includeFields` | `boolean` | フィールド定義を含める (クエリ) |
+
+### コレクション作成
+
+```http
+POST /_emdash/api/schema/collections
+Content-Type: application/json
+```
+
+#### リクエストボディ
+
+```json
+{
+	"slug": "products",
+	"label": "Products",
+	"labelSingular": "Product",
+	"description": "Product catalog",
+	"supports": ["drafts", "revisions"]
+}
+```
+
+### コレクション更新
+
+```http
+PATCH /_emdash/api/schema/collections/:slug
+Content-Type: application/json
+```
+
+### コレクション削除
+
+```http
+DELETE /_emdash/api/schema/collections/:slug
+```
+
+#### パラメータ
+
+| パラメータ | 型        | 説明                                   |
+| --------- | --------- | --------------------------------------------- |
+| `force`   | `boolean` | コレクションにコンテンツがあっても削除 (クエリ) |
+
+### フィールド一覧
+
+```http
+GET /_emdash/api/schema/collections/:slug/fields
+```
+
+### フィールド作成
+
+```http
+POST /_emdash/api/schema/collections/:slug/fields
+Content-Type: application/json
+```
+
+#### リクエストボディ
+
+```json
+{
+	"slug": "price",
+	"label": "Price",
+	"type": "number",
+	"required": true,
+	"validation": {
+		"min": 0
+	}
+}
+```
+
+### フィールド更新
+
+```http
+PATCH /_emdash/api/schema/collections/:collectionSlug/fields/:fieldSlug
+Content-Type: application/json
+```
+
+### フィールド削除
+
+```http
+DELETE /_emdash/api/schema/collections/:collectionSlug/fields/:fieldSlug
+```
+
+### フィールド順序変更
+
+```http
+POST /_emdash/api/schema/collections/:slug/fields/reorder
+Content-Type: application/json
+```
+
+#### リクエストボディ
+
+```json
+{
+	"fieldSlugs": ["title", "content", "author", "publishedAt"]
+}
+```
+
+## スキーマエクスポート
+
+### スキーマエクスポート (JSON)
+
+```http
+GET /_emdash/api/schema
+Accept: application/json
+```
+
+### スキーマエクスポート (TypeScript)
+
+```http
+GET /_emdash/api/schema?format=typescript
+Accept: text/typescript
+```
+
+すべてのコレクションのTypeScriptインターフェースを返します。
+
+## プラグインエンドポイント
+
+### プラグイン一覧
+
+```http
+GET /_emdash/api/plugins
+```
+
+### プラグイン取得
+
+```http
+GET /_emdash/api/plugins/:pluginId
+```
+
+### プラグイン有効化
+
+```http
+POST /_emdash/api/plugins/:pluginId/enable
+```
+
+### プラグイン無効化
+
+```http
+POST /_emdash/api/plugins/:pluginId/disable
+```
+
+## エラーコード
+
+| コード                   | HTTPステータス | 説明              |
+| ---------------------- | ----------- | ------------------------ |
+| `NOT_FOUND`            | 404         | リソースが見つかりません       |
+| `VALIDATION_ERROR`     | 400         | 無効な入力データ       |
+| `UNAUTHORIZED`         | 401         | トークンがないか無効 |
+| `FORBIDDEN`            | 403         | 権限が不足しています |
+| `CONTENT_LIST_ERROR`   | 500         | コンテンツ一覧の取得に失敗   |
+| `CONTENT_CREATE_ERROR` | 500         | コンテンツ作成に失敗 |
+| `CONTENT_UPDATE_ERROR` | 500         | コンテンツ更新に失敗 |
+| `CONTENT_DELETE_ERROR` | 500         | コンテンツ削除に失敗 |
+| `MEDIA_LIST_ERROR`     | 500         | メディア一覧の取得に失敗     |
+| `MEDIA_CREATE_ERROR`   | 500         | メディア作成に失敗   |
+| `SCHEMA_ERROR`         | 400         | スキーマ操作に失敗  |
+| `DUPLICATE_SLUG`       | 409         | スラッグが既に存在します      |
+| `RESERVED_SLUG`        | 400         | スラッグは予約済みです         |
+
+## 検索エンドポイント
+
+### グローバル検索
+
+```http
+GET /_emdash/api/search?q=hello+world
+```
+
+#### パラメータ
+
+| パラメータ     | 型       | 説明                      |
+| ------------- | -------- | -------------------------------- |
+| `q`           | `string` | 検索クエリ (必須)          |
+| `collections` | `string` | カンマ区切りのコレクションスラッグ |
+| `status`      | `string` | ステータスによるフィルタ (デフォルト: published) |
+| `limit`       | `number` | 最大結果数 (デフォルト: 20)        |
+| `cursor`      | `string` | ページネーションカーソル                |
+
+#### レスポンス
+
+```json
+{
+  "results": [
+    {
+      "collection": "posts",
+      "id": "01HXK5MZSN...",
+      "slug": "hello-world",
+      "title": "はじめまして",
+      "snippet": "...this is a <mark>hello</mark>
+ <mark>world</mark>
+ example...",
+      "score": 0.95
+    }
+  ],
+  "nextCursor": "eyJvZmZzZXQiOjIwfQ"
+}
+```
+
+### 検索サジェスト
+
+```http
+GET /_emdash/api/search/suggest?q=hel&limit=5
+```
+
+オートコンプリート用のプレフィックス一致タイトルを返します。
+
+### 検索インデックス再構築
+
+```http
+POST /_emdash/api/search/rebuild
+```
+
+すべてまたは特定のコレクションのFTSインデックスを再構築します。
+
+### 検索統計
+
+```http
+GET /_emdash/api/search/stats
+```
+
+コレクションごとのインデックス済みドキュメント数を返します。
+
+## セクションエンドポイント
+
+### セクション一覧
+
+```http
+GET /_emdash/api/sections
+GET /_emdash/api/sections?source=theme
+GET /_emdash/api/sections?search=newsletter
+```
+
+### セクション取得
+
+```http
+GET /_emdash/api/sections/:slug
+```
+
+### セクション作成
+
+```http
+POST /_emdash/api/sections
+Content-Type: application/json
+
+{
+  "slug": "my-section",
+  "title": "My Section",
+  "keywords": ["keyword1"],
+  "content": [...]
+}
+```
+
+### セクション更新
+
+```http
+PUT /_emdash/api/sections/:slug
+```
+
+### セクション削除
+
+```http
+DELETE /_emdash/api/sections/:slug
+```
+
+## 設定エンドポイント
+
+### すべての設定を取得
+
+```http
+GET /_emdash/api/settings
+```
+
+### 設定を更新
+
+```http
+POST /_emdash/api/settings
+Content-Type: application/json
+
+{
+  "siteTitle": "私のサイト",
+  "tagline": "すばらしいサイト",
+  "postsPerPage": 10
+}
+```
+
+## メニューエンドポイント
+
+### メニュー一覧
+
+```http
+GET /_emdash/api/menus
+```
+
+### メニュー取得
+
+```http
+GET /_emdash/api/menus/:name
+```
+
+### メニュー作成
+
+```http
+POST /_emdash/api/menus
+Content-Type: application/json
+
+{
+  "name": "footer",
+  "label": "Footer Navigation"
+}
+```
+
+### メニュー更新
+
+```http
+PUT /_emdash/api/menus/:name
+```
+
+### メニュー削除
+
+```http
+DELETE /_emdash/api/menus/:name
+```
+
+### メニュー項目を追加
+
+```http
+POST /_emdash/api/menus/:name/items
+Content-Type: application/json
+
+{
+  "type": "page",
+  "referenceCollection": "pages",
+  "referenceId": "page_about",
+  "label": "About Us"
+}
+```
+
+### メニュー項目の順序変更
+
+```http
+POST /_emdash/api/menus/:name/reorder
+Content-Type: application/json
+
+{
+  "items": [
+    { "id": "item_1", "parentId": null, "sortOrder": 0 },
+    { "id": "item_2", "parentId": null, "sortOrder": 1 },
+    { "id": "item_3", "parentId": "item_2", "sortOrder": 0 }
+  ]
+}
+```
+
+## タクソノミーエンドポイント
+
+### タクソノミー定義一覧
+
+```http
+GET /_emdash/api/taxonomies
+```
+
+### タクソノミー作成
+
+```http
+POST /_emdash/api/taxonomies
+Content-Type: application/json
+
+{
+  "name": "genre",
+  "label": "Genres",
+  "labelSingular": "Genre",
+  "hierarchical": true,
+  "collections": ["books", "movies"]
+}
+```
+
+### ターム一覧
+
+```http
+GET /_emdash/api/taxonomies/:name/terms
+```
+
+### ターム作成
+
+```http
+POST /_emdash/api/taxonomies/:name/terms
+Content-Type: application/json
+
+{
+  "slug": "tutorials",
+  "label": "チュートリアル",
+  "parentId": "term_abc",
+  "description": "ハウツーガイド"
+}
+```
+
+### ターム更新
+
+```http
+PUT /_emdash/api/taxonomies/:name/terms/:slug
+```
+
+### ターム削除
+
+```http
+DELETE /_emdash/api/taxonomies/:name/terms/:slug
+```
+
+### エントリータームを設定
+
+```http
+POST /_emdash/api/content/:collection/:id/terms/:taxonomy
+Content-Type: application/json
+
+{
+  "termIds": ["term_news", "term_featured"]
+}
+```
+
+## ウィジェットエリアエンドポイント
+
+### ウィジェットエリア一覧
+
+```http
+GET /_emdash/api/widget-areas
+```
+
+### ウィジェットエリア取得
+
+```http
+GET /_emdash/api/widget-areas/:name
+```
+
+### ウィジェットエリア作成
+
+```http
+POST /_emdash/api/widget-areas
+Content-Type: application/json
+
+{
+  "name": "sidebar",
+  "label": "メインサイドバー",
+  "description": "投稿ページに表示されます"
+}
+```
+
+### ウィジェットエリア削除
+
+```http
+DELETE /_emdash/api/widget-areas/:name
+```
+
+### ウィジェットを追加
+
+```http
+POST /_emdash/api/widget-areas/:name/widgets
+Content-Type: application/json
+
+{
+  "type": "content",
+  "title": "概要",
+  "content": [...]
+}
+```
+
+### ウィジェット更新
+
+```http
+PUT /_emdash/api/widget-areas/:name/widgets/:id
+```
+
+### ウィジェット削除
+
+```http
+DELETE /_emdash/api/widget-areas/:name/widgets/:id
+```
+
+### ウィジェット順序変更
+
+```http
+POST /_emdash/api/widget-areas/:name/reorder
+Content-Type: application/json
+
+{
+  "widgetIds": ["widget_1", "widget_2", "widget_3"]
+}
+```
+
+## ユーザー管理エンドポイント
+
+### ユーザー一覧
+
+```http
+GET /_emdash/api/admin/users
+GET /_emdash/api/admin/users?role=40
+GET /_emdash/api/admin/users?search=john
+```
+
+### ユーザー取得
+
+```http
+GET /_emdash/api/admin/users/:id
+```
+
+### ユーザー更新
+
+```http
+PATCH /_emdash/api/admin/users/:id
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "role": 40
+}
+```
+
+### ユーザー有効化
+
+```http
+POST /_emdash/api/admin/users/:id/enable
+```
+
+### ユーザー無効化
+
+```http
+POST /_emdash/api/admin/users/:id/disable
+```
+
+## 認証エンドポイント
+
+### セットアップステータス
+
+```http
+GET /_emdash/api/setup/status
+```
+
+セットアップが完了し、ユーザーが存在するかどうかを返します。
+
+### パスキーログイン
+
+```http
+POST /_emdash/api/auth/passkey/options
+```
+
+WebAuthn認証オプションを取得します。
+
+```http
+POST /_emdash/api/auth/passkey/verify
+Content-Type: application/json
+
+{
+  "id": "credential-id",
+  "rawId": "...",
+  "response": {...},
+  "type": "public-key"
+}
+```
+
+パスキーを検証し、セッションを作成します。
+
+### マジックリンク
+
+```http
+POST /_emdash/api/auth/magic-link/send
+Content-Type: application/json
+
+{
+  "email": "user@example.com"
+}
+```
+
+```http
+GET /_emdash/api/auth/magic-link/verify?token=xxx
+```
+
+### ログアウト
+
+```http
+POST /_emdash/api/auth/logout
+```
+
+### 現在のユーザー
+
+```http
+GET /_emdash/api/auth/me
+```
+
+### ユーザー招待
+
+```http
+POST /_emdash/api/auth/invite
+Content-Type: application/json
+
+{
+  "email": "newuser@example.com",
+  "role": 30
+}
+```
+
+### パスキー管理
+
+```http
+GET /_emdash/api/auth/passkey
+```
+
+ユーザーのパスキーを一覧表示します。
+
+```http
+POST /_emdash/api/auth/passkey/register/options
+POST /_emdash/api/auth/passkey/register/verify
+```
+
+新しいパスキーを登録します。
+
+```http
+PATCH /_emdash/api/auth/passkey/:id
+Content-Type: application/json
+
+{
+  "name": "MacBook Pro"
+}
+```
+
+パスキーの名前を変更します。
+
+```http
+DELETE /_emdash/api/auth/passkey/:id
+```
+
+パスキーを削除します。
+
+## インポートエンドポイント
+
+### WordPressエクスポートの分析
+
+```http
+POST /_emdash/api/import/wordpress/analyze
+Content-Type: multipart/form-data
+
+file: <WXR file>
+```
+
+### WordPressインポートの実行
+
+```http
+POST /_emdash/api/import/wordpress/execute
+Content-Type: application/json
+
+{
+  "analysisId": "...",
+  "options": {
+    "includeMedia": true,
+    "includeTaxonomies": true,
+    "includeMenus": true
+  }
+}
+```
+
+## レート制限
+
+APIエンドポイントは、デプロイメント構成に基づいてレート制限される場合があります。レート制限時、レスポンスには以下が含まれます：
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 60
+```
+
+## CORS
+
+APIはブラウザリクエスト用にCORSをサポートしています。デプロイメントで許可されたオリジンを設定してください。

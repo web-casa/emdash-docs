@@ -1,0 +1,282 @@
+---
+title: ナビゲーションメニュー
+description: ヘッダー、フッター、サイドバー用のナビゲーションメニューを作成および管理します。
+---
+
+import { Aside, Steps, Tabs, TabItem, Code } from "@astrojs/starlight/components";
+
+EmDashメニューは、管理インターフェースを通じて管理するリンクの順序付きリストです。メニューはドロップダウンのためのネストをサポートし、ページ、投稿、タクソノミーターム、または外部URLにリンクできます。
+
+## メニューのクエリ
+
+`getMenu()`を使用して、一意の名前でメニューを取得します：
+
+```astro title="src/layouts/Base.astro"
+---
+import { getMenu } from "emdash";
+
+const primaryMenu = await getMenu("primary");
+---
+
+{primaryMenu && (
+  <nav>
+    <ul>
+      {primaryMenu.items.map(item => (
+        <li>
+          <a href={item.url}>{item.label}</a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+その名前のメニューが存在しない場合、関数は`null`を返します。
+
+## メニュー構造
+
+メニューはメタデータとアイテムの配列を含みます：
+
+```ts
+interface Menu {
+	id: string;
+	name: string; // 一意の識別子 ("primary", "footer")
+	label: string; // 表示名 ("メインナビゲーション")
+	items: MenuItem[];
+}
+
+interface MenuItem {
+	id: string;
+	label: string;
+	url: string; // 解決済みURL
+	target?: string; // 新しいウィンドウなら "_blank"
+	titleAttr?: string; // HTML title attribute
+	cssClasses?: string; // カスタムCSSクラス
+	children: MenuItem[]; // ドロップダウン用のネストされた項目
+}
+```
+
+URLはアイテムタイプに基づいて自動的に解決されます：
+
+- **ページ/投稿アイテム**は`/{collection}/{slug}`に解決されます
+- **タクソノミーアイテム**は`/{taxonomy}/{slug}`に解決されます
+- **コレクションアイテム**は`/{collection}/`に解決されます
+- **カスタムリンク**はURLをそのまま使用します
+
+## ネストされたメニューのレンダリング
+
+メニューアイテムはドロップダウンナビゲーションのために子を持つことができます。`children`配列を再帰的にレンダリングしてネストを処理します：
+
+```
+astro title="src/components/Navigation.astro"
+---
+import { getMenu } from "emdash";
+import type { MenuItem } from "emdash";
+
+interface Props {
+  name: string;
+}
+
+const menu = await getMenu(Astro.props.name);
+---
+
+{menu && (
+  <nav class="nav">
+    <ul class="nav-list">
+      {menu.items.map(item => (
+        <li class:list={["nav-item", item.cssClasses]}>
+          <a
+            href={item.url}
+            target={item.target}
+            title={item.titleAttr}
+            aria-current={Astro.url.pathname === item.url ? "page" : undefined}
+          >
+            {item.label}
+          </a>
+          {item.children.length > 0 && (
+            <ul class="submenu">
+              {item.children.map(child => (
+                <li>
+                  <a href={child.url} target={child.target}>
+                    {child.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+<Aside>
+	`aria-current="page"`を使用して、ナビゲーション内の現在のページを示します。スクリーンリーダーはこれをアナウンスし、`[aria-current="page"]` CSSセレクタはアクティブリンクのスタイリングを可能にします。
+</Aside>
+
+## メニューアイテムタイプ
+
+管理パネルは5種類のメニューアイテムをサポートしています：
+
+| タイプ         | 説明                          | URL解決               |
+| ------------ | ---------------------------- | ---------------------- |
+| `page`       | ページへのリンク               | `/{collection}/{slug}` |
+| `post`       | 投稿へのリンク                 | `/{collection}/{slug}` |
+| `taxonomy`   | カテゴリーまたはタグへのリンク  | `/{taxonomy}/{slug}`   |
+| `collection` | コレクションアーカイブへのリンク | `/{collection}/`       |
+| `custom`     | 外部またはカスタムURL          | そのまま使用             |
+
+## すべてのメニューの一覧表示
+
+`getMenus()`を使用してすべてのメニュー定義（アイテムなし）を取得します：
+
+```ts
+import { getMenus } from "emdash";
+
+const menus = await getMenus();
+// 戻り値: [{ id, name, label }, ...]
+```
+
+これは主に管理インターフェースやデバッグに役立ちます。
+
+## メニューの作成
+
+`/_emdash/admin/menus`の管理インターフェースを通じて、または管理APIを使用してメニューを作成します：
+
+```http
+POST /_emdash/api/menus
+Content-Type: application/json
+
+{
+  "name": "footer",
+  "label": "Footer Navigation"
+}
+```
+
+メニューにアイテムを追加します：
+
+```http
+POST /_emdash/api/menus/footer/items
+Content-Type: application/json
+
+{
+  "type": "page",
+  "referenceCollection": "pages",
+  "referenceId": "page_privacy",
+  "label": "Privacy Policy"
+}
+```
+
+カスタム外部リンクを追加します：
+
+```http
+POST /_emdash/api/menus/footer/items
+Content-Type: application/json
+
+{
+  "type": "custom",
+  "customUrl": "https://github.com/example",
+  "label": "GitHub",
+  "target": "_blank"
+}
+```
+
+## 並べ替えとネスト
+
+並べ替えエンドポイントを使用してアイテムの順序と親子関係を更新します：
+
+```http
+POST /_emdash/api/menus/primary/reorder
+Content-Type: application/json
+
+{
+  "items": [
+    { "id": "item_1", "parentId": null, "sortOrder": 0 },
+    { "id": "item_2", "parentId": null, "sortOrder": 1 },
+    { "id": "item_3", "parentId": "item_2", "sortOrder": 0 }
+  ]
+}
+```
+
+これにより、`item_3`が`item_2`の子となり、ドロップダウンが作成されます。
+
+## 完全な例
+
+以下の例は、プライマリナビゲーションを含むレスポンシブヘッダーを示しています：
+
+```
+astro title="src/layouts/Base.astro"
+---
+import { getMenu, getSiteSettings } from "emdash";
+
+const settings = await getSiteSettings();
+const primaryMenu = await getMenu("primary");
+---
+
+<html lang="en">
+  <head>
+    <title>{settings.title}</title>
+  </head>
+  <body>
+    <header class="header">
+      <a href="/" class="logo">
+        {settings.logo ? (
+          <img src={settings.logo.url} alt={settings.logo.alt || settings.title} />
+        ) : (
+          settings.title
+        )}
+      </a>
+
+      {primaryMenu && (
+        <nav class="main-nav" aria-label="Main navigation">
+          <ul>
+            {primaryMenu.items.map(item => (
+              <li class:list={[item.cssClasses, { "has-children": item.children.length > 0 }]}>
+                <a
+                  href={item.url}
+                  target={item.target}
+                  aria-current={Astro.url.pathname === item.url ? "page" : undefined}
+                >
+                  {item.label}
+                </a>
+                {item.children.length > 0 && (
+                  <ul class="dropdown">
+                    {item.children.map(child => (
+                      <li>
+                        <a href={child.url} target={child.target}>{child.label}</a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+    </header>
+
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>
+```
+
+## APIリファレンス
+
+### `getMenu(name)`
+
+名前でメニューを取得し、すべてのアイテムと解決されたURLを含みます。
+
+**パラメータ：**
+
+- `name` — メニューの一意の識別子（文字列）
+
+**戻り値：** `Promise<Menu | null>`
+
+### `getMenus()`
+
+アイテムなしですべてのメニュー定義を一覧表示します。
+
+**戻り値：** `Promise<Array<{ id: string; name: string; label: string }>>`

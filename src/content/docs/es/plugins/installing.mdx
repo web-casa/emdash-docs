@@ -1,0 +1,138 @@
+---
+title: Instalar plugins
+description: Instala plugins desde el EmDash Marketplace o añádelos directamente desde código.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Los plugins de EmDash pueden instalarse de dos maneras: desde el marketplace en el panel de administración o añadiéndolos directamente a tu configuración de Astro. Los del marketplace se ejecutan en un entorno aislado; los basados en configuración se ejecutan en el mismo proceso que tu sitio.
+
+## Desde el marketplace
+
+El panel de administración incluye un navegador del mercado donde puedes buscar, instalar y gestionar complementos.
+
+### Requisitos previos
+
+Para instalar complementos del mercado, tu sitio necesita:
+
+1. **Ejecutor de sandbox configurado** — Los complementos del mercado se ejecutan en workers V8 aislados, lo que requiere el entorno de ejecución del sandbox:
+
+   ```typescript title="astro.config.mjs"
+   import { emdash } from "emdash/astro";
+
+   export default defineConfig({
+     integrations: [
+       emdash({
+         marketplace: "https://marketplace.emdashcms.com",
+         sandboxRunner: true,
+       }),
+     ],
+   });
+   ```
+
+2. **Acceso de administrador** — Solo los administradores pueden instalar o eliminar complementos.
+
+### Buscar e instalar
+
+<Steps>
+1. Abre el panel de administración y navega a **Complementos > Mercado**
+2. Navega o busca un complemento
+3. Haz clic en la tarjeta del complemento para ver su página de detalles — README, capturas de pantalla, capacidades y resultados de auditoría de seguridad
+4. Haz clic en **Instalar**
+5. Revisa el diálogo de consentimiento de capacidades — esto muestra a qué podrá acceder el complemento
+6. Confirma la instalación
+</Steps>
+
+El complemento se descargará, se almacenará en tu bucket R2 del sitio y se cargará en el ejecutor del sandbox. Estará activo inmediatamente.
+
+### Consentimiento de Capacidades
+
+Antes de la instalación, verás un diálogo que enumera a qué necesita acceder el complemento:
+
+| Capacidad | Qué significa |
+| ---------- | ------------- |
+| `read:content` | Leer tu contenido |
+| `write:content` | Crear, actualizar y eliminar contenido |
+| `read:media` | Acceder a tu biblioteca multimedia |
+| `write:media` | Subir y gestionar medios |
+| `network:fetch` | Realizar solicitudes de red a hosts específicos |
+
+<Aside type="caution">
+  Solo instala complementos de autores en los que confíes. El sistema de capacidades limita a qué puede acceder un complemento en sandbox, pero un complemento con `write:content` puede modificar cualquier contenido en tu sitio.
+</Aside>
+
+### Auditoría de Seguridad
+
+Cada versión de complemento en el mercado ha pasado por una auditoría de seguridad automatizada. El veredicto de la auditoría aparece en la tarjeta del complemento:
+
+- **Aprobado** — No se encontraron problemas
+- **Advertencia** — Se marcaron preocupaciones menores (revisa los hallazgos)
+- **Fallido** — Se detectaron problemas de seguridad significativos
+
+Puedes ver el informe completo de la auditoría en la página de detalles del complemento, incluidos los hallazgos individuales y su gravedad.
+
+### Actualizaciones
+
+Cuando hay una versión más nueva disponible de un complemento instalado:
+
+1. Ve a **Complementos** en el panel de administración
+2. Los complementos del mercado muestran una insignia **Actualización disponible**
+3. Haz clic en **Actualizar** para ver el registro de cambios y cualquier cambio de capacidad
+4. Si la nueva versión requiere capacidades adicionales, verás una comparación y deberás aprobarlas
+5. Confirma para actualizar
+
+<Aside type="note">
+  Las actualizaciones que agregan nuevas capacidades requieren aprobación explícita. Si un complemento que antes solo leía contenido ahora quiere hacer solicitudes de red, verás la nueva capacidad resaltada antes de confirmar.
+</Aside>
+
+### Desinstalación
+
+1. Ve a **Complementos** en el panel de administración
+2. Haz clic en el complemento del mercado que deseas eliminar
+3. Haz clic en **Desinstalar**
+4. Elige si conservar o eliminar los datos almacenados del complemento
+5. Confirma
+
+El código del sandbox del complemento se elimina de tu bucket R2 y deja de ejecutarse inmediatamente.
+
+## Desde la Configuración
+
+Para complementos de confianza (tu propio código, o paquetes que instalas vía npm), agrégalos directamente a tu configuración de Astro:
+
+```typescript title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import { emdash } from "emdash/astro";
+import seoPlugin from "@emdash-cms/plugin-seo";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      plugins: [
+        seoPlugin({ generateSitemap: true }),
+      ],
+    }),
+  ],
+});
+```
+
+Los plugins basados en configuración:
+
+- Se ejecutan en el mismo proceso (no en sandbox)
+- Tienen acceso completo a las APIs de Node.js
+- Se cargan en tiempo de compilación y en cada inicio del servidor
+- No se pueden instalar o eliminar desde la UI de administración
+
+<Aside type="tip">
+  Usa plugins basados en configuración para código propio y para paquetes que mantienes tú mismo. Usa plugins del marketplace para extensiones de terceros donde el aislamiento del sandbox aporte ventajas de seguridad.
+</Aside>
+
+## Marketplace vs. configuración: cuándo usar cada opción
+
+| | Mercado | Configuración |
+| --- | --- | --- |
+| **Ejecución** | Aislado en V8 (sandbox) | En el mismo proceso |
+| **Método de instalación** | UI de administración | Cambio de código + despliegue |
+| **Capacidades** | Aplicadas en tiempo de ejecución | Solo documentación |
+| **APIs de Node.js** | No disponibles | Acceso completo |
+| **Ideal para** | Complementos de terceros | Código propio |
+| **Actualizaciones** | Un clic en el administrador | Cambio de versión + despliegue |

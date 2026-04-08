@@ -1,0 +1,329 @@
+---
+title: 国际化 (i18n)
+description: 通过按语言区域发布、自定义 slug 和自动回退机制，将内容翻译成多种语言。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 与 [Astro 内置的 i18n 路由](https://docs.astro.build/en/guides/internationalization/) 集成，提供多语言内容管理。Astro 负责 URL 路由和语言区域检测；EmDash 负责翻译内容的存储和检索。
+
+每个翻译都是一个完整、独立的内容条目，拥有自己的 slug、状态和修订历史。一篇帖子的法语版本可以是草稿，而其英语版本可以已发布。
+
+## 配置
+
+通过在 Astro 配置中添加 `i18n` 块来启用 i18n。EmDash 会自动读取此配置——在 EmDash 中无需单独设置语言区域。
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	i18n: {
+		defaultLocale: "en",
+		locales: ["en", "fr", "es"],
+		fallback: { fr: "en", es: "en" },
+	},
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+当 Astro 配置中不存在 `i18n` 时，所有 i18n 功能将被禁用，EmDash 将作为单语言 CMS 运行。
+
+## 翻译工作原理
+
+EmDash 使用 **按语言区域分行** 模型。每个翻译都是数据库中的一个独立行，拥有自己的 ID、slug 和状态，并通过共享的 `translation_group` 标识符与其他翻译关联。
+
+```
+ec_posts:
+id       | slug        | locale | translation_group | status
+---------|-------------|--------|-------------------|----------
+01ABC... | my-post     | en     | 01ABC...          | published
+01DEF... | mon-article | fr     | 01ABC...          | draft
+01GHI... | mi-entrada  | es     | 01ABC...          | published
+```
+
+这种设计意味着：
+
+- **按语言区域的 slug** — `/blog/my-post` 和 `/fr/blog/mon-article` 可以自然工作
+- **按语言区域发布** — 发布英语版本，同时保持法语版本为草稿
+- **按语言区域的修订历史** — 每个翻译都有自己的修订历史
+- **无跨语言区域查询复杂性** — 列表查询仅返回一个语言区域的条目
+
+## 查询翻译内容
+
+### 单个条目
+
+向 `getEmDashEntry` 传递 `locale` 参数以检索特定翻译。省略时，默认为请求的当前语言区域（由 Astro 的 i18n 中间件设置）。
+
+```astro title="src/pages/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug, {
+  locale: Astro.currentLocale,
+});
+
+if (!post) return Astro.redirect("/404");
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+</article>
+```
+
+### 回退链
+
+当请求的语言区域没有内容时，EmDash 会遵循您在 Astro 配置中定义的回退链。假设 `fallback: { fr: "en" }`：
+
+1. 尝试请求的语言区域 (`fr`)
+2. 尝试回退语言区域 (`en`)
+3. 尝试默认语言区域
+
+回退仅适用于单条目查询。列表查询仅返回请求语言区域的条目——不会混合跨语言区域的内容。
+
+<Aside>
+  当使用回退时，响应元数据会包含 `fallbackLocale`，以便您的模板可以显示“此内容尚未翻译”的通知。
+</Aside>
+
+### 集合列表
+
+按语言区域筛选集合：
+
+```astro title="src/pages/posts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  locale: Astro.currentLocale,
+  status: "published",
+});
+---
+
+<ul>
+  {posts.map((post) => (
+    <li><a href={`/${post.data.slug}`}>{post.data.title}</a></li>
+  ))}
+</ul>
+```
+
+## 语言切换器
+
+使用 `getTranslations` 构建一个语言切换器，链接到当前条目的现有翻译：
+
+```astro title="src/components/LanguageSwitcher.astro"
+---
+import { getTranslations } from "emdash";
+import { getRelativeLocaleUrl } from "astro:i18n";
+
+interface Props {
+  collection: string;
+  entryId: string;
+}
+
+const { collection, entryId } = Astro.props;
+const { translations } = await getTranslations(collection, entryId);
+---
+
+<nav aria-label="Language">
+  <ul>
+    {translations.map((t) => (
+      <li>
+        <a
+          href={getRelativeLocaleUrl(t.locale, `/blog/${t.slug}`)}
+          aria-current={t.locale === Astro.currentLocale ? "page" : undefined}
+        >
+          {t.locale.toUpperCase()}
+        </a>
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+
+`getTranslations` 函数返回同一翻译组中的所有语言区域变体：
+
+```ts
+const { translationGroup, translations } = await getTranslations("posts", post.entry.id);
+// translations: [
+//   { locale: "en", id: "01ABC...", slug: "my-post", status: "published" },
+//   { locale: "fr", id: "01DEF...", slug: "mon-article", status: "draft" },
+// ]
+```
+
+<Aside type="tip">
+  使用来自 `astro:i18n` 的 `getRelativeLocaleUrl` 来构建带语言区域前缀的 URL。这会尊重您的 Astro 路由策略（`prefix-other-locales` 或 `prefix-always`）。
+</Aside>
+
+## 在管理面板管理翻译
+
+### 内容列表
+
+启用 i18n 后，内容列表显示：
+
+-   一个**语言区域列**，显示每个条目的语言区域
+-   工具栏中的**语言区域筛选器**，用于在不同语言区域之间切换
+
+### 创建翻译
+
+在编辑器中打开任何内容条目。侧边栏会显示一个**翻译**面板，列出所有已配置的语言区域。对于每个语言区域：
+
+-   **"翻译"** 出现在没有翻译的语言区域——点击以创建翻译
+-   **"编辑"** 出现在已有翻译的语言区域——点击以导航到该翻译
+-   当前语言区域会标有对勾标记
+
+创建翻译时，新条目会使用源语言区域的数据预填充，并分配一个默认 slug `{source-slug}-{locale}`。根据需要调整 slug 和内容，然后保存。
+
+### 按语言区域发布
+
+每个翻译都有自己的状态。可以独立地发布、取消发布或安排翻译。法语版本可以是草稿，而英语版本可以已上线。
+
+## 内容 API
+
+### 语言区域参数
+
+所有内容 API 路由都接受一个可选的 `locale` 查询参数：
+
+```http
+GET /_emdash/api/content/posts?locale=fr
+GET /_emdash/api/content/posts/my-post?locale=fr
+```
+
+省略时，默认为配置的默认语言区域。
+
+### 通过 API 创建翻译
+
+通过向内容创建端点传递 `locale` 和 `translationOf` 来创建翻译：
+
+```http
+POST /_emdash/api/content/posts
+Content-Type: application/json
+
+{
+  "locale": "fr",
+  "translationOf": "01ABC...",
+  "data": {
+    "title": "Mon Article",
+    "slug": "mon-article"
+  }
+}
+```
+
+新条目共享源条目的 `translation_group` 并以草稿状态开始。
+
+### 列出翻译
+
+检索给定条目的所有翻译：
+
+```http
+GET /_emdash/api/content/posts/01ABC.../translations
+```
+
+返回翻译组 ID 以及一个包含其 ID、slug 和状态的语言区域变体数组。
+
+## CLI
+
+CLI 在内容命令上支持 `--locale` 标志：
+
+```bash
+# List French posts
+emdash content list posts --locale fr
+
+# Get a specific entry in French
+emdash content get posts my-post --locale fr
+
+# Create a French translation of an existing entry
+emdash content create posts --locale fr --translation-of 01ABC...
+```
+
+## 种子数据填充多语言内容
+
+种子文件使用 `locale` 和 `translationOf` 来表达翻译：
+
+```json title=".emdash/seed.json"
+{
+  "content": {
+    "posts": [
+      {
+        "id": "welcome",
+        "slug": "welcome",
+        "locale": "en",
+        "status": "published",
+        "data": { "title": "Welcome" }
+      },
+      {
+        "id": "welcome-fr",
+        "slug": "bienvenue",
+        "locale": "fr",
+        "translationOf": "welcome",
+        "status": "draft",
+        "data": { "title": "Bienvenue" }
+      }
+    ]
+  }
+}
+```
+
+源语言区域条目必须出现在其翻译之前，以便 `translationOf` 引用能够正确解析。
+
+## 字段可翻译性
+
+每个字段都有一个 `translatable` 设置（默认值：`true`）。创建翻译时：
+
+-   **可翻译字段** 会从源语言区域预填充以供编辑
+-   **不可翻译字段** 会被复制，并在组内的所有翻译之间保持同步
+
+系统字段如 `status`、`published_at` 和 `author_id` 始终是按语言区域的，并且永远不会同步。
+
+<Aside>
+  不可翻译字段适用于需要在不同语言区域之间保持一致的值，例如产品 SKU 或排序序号。
+</Aside>
+
+## URL 策略
+
+EmDash 不管理语言区域 URL——Astro 负责路由。常见模式：
+
+```
+# prefix-other-locales (Astro default)
+/blog/my-post          → en (default locale, no prefix)
+/fr/blog/mon-article   → fr
+
+# prefix-always
+/en/blog/my-post       → en
+/fr/blog/mon-article   → fr
+```
+
+使用来自 `astro:i18n` 的 `getRelativeLocaleUrl` 来构建正确的 URL，无论采用何种路由模式。
+
+## 导入多语言内容
+
+### 使用 WPML 或 Polylang 的 WordPress
+
+WordPress 插件导入源会自动检测 WPML 和 Polylang。检测到时，导入的内容会包含语言区域和翻译组元数据，从而保留多语言结构。
+
+### WXR 文件
+
+WXR 导出不包含 WPML/Polylang 元数据。可以将其作为单一语言区域导入并手动创建翻译，或者使用 `--locale` 标志为所有导入的项目分配一个语言区域：
+
+```bash
+# Import a French WXR export
+emdash import wordpress export-fr.xml --execute --locale fr
+
+# Match against existing English content by slug
+emdash import wordpress export-fr.xml --execute --locale fr --translation-of-locale en
+```
+
+## 后续步骤
+
+-   [查询内容](/zh-cn/guides/querying-content/) — 完整的查询 API 参考
+-   [处理内容](/zh-cn/guides/working-with-content/) — 管理面板内容管理
+-   [Astro i18n 路由](https://docs.astro.build/en/guides/internationalization/) — Astro 的路由配置

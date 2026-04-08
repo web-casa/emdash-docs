@@ -1,0 +1,150 @@
+---
+title: Herramientas de IA
+description: Conecta Claude, ChatGPT y otros asistentes de IA a tu sitio de EmDash.
+---
+
+import { Aside, Steps, Tabs, TabItem, LinkCard } from "@astrojs/starlight/components";
+
+EmDash tiene un [servidor MCP](https://modelcontextprotocol.io) integrado que permite a los asistentes de IA trabajar directamente con el contenido de tu sitio. Puedes pedirle a Claude, ChatGPT u otras herramientas que redacten publicaciones, actualicen páginas, gestionen medios, busquen en tu contenido y más, todo mediante conversación natural.
+
+## Habilitar el servidor MCP
+
+El servidor MCP está deshabilitado por defecto. Habilítalo en tu configuración de Astro:
+
+```js title="astro.config.mjs"
+emdash({
+  mcp: true,
+})
+```
+
+## Configuración
+
+La URL del servidor MCP de tu sitio es:
+
+```
+https://example.com/_emdash/api/mcp
+```
+
+Reemplaza `example.com` con tu dominio. Para desarrollo local, usa `http://localhost:4321/_emdash/api/mcp`.
+
+<Tabs>
+<TabItem label="Claude">
+
+Los conectores agregados en [claude.ai](https://claude.ai) funcionan tanto en la aplicación web como en Claude Desktop.
+
+<Steps>
+
+1. Ve a [Configuración > Conectores](https://claude.ai/settings/connectors)
+
+2. Haz clic en **Agregar conector personalizado**
+
+3. Ingresa la URL del servidor MCP de tu sitio
+
+4. Haz clic en **Agregar** -- tu navegador se abrirá para que inicies sesión y apruebes el acceso
+
+5. Inicia una nueva conversación, haz clic en **+** en la entrada del chat, luego en **Conectores**, y activa tu sitio
+
+</Steps>
+
+Para los planes Team y Enterprise, un Propietario primero agrega el conector desde [Configuración de administrador > Conectores](https://claude.ai/admin-settings/connectors). Los miembros luego se conectan individualmente desde su propia configuración.
+
+</TabItem>
+<TabItem label="ChatGPT">
+
+ChatGPT admite servidores MCP en los planes Pro, Business y Enterprise.
+
+<Steps>
+
+1. Ve a **Configuración > Aplicaciones y conectores > Configuración avanzada** y habilita **Modo desarrollador**
+
+2. Ve a **Configuración > Conectores > Crear**
+
+3. Ingresa un nombre, descripción y la URL del servidor MCP de tu sitio
+
+4. Haz clic en **Crear**
+
+5. En una conversación, haz clic en **+** cerca del compositor, luego en **Más**, y selecciona tu conector
+
+</Steps>
+
+</TabItem>
+</Tabs>
+
+<Aside>
+	¿Usas una herramienta de código como VS Code, Cursor o Windsurf? Consulta la [Referencia del servidor MCP](/es/reference/mcp-server) para detalles de configuración.
+</Aside>
+
+## Lo que puedes hacer
+
+Una vez conectado, puedes pedirle al asistente de IA que realice cualquiera de estas operaciones en lenguaje natural. No necesitas conocer los nombres de las herramientas, solo describe lo que quieres.
+
+### Contenido
+
+- **Explorar contenido** -- "Muéstrame las últimas 10 publicaciones del blog" o "Encuentra todas las páginas en borrador"
+- **Leer contenido** -- "Obtén la publicación llamada 'hello-world' y resúmela"
+- **Crear contenido** -- "Escribe una nueva publicación de blog sobre nuestra venta de verano" o "Crea una página en borrador para la sección Acerca de"
+- **Editar contenido** -- "Actualiza la página de precios para mencionar el nuevo plan" o "Corrige el error tipográfico en la publicación de preguntas frecuentes"
+- **Publicar y programar** -- "Publica la publicación de la venta de verano" o "Programa el anuncio para el 1 de junio a las 9 a.m."
+- **Comparar versiones** -- "Muéstrame qué cambió en la página de inicio desde que se publicó por última vez"
+- **Gestionar borradores** -- "Descarta los cambios en borrador en la página Acerca de" o "Duplica la plantilla del boletín"
+- **Traducciones** -- "¿Qué traducciones existen para la publicación de bienvenida?" (cuando i18n está habilitado)
+
+### Medios
+
+- **Explorar medios** -- "Lista todas las imágenes subidas" o "Muéstrame los PDF en la biblioteca multimedia"
+- **Verificar detalles** -- "Obtén los detalles de este elemento multimedia"
+- **Actualizar metadatos** -- "Establece el texto alternativo en la imagen principal a 'Atardecer en la montaña'"
+- **Eliminar archivos** -- "Elimina la imagen del banner antiguo"
+
+### Búsqueda
+
+- **Buscar contenido** -- "Busca publicaciones que mencionen 'accesibilidad'" o "Encuentra cualquier cosa sobre TypeScript en todas las colecciones"
+
+### Taxonomías
+
+- **Explorar** -- "Lista todas las categorías" o "Muéstrame las etiquetas"
+- **Crear términos** -- "Agrega una etiqueta 'tutoriales'" o "Crea una subcategoría 'Frontend' bajo 'Ingeniería'"
+
+### Menús
+
+- **Ver menús** -- "Muéstrame el menú de navegación principal" o "¿Qué hay en el menú del pie de página?"
+
+### Esquema (solo administrador)
+
+- **Inspeccionar** -- "¿Qué colecciones existen?" o "Muéstrame los campos en la colección de publicaciones"
+- **Crear colecciones** -- "Crea una nueva colección 'testimonios' con campos de nombre y cita"
+- **Modificar esquema** -- "Agrega un campo booleano 'destacado' a las publicaciones"
+
+<Aside type="caution">
+	Los cambios en el esquema (crear/eliminar colecciones y campos) modifican la estructura de tu base de datos y requieren permisos de administrador. La IA te informará si no tienes acceso suficiente.
+</Aside>
+
+### Revisiones
+
+- **Ver historial** -- "Muestra el historial de revisiones para esta publicación"
+- **Restaurar** -- "Restaura la publicación a su versión anterior"
+
+## Permisos
+
+Lo que puedes hacer a través de una herramienta de IA depende de tu rol en EmDash. El asistente de IA opera con los mismos permisos que tienes en el panel de administración:
+
+| Rol | Lo que la IA puede hacer |
+| --- | --- |
+| **Administrador** | Todo, incluidos cambios en el esquema |
+| **Editor** | Todo el contenido, medios, taxonomías y menús. Puede ver el esquema. |
+| **Autor** | Su propio contenido y medios |
+| **Colaborador** | Su propio contenido (sin publicar) y medios |
+
+Si intentas algo para lo que no tienes acceso, la IA te lo hará saber.
+
+## Consejos
+
+- **Sé específico sobre las colecciones.** Di "crea una publicación de blog" en lugar de "crea una publicación" si tienes múltiples colecciones.
+- **Pregunta primero por el esquema.** Si no estás seguro de qué campos tiene una colección, pregunta "¿Qué campos tiene la colección de publicaciones?" antes de crear o editar contenido.
+- **Revisa antes de publicar.** Pídele a la IA que cree contenido como borrador, revísalo en el panel de administración, luego pídele a la IA que lo publique, o publícalo tú mismo.
+- **Usa comparar para revisar.** Antes de publicar, pregunta "Compara las versiones en vivo y en borrador de esta publicación" para ver exactamente qué cambiará.
+- **Los campos de texto enriquecido usan Portable Text.** La IA puede escribir contenido para campos de texto enriquecido, pero el formato complejo es mejor hacerlo en el editor de administración.
+
+## Para desarrolladores
+
+El endpoint del servidor MCP, los métodos de autenticación, el descubrimiento de OAuth, los parámetros de las herramientas y el manejo de errores están documentados en la [Referencia del servidor MCP](/es/reference/mcp-server).

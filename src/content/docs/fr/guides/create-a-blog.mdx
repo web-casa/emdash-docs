@@ -1,0 +1,325 @@
+---
+title: Créer un Blog
+description: Construisez un blog complet avec des articles, des catégories et des étiquettes en utilisant EmDash.
+---
+
+import { Aside, Steps, Tabs, TabItem, Code } from "@astrojs/starlight/components";
+import postsListImg from "../../../../assets/screenshots/admin-posts-list.png";
+import postEditorImg from "../../../../assets/screenshots/admin-post-editor.png";
+
+Ce guide vous accompagne dans la création d'un blog avec EmDash, depuis la définition de votre type de contenu jusqu'à l'affichage des articles avec catégories et étiquettes.
+
+## Prérequis
+
+- Un site EmDash configuré et en cours d'exécution (voir [Démarrage](/fr/getting-started/))
+- Une familiarité de base avec les composants Astro
+
+## Définir la Collection d'Articles
+
+EmDash crée une collection "posts" par défaut lors de l'installation. Si vous avez besoin de la personnaliser, utilisez le tableau de bord d'administration ou l'API.
+
+La collection d'articles par défaut inclut :
+
+- `title` - Titre de l'article
+- `slug` - Identifiant adapté aux URL
+- `content` - Corps de texte enrichi
+- `excerpt` - Courte description
+- `featured_image` - Image d'en-tête (optionnelle)
+- `status` - brouillon, publié ou planifié
+- `publishedAt` - Date de publication (champ système)
+
+## Créer Votre Premier Article
+
+1. Ouvrez le tableau de bord d'administration à l'adresse `/_emdash/admin`
+
+2. Cliquez sur **Posts** dans la barre latérale
+
+   <img src={postsListImg.src} alt="EmDash posts list showing titles, status, and dates" />
+
+3. Cliquez sur **New Post**
+
+   <img src={postEditorImg.src} alt="EmDash post editor with title, content, and publish options" />
+
+4. Saisissez un titre et rédigez votre contenu à l'aide de l'éditeur de texte enrichi
+
+5. Ajoutez des catégories et des étiquettes dans le panneau latéral
+
+6. Définissez le statut sur **Published**
+
+7. Cliquez sur **Save**
+
+Votre article est maintenant en ligne. Aucune reconstruction n'est requise.
+
+## Afficher les Articles sur Votre Site
+
+### Lister Tous les Articles
+
+Créez une page qui affiche tous les articles publiés :
+
+```astro title="src/pages/blog/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+});
+
+// Trier par date de publication, du plus récent au plus ancien
+const sortedPosts = posts.sort(
+  (a, b) => (b.data.publishedAt?.getTime() ?? 0) - (a.data.publishedAt?.getTime() ?? 0)
+);
+---
+
+<Base title="Blog">
+  <h1>Blog</h1>
+  <ul>
+    {sortedPosts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>
+          <h2>{post.data.title}</h2>
+          <p>{post.data.excerpt}</p>
+          <time datetime={post.data.publishedAt?.toISOString()}>
+            {post.data.publishedAt?.toLocaleDateString()}
+          </time>
+        </a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+### Afficher un Article Individuel
+
+Créez une route dynamique pour les articles individuels :
+
+```
+astro title="src/pages/blog/[slug].astro"
+---
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const { entries: posts } = await getEmDashCollection("posts", {
+    status: "published",
+  });
+
+  return posts.map((post) => ({
+    params: { slug: post.data.slug },
+  }));
+}
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+
+if (!post) {
+  return Astro.redirect("/404");
+}
+---
+
+<Base title={post.data.title}>
+  <article>
+    {post.data.featured_image && (
+      <img src={post.data.featured_image} alt="" />
+    )}
+    <h1>{post.data.title}</h1>
+    <time datetime={post.data.publishedAt?.toISOString()}>
+      {post.data.publishedAt?.toLocaleDateString()}
+    </time>
+    <PortableText value={post.data.content} />
+  </article>
+</Base>
+```
+
+<Aside type="tip">
+	Pour les sites rendus côté serveur, supprimez `getStaticPaths` et la page sera rendue à la demande. Les collections de contenu en direct d'EmDash fonctionnent dans les deux modes.
+</Aside>
+
+## Ajouter des Catégories et des Étiquettes
+
+EmDash inclut des taxonomies intégrées pour les catégories et les étiquettes. Consultez [Taxonomies](/fr/guides/taxonomies/) pour plus de détails sur la création et la gestion des termes.
+
+### Filtrer les Articles par Catégorie
+
+```
+astro title="src/pages/category/[slug].astro"
+---
+import { getEmDashCollection, getTerm, getTaxonomyTerms } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const categories = await getTaxonomyTerms("category");
+
+  // Aplatir les catégories hiérarchiques
+  const flatten = (terms) => terms.flatMap((t) => [t, ...flatten(t.children)]);
+
+  return flatten(categories).map((cat) => ({
+    params: { slug: cat.slug },
+    props: { category: cat },
+  }));
+}
+
+const { category } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  where: { category: category.slug },
+});
+---
+
+<Base title={category.label}>
+  <h1>{category.label}</h1>
+  {category.description && <p>{category.description}</p>
+}
+
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+### Afficher les Catégories d'un Article
+
+Affichez les catégories sur les articles individuels :
+
+```
+astro title="src/components/PostMeta.astro"
+---
+import { getEntryTerms } from "emdash";
+
+interface Props {
+  postId: string;
+}
+
+const { postId } = Astro.props;
+const categories = await getEntryTerms("posts", postId, "category");
+const tags = await getEntryTerms("posts", postId, "tag");
+---
+
+<div class="post-meta">
+  {categories.length > 0 && (
+    <div class="categories">
+      <span>Catégories :</span>
+      {categories.map((cat) => (
+        <a href={`/category/${cat.slug}`}>{cat.label}</a>
+      ))}
+    </div>
+  )}
+
+  {tags.length > 0 && (
+    <div class="tags">
+      <span>Étiquettes :</span>
+      {tags.map((tag) => (
+        <a href={`/tag/${tag.slug}`}>{tag.label}</a>
+      ))}
+    </div>
+  )}
+</div>
+```
+
+## Ajouter une Pagination
+
+Pour les blogs avec de nombreux articles, ajoutez une pagination :
+
+```
+astro title="src/pages/blog/page/[page].astro"
+---
+import { getEmDashCollection } from "emdash";
+import Base from "../../../../layouts/Base.astro";
+
+const POSTS_PER_PAGE = 10;
+
+export async function getStaticPaths() {
+  const { entries: allPosts } = await getEmDashCollection("posts", {
+    status: "published",
+  });
+
+  const totalPages = Math.ceil(allPosts.length / POSTS_PER_PAGE);
+
+  return Array.from({ length: totalPages }, (_, i) => ({
+    params: { page: String(i + 1) },
+    props: { currentPage: i + 1, totalPages },
+  }));
+}
+
+const { currentPage, totalPages } = Astro.props;
+
+const { entries: allPosts } = await getEmDashCollection("posts", {
+  status: "published",
+});
+
+const sortedPosts = allPosts.sort(
+  (a, b) => (b.data.publishedAt?.getTime() ?? 0) - (a.data.publishedAt?.getTime() ?? 0)
+);
+
+const start = (currentPage - 1) * POSTS_PER_PAGE;
+const posts = sortedPosts.slice(start, start + POSTS_PER_PAGE);
+---
+
+<Base title={`Blog - Page ${currentPage}`}>
+  <h1>Blog</h1>
+
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+
+  <nav>
+    {currentPage > 1 && (
+      <a href={`/blog/page/${currentPage - 1}`}>Précédent</a>
+    )}
+    <span>Page {currentPage} sur {totalPages}</span>
+    {currentPage < totalPages && (
+      <a href={`/blog/page/${currentPage + 1}`}>Suivant</a>
+    )}
+  </nav>
+</Base>
+```
+
+## Ajouter un Flux RSS
+
+Créez un flux RSS pour votre blog :
+
+```
+ts title="src/pages/rss.xml.ts"
+import rss from "@astrojs/rss";
+import { getEmDashCollection } from "emdash";
+
+export async function GET(context) {
+	const { entries: posts } = await getEmDashCollection("posts", {
+		status: "published",
+	});
+
+	return rss({
+			title: "Mon blog",
+			description: "Un blog créé avec EmDash",
+		site: context.site,
+		items: posts.map((post) => ({
+			title: post.data.title,
+			pubDate: post.data.publishedAt,
+			description: post.data.excerpt,
+			link: `/blog/${post.data.slug}`,
+		})),
+	});
+}
+```
+
+Installez le package RSS si ce n'est pas déjà fait :
+
+```bash
+npm install @astrojs/rss
+```
+
+## Prochaines Étapes
+
+- [Travailler avec le Contenu](/fr/guides/working-with-content/) - Apprenez les opérations CRUD dans l'administration
+- [Médiathèque](/fr/guides/media-library/) - Ajoutez des images à vos articles
+- [Taxonomies](/fr/guides/taxonomies/) - Créez des systèmes de classification personnalisés

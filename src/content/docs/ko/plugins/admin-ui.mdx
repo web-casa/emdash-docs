@@ -1,0 +1,409 @@
+---
+title: 관리자 UI
+description: EmDash 관리자 패널에 관리자 페이지와 대시보드 위젯을 추가합니다.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+플러그인은 관리자 패널을 커스텀 페이지와 대시보드 위젯으로 확장할 수 있습니다. 이는 코어 관리자 기능과 함께 렌더링되는 React 컴포넌트입니다.
+
+## 관리자 진입점
+
+관리자 UI가 있는 플러그인은 `admin` 진입점에서 컴포넌트를 내보냅니다:
+
+```typescript title="src/admin.tsx"
+import { SEOSettingsPage } from "../../plugins/components/SEOSettingsPage";
+import { SEODashboardWidget } from "../../plugins/components/SEODashboardWidget";
+
+// Dashboard widgets
+export const widgets = {
+	"seo-overview": SEODashboardWidget,
+};
+
+// Admin pages
+export const pages = {
+	"/settings": SEOSettingsPage,
+};
+```
+
+`package.json`에서 진입점을 구성하세요:
+
+```
+json title="package.json"
+{
+	"exports": {
+		".": "./dist/index.js",
+		"./admin": "./dist/admin.js"
+	}
+}
+```
+
+플러그인 정의에서 이를 참조하세요:
+
+```
+typescript title="src/index.ts"
+definePlugin({
+	id: "seo",
+	version: "1.0.0",
+
+	admin: {
+		entry: "@my-org/plugin-seo/admin",
+		pages: [{ path: "/settings", label: "SEO Settings", icon: "settings" }],
+		widgets: [{ id: "seo-overview", title: "SEO Overview", size: "half" }],
+	},
+});
+```
+
+## 관리자 페이지
+
+관리자 페이지는 훅을 통해 플러그인 컨텍스트를 받는 React 컴포넌트입니다.
+
+### 페이지 정의
+
+`admin.pages`에서 페이지를 정의하세요:
+
+```typescript
+admin: {
+	pages: [
+		{
+			path: "/settings", // URL path (relative to plugin base)
+			label: "Settings", // Sidebar label
+			icon: "settings", // Icon name (optional)
+		},
+		{
+			path: "/reports",
+			label: "Reports",
+			icon: "chart",
+		},
+	];
+}
+```
+
+페이지는 `/_emdash/admin/plugins/<plugin-id>/<path>`에 마운트됩니다.
+
+### 페이지 컴포넌트
+
+```
+typescript title="src/components/SettingsPage.tsx"
+import { useState, useEffect } from "react";
+import { usePluginAPI } from "@emdash-cms/admin";
+
+export function SettingsPage() {
+  const api = usePluginAPI();
+  const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get("settings").then(setSettings);
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    await api.post("settings/save", settings);
+    setSaving(false);
+  };
+
+  return (
+    <div>
+      <h1>플러그인 설정</h1>
+
+      <label>
+        사이트 제목
+        <input
+          type="text"
+          value={settings.siteTitle || ""}
+          onChange={(e) => setSettings({ ...settings, siteTitle: e.target.value })}
+        />
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={settings.enabled ?? true}
+          onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
+        />
+        활성화됨
+      </label>
+
+      <button onClick={handleSave} disabled={saving}>
+        {saving ? "Saving..." : "Save Settings"}
+      </button>
+    </div>
+  );
+}
+```
+
+### 플러그인 API 훅
+
+`usePluginAPI()`를 사용하여 플러그인의 라우트를 호출하세요:
+
+```typescript
+import { usePluginAPI } from "@emdash-cms/admin";
+
+function MyComponent() {
+	const api = usePluginAPI();
+
+	// 플러그인 라우트로 GET 요청
+	const data = await api.get("status");
+
+	// 본문이 있는 POST 요청
+	await api.post("settings/save", { enabled: true });
+
+	// URL 매개변수와 함께
+	const result = await api.get("history?limit=50");
+}
+```
+
+이 훅은 라우트 URL에 플러그인 ID 접두사를 자동으로 추가합니다.
+
+## 대시보드 위젯
+
+위젯은 관리자 대시보드에 나타나며 한눈에 정보를 제공합니다.
+
+### 위젯 정의
+
+`admin.widgets`에서 위젯을 정의하세요:
+
+```typescript
+admin: {
+	widgets: [
+		{
+			id: "seo-overview", // Unique widget ID
+			title: "SEO Overview", // Widget title (optional)
+			size: "half", // "full" | "half" | "third"
+		},
+	];
+}
+```
+
+### 위젯 컴포넌트
+
+```
+typescript title="src/components/SEOWidget.tsx"
+import { useState, useEffect } from "react";
+import { usePluginAPI } from "@emdash-cms/admin";
+
+export function SEOWidget() {
+  const api = usePluginAPI();
+  const [data, setData] = useState({ score: 0, issues: [] });
+
+  useEffect(() => {
+    api.get("analyze").then(setData);
+  }, []);
+
+  return (
+    <div className="widget-content">
+      <div className="score">{data.score}%</div>
+      <ul>
+        {data.issues.map((issue, i) => (
+          <li key={i}>{issue.message}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### 위젯 크기
+
+| 크기    | 설명                     |
+| ------- | ------------------------- |
+| `full`  | 전체 대시보드 너비        |
+| `half`  | 절반 대시보드 너비        |
+| `third` | 1/3 대시보드 너비         |
+
+위젯은 화면 너비에 따라 자동으로 줄바꿈됩니다.
+
+## 내보내기 구조
+
+관리자 진입점은 두 개의 객체를 내보냅니다:
+
+```
+typescript title="src/admin.tsx"
+import { SettingsPage } from "../../plugins/components/SettingsPage";
+import { ReportsPage } from "../../plugins/components/ReportsPage";
+import { StatusWidget } from "../../plugins/components/StatusWidget";
+import { OverviewWidget } from "../../plugins/components/OverviewWidget";
+
+// Pages keyed by path
+export const pages = {
+	"/settings": SettingsPage,
+	"/reports": ReportsPage,
+};
+
+// Widgets keyed by ID
+export const widgets = {
+	status: StatusWidget,
+	overview: OverviewWidget,
+};
+```
+
+<Aside type="caution">
+	`pages`의 페이지 경로는 `admin.pages`의 `path` 값과 일치해야 합니다. 위젯 키는 `admin.widgets`의 `id` 값과 일치해야 합니다.
+</Aside>
+
+## 관리자 컴포넌트 사용
+
+EmDash는 일반적인 패턴을 위한 사전 제작된 컴포넌트를 제공합니다:
+
+```typescript
+import {
+  Card,
+  Button,
+  Input,
+  Select,
+  Toggle,
+  Table,
+  Pagination,
+  Alert,
+  Loading
+} from "@emdash-cms/admin";
+
+function SettingsPage() {
+  return (
+    <Card title="Settings">
+      <Input label="API Key" type="password" />
+      <Toggle label="Enabled" defaultChecked />
+      <Button variant="primary">Save</Button>
+    </Card>
+  );
+}
+```
+
+## 자동 생성된 설정 UI
+
+플러그인이 설정 폼만 필요하다면, 커스텀 컴포넌트 없이 `admin.settingsSchema`를 사용하세요:
+
+```typescript
+admin: {
+  settingsSchema: {
+    apiKey: { type: "secret", label: "API Key" },
+    enabled: { type: "boolean", label: "Enabled", default: true }
+  }
+}
+```
+
+EmDash는 설정 페이지를 자동으로 생성합니다. 기본 설정 이상의 기능을 위해서만 커스텀 페이지를 추가하세요.
+
+## 탐색
+
+플러그인 페이지는 플러그인 이름 아래 관리자 사이드바에 나타납니다. 순서는 `admin.pages` 배열과 일치합니다.
+
+```typescript
+admin: {
+	pages: [
+		{ path: "/settings", label: "Settings", icon: "settings" }, // First
+		{ path: "/history", label: "History", icon: "history" }, // Second
+		{ path: "/reports", label: "Reports", icon: "chart" }, // Third
+	];
+}
+```
+
+## 빌드 구성
+
+관리자 컴포넌트는 별도의 빌드 진입점이 필요합니다. 번들러를 구성하세요:
+
+<Tabs>
+  <TabItem label="tsdown">
+```
+typescript title="tsdown.config.ts"
+export default {
+  entry: {
+    index: "src/index.ts",
+    admin: "src/admin.tsx"
+  },
+  format: "esm",
+  dts: true,
+  external: ["react", "react-dom", "emdash", "@emdash-cms/admin"]
+};
+```
+  </TabItem>
+  <TabItem label="tsup">
+```
+typescript title="tsup.config.ts"
+export default {
+  entry: ["src/index.ts", "src/admin.tsx"],
+  format: "esm",
+  dts: true,
+  external: ["react", "react-dom", "emdash", "@emdash-cms/admin"]
+};
+```
+  </TabItem>
+</Tabs>
+
+중복 번들링을 피하기 위해 React와 EmDash 관리자를 외부 종속성으로 유지하세요.
+
+## 플러그인 활성화/비활성화
+
+관리자에서 플러그인이 비활성화되면:
+
+- 사이드바 링크가 숨겨집니다
+- 대시보드 위젯이 렌더링되지 않습니다
+- 관리자 페이지는 404를 반환합니다
+- 백엔드 훅은 여전히 실행됩니다 (데이터 안전을 위해)
+
+플러그인은 활성화 상태를 확인할 수 있습니다:
+
+```typescript
+const enabled = await ctx.kv.get<boolean>("_emdash:enabled");
+```
+
+## 예시: 완전한 관리자 UI
+
+```
+typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+
+	capabilities: ["network:fetch"],
+	allowedHosts: ["api.analytics.example.com"],
+
+	storage: {
+		events: { indexes: ["type", "createdAt"] },
+	},
+
+	admin: {
+		entry: "@my-org/plugin-analytics/admin",
+		settingsSchema: {
+			trackingId: { type: "string", label: "Tracking ID" },
+			enabled: { type: "boolean", label: "Enabled", default: true },
+		},
+		pages: [
+			{ path: "/dashboard", label: "Dashboard", icon: "chart" },
+			{ path: "/settings", label: "Settings", icon: "settings" },
+		],
+		widgets: [{ id: "events-today", title: "Events Today", size: "third" }],
+	},
+
+	routes: {
+		stats: {
+			handler: async (ctx) => {
+				const today = new Date().toISOString().split("T")[0];
+				const count = await ctx.storage.events!.count({
+					createdAt: { gte: today },
+				});
+				return { today: count };
+			},
+		},
+	},
+});
+```
+
+```
+typescript title="src/admin.tsx"
+import { EventsWidget } from "../../plugins/components/EventsWidget";
+import { DashboardPage } from "../../plugins/components/DashboardPage";
+import { SettingsPage } from "../../plugins/components/SettingsPage";
+
+export const widgets = {
+	"events-today": EventsWidget,
+};
+
+export const pages = {
+	"/dashboard": DashboardPage,
+	"/settings": SettingsPage,
+};
+```

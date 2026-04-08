@@ -1,0 +1,264 @@
+---
+title: セクション
+description: サイト全体で再利用可能なコンテンツブロックを作成し、使用します。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+セクションは、編集者がスラッシュコマンドを通じて任意のコンテンツに挿入できる再利用可能なコンテンツブロックです。CTA、お客様の声、機能グリッド、または複数のページにまたがって表示される共通パターンに使用します。
+
+## セクションのクエリ
+
+### getSection
+
+スラッグで単一のセクションを取得:
+
+```typescript
+import { getSection } from "emdash";
+
+const cta = await getSection("newsletter-cta");
+
+if (cta) {
+  console.log(cta.title);    // "Newsletter CTA"
+  console.log(cta.content);  // PortableTextBlock[]
+}
+```
+
+### getSections
+
+オプションのフィルターを使用して複数のセクションを取得:
+
+```typescript
+import { getSections } from "emdash";
+
+// すべてのセクションを取得
+const { items: all } = await getSections();
+
+// ソースでフィルター
+const { items: themeSections } = await getSections({ source: "theme" });
+
+// タイトル/キーワードで検索
+const { items: results } = await getSections({ search: "newsletter" });
+```
+
+`getSections` は標準のページネーションパターンに従って `{ items: Section[], nextCursor?: string }` を返します。
+
+## セクションの構造
+
+```typescript
+interface Section {
+  id: string;
+  slug: string;
+  title: string;
+  description?: string;
+  keywords: string[];
+  content: PortableTextBlock[];
+  previewUrl?: string;
+  source: "theme" | "user" | "import";
+  themeId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+### ソースタイプ
+
+| ソース   | 説明                                      |
+| -------- | ------------------------------------------------ |
+| `theme`  | シードファイルで定義、テーマによって管理           |
+| `user`   | 管理者で編集者によって作成                      |
+| `import` | WordPress（再利用可能ブロック）からインポート        |
+
+## コンテンツでのセクションの使用
+
+編集者はリッチテキストエディター内で `/section` スラッシュコマンドを使用してセクションを挿入します:
+
+<Steps>
+
+1. `/section`（または `/pattern`、`/block`、`/template`）と入力
+
+2. 利用可能なセクションを検索または閲覧
+
+3. クリックしてカーソル位置にセクションのコンテンツを挿入
+
+</Steps>
+
+セクションのPortable Textコンテンツがドキュメントにコピーされます。これは次のことを意味します:
+
+- セクションへの変更は、既に挿入されたコンテンツに影響しません
+- 編集者は挿入されたコンテンツをカスタマイズできます
+- コンテンツは自己完結型のままです
+
+<Aside type="tip">
+  同期を維持すべきコンテンツについては、代わりにコンポーネントウィジェットを使用した[ウィジェットエリア](/ja/guides/widgets/)の使用を検討してください。
+</Aside>
+
+## セクションの作成
+
+### 管理UIで
+
+1. 管理サイドバーの **セクション** に移動
+
+2. **新規セクション** をクリック
+
+3. 以下を入力:
+   - **タイトル** - セクションの表示名
+   - **スラッグ** - URL識別子（タイトルから自動生成）
+   - **説明** - 編集者向けのヘルプテキスト
+
+4. リッチテキストエディターを使用してコンテンツを追加
+
+5. 必要に応じて、検索を容易にするためのキーワードを設定
+
+### シードファイル経由
+
+テーマのシードファイルにセクションを含めます:
+
+```json
+{
+  "sections": [
+    {
+      "slug": "hero-centered",
+      "title": "Centered Hero",
+      "description": "Full-width hero with centered heading and CTA",
+      "keywords": ["hero", "banner", "header"],
+      "content": [
+        {
+          "_type": "block",
+          "style": "h1",
+	          "children": [{ "_type": "span", "text": "私たちのサイトへようこそ" }]
+        },
+        {
+          "_type": "block",
+          "children": [{ "_type": "span", "text": "Your tagline goes here." }]
+        }
+      ]
+    },
+    {
+      "slug": "newsletter-cta",
+      "title": "Newsletter CTA",
+      "keywords": ["newsletter", "subscribe", "email"],
+      "content": [
+        {
+          "_type": "block",
+          "style": "h3",
+          "children": [{ "_type": "span", "text": "Subscribe to our newsletter" }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### WordPressインポート経由
+
+WordPressの再利用可能ブロック（`wp_block` 投稿タイプ）は自動的にセクションとしてインポートされます:
+
+- ソースは `"import"` に設定されます
+- GutenbergコンテンツはPortable Textに変換されます
+
+## プログラムによるセクションのレンダリング
+
+エディター外でサーバーサイドレンダリングされるセクションコンテンツの場合:
+
+```astro
+---
+import { getSection } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const newsletter = await getSection("newsletter-cta");
+---
+
+{newsletter && (
+  <aside class="cta-box">
+    <PortableText value={newsletter.content} />
+  </aside>
+)}
+```
+
+## 管理UIの機能
+
+セクションライブラリ（`/_emdash/admin/sections`）は以下を提供します:
+
+- セクションプレビュー付きの **グリッドビュー**
+- タイトルとキーワードによる **検索**  
+- ソースによる **フィルター**
+- スラッグの **クイックコピー** をクリップボードへ
+- セクションコンテンツとメタデータの **編集**
+- 確認付きの **削除**（テーマセクションには警告が表示されます）
+
+## APIリファレンス
+
+### `getSection(slug)`
+
+スラッグでセクションを取得します。
+
+**パラメータ:**
+- `slug` — セクションの一意の識別子（文字列）
+
+**戻り値:** `Promise<Section | null>`
+
+### `getSections(options?)`
+
+オプションのフィルターを使用してセクションを一覧表示します。
+
+**パラメータ:**
+- `options.source` — ソースでフィルター: `"theme"`、`"user"`、または `"import"`
+- `options.search` — タイトルとキーワードを検索
+
+**戻り値:** `Promise<Section[]>`
+
+## REST API
+
+### セクションの一覧
+
+```http
+GET /_emdash/api/sections
+GET /_emdash/api/sections?source=theme
+GET /_emdash/api/sections?search=newsletter
+```
+
+### セクションの取得
+
+```http
+GET /_emdash/api/sections/newsletter-cta
+```
+
+### セクションの作成
+
+```http
+POST /_emdash/api/sections
+Content-Type: application/json
+
+{
+  "slug": "my-section",
+  "title": "My Section",
+  "description": "Optional description",
+  "keywords": ["keyword1", "keyword2"],
+  "content": [...]
+}
+```
+
+### セクションの更新
+
+```http
+PUT /_emdash/api/sections/my-section
+Content-Type: application/json
+
+{
+  "title": "Updated Title",
+  "content": [...]
+}
+```
+
+### セクションの削除
+
+```http
+DELETE /_emdash/api/sections/my-section
+```
+
+## 次のステップ
+
+- [コンテンツの操作](/ja/guides/working-with-content/) - リッチテキストエディターについて学ぶ
+- [ウィジェットエリア](/ja/guides/widgets/) - 同期された動的コンテンツ用
+- [コンテンツインポート](/ja/migration/content-import/) - WordPressの再利用可能ブロックをインポート

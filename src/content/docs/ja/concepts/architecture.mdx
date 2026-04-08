@@ -1,0 +1,262 @@
+---
+title: アーキテクチャ
+description: EmDashの内部動作—データベースファーストスキーマ、ライブコレクション、プラグインシステム、管理パネルについて。
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDashはAstroと深く統合し、完全なCMS体験を提供します。このページでは、主要なアーキテクチャ上の決定と、各要素がどのように連携するかを説明します。
+
+## 高レベル概要
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        あなたのAstroサイト                       │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                     EmDash統合                         │  │
+│  │                                                            │  │
+│  │  ┌──────────────┐   ┌──────────────┐   ┌───────────────┐   │  │
+│  │  │ コンテンツAPI │   │    管理      │   │  プラグイン   │   │  │
+│  │  │              │   │   パネル     │   │               │   │  │
+│  │  └──────────────┘   └──────────────┘   └───────────────┘   │  │
+│  │                                                            │  │
+│  │  ┌──────────────────────────────────────────────────────┐  │  │
+│  │  │                     データ層                          │  │  │
+│  │  │   データベース (D1/SQLite) + ストレージ (R2/S3)      │  │  │
+│  │  └──────────────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                  Astroフレームワーク                      │  │
+│  │         Live Collections · Middleware · Sessions           │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+EmDashはAstro統合として動作します。管理パネルとREST APIのルートを注入し、ライブコレクション用のコンテンツローダーを提供し、データベースマイグレーションとストレージ接続を管理します。
+
+## データベースファーストスキーマ
+
+コード内でスキーマを定義する従来のCMSとは異なり、EmDashはスキーマ定義をデータベース自体に保存します。2つのシステムテーブルがコンテンツ構造を追跡します：
+
+- `_emdash_collections` — コレクションメタデータ（スラッグ、ラベル、機能）
+- `_emdash_fields` — 各コレクションのフィールド定義
+
+管理UI経由でタイトルと価格フィールドを持つ「products」コレクションを作成すると、EmDashは：
+
+1. `_emdash_collections`と`_emdash_fields`にレコードを挿入
+2. 適切なカラムを持つ`ec_products`を作成するために`ALTER TABLE`を実行
+
+この設計により以下が可能になります：
+
+- **ランタイムスキーマ変更** — コード変更やリビルドなしでコンテンツタイプを作成・編集
+- **非開発者向けセットアップ** — コンテンツ編集者がUIを通じてコンテンツモデルを設計可能
+- **実際のSQLカラム** — 適切なインデックス作成、外部キー、クエリ最適化
+
+<Aside type="tip">
+	ライブスキーマからTypeScript型を生成するには`npx emdash types`を実行します。これにより、動的に定義されたコレクションに対する型安全性が得られます。
+</Aside>
+
+## コレクションごとのテーブル
+
+各コレクションは`ec_`プレフィックスを持つ独自のSQLiteテーブルを取得します：
+
+```sql
+-- Created when "posts" collection is added
+CREATE TABLE ec_posts (
+  -- System columns (always present)
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
+  status TEXT DEFAULT 'draft',  -- draft, published, scheduled
+  author_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  published_at TEXT,
+  deleted_at TEXT,              -- Soft delete
+  version INTEGER DEFAULT 1,    -- Optimistic locking
+
+  -- コンテンツカラム（フィールド定義から）
+  title TEXT NOT NULL,
+  content JSON,                 -- Portable Text
+  excerpt TEXT
+);
+```
+
+**単一のJSONコンテンツテーブルではなく、コレクションごとのテーブルを採用する理由は？**
+
+- 実際のSQLカラムにより適切なインデックス作成とクエリが可能
+- 外部キーが正しく機能
+- スキーマがデータベース内で自己文書化
+- フィールドアクセスにJSON解析のオーバーヘッドなし
+- データベースツールがスキーマを直接検査可能
+
+## ライブコレクション統合
+
+EmDashはAstro 6のライブコレクションを使用して、ランタイムでコンテンツを提供します。コンテンツ変更は静的リビルドなしですぐに利用可能になります。
+
+`emdashLoader()`はAstroの`LiveLoader`インターフェースを実装します：
+
+```ts
+// src/live.config.ts
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({ loader: emdashLoader() }),
+};
+```
+
+<Aside type="note">
+	単一の`_emdash` Astroコレクションがすべてのコンテンツタイプをラップします。ローダーは`getEmDashCollection("posts")`を呼び出す際に内部でタイプでフィルタリングします。
+</Aside>
+
+提供されたラッパー関数を使用してコンテンツをクエリします：
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+// 公開済み投稿をすべて取得
+const { entries: posts } = await getEmDashCollection("posts");
+
+// 下書きを取得
+const { entries: drafts } = await getEmDashCollection("posts", {
+	status: "draft",
+});
+
+// スラッグで単一エントリを取得
+const { entry: post } = await getEmDashEntry("posts", "my-post-slug");
+```
+
+## ルート注入
+
+EmDash統合はAstroの`injectRoute` APIを使用して管理およびAPIルートを追加します：
+
+| パスパターン                          | 目的                               |
+| ------------------------------------- | ------------------------------------- |
+| `/_emdash/admin/[...path]`          | 管理パネルSPA                       |
+| `/_emdash/api/manifest`             | 管理マニフェスト（コレクション、プラグイン） |
+| `/_emdash/api/content/[collection]` | コンテンツエントリのCRUD              |
+| `/_emdash/api/media/*`              | メディアライブラリ操作              |
+| `/_emdash/api/schema/*`             | スキーマ管理                     |
+| `/_emdash/api/settings`             | サイト設定                         |
+| `/_emdash/api/menus/*`              | ナビゲーションメニュー                      |
+| `/_emdash/api/taxonomies/*`         | カテゴリ、タグ、カスタム分類   |
+
+ルートは`emdash`パッケージから注入され、プロジェクト内には何もコピーされません。
+
+## データレイヤー
+
+EmDashはサポート対象のすべてのデータベースで型安全なSQLクエリを行うために[Kysely](https://kysely.dev)を使用します：
+
+<CardGrid>
+  <Card title="SQLite" icon="laptop">
+    `sqlite({ url: "file:./data.db" })`によるローカル開発
+  </Card>
+  <Card title="D1" icon="cloudflare">
+    `d1({ binding: "DB" })`によるCloudflareのサーバーレスSQL
+  </Card>
+  <Card title="libSQL" icon="external">
+    `libsql({ url: "...", authToken: "..." })`によるリモートSQLite
+  </Card>
+</CardGrid>
+
+データベース設定は`astro.config.mjs`で統合に渡されます：
+
+```ts
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { sqlite } from "emdash/db";
+import { local } from "emdash/storage";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+## ストレージ抽象化
+
+メディアファイルはデータベースとは別に保存されます。EmDashは以下をサポートします：
+
+- **ローカルファイルシステム** — 開発およびシンプルなデプロイメント
+- **Cloudflare R2** — エッジ上のS3互換オブジェクトストレージ
+- **S3互換** — 任意のS3互換オブジェクトストレージ
+
+アップロードは署名付きURLを使用して、クライアントからストレージへの直接アップロードを行い、Workersのボディサイズ制限を回避します。
+
+## プラグインアーキテクチャ
+
+プラグインはWordPressにインスパイアされたフックシステムを通じてEmDashを拡張します：
+
+- **コンテンツフック** — `content:beforeSave`、`content:afterSave`、`content:beforeDelete`、`content:afterDelete`
+- **メディアフック** — `media:beforeUpload`、`media:afterUpload`
+- **分離ストレージ** — 各プラグインは名前空間付きKVアクセスを取得
+- **管理UI拡張** — ダッシュボードウィジェット、設定ページ、カスタムフィールドエディタ
+
+プラグインは2つのモードで実行できます：
+
+1. **信頼済み** — ホスト環境へのフルアクセス（ファーストパーティプラグイン用）
+2. **サンドボックス化** — 機能ベースの権限を持つV8アイソレートで実行（Cloudflare上のサードパーティプラグイン用）
+
+```ts
+// astro.config.mjs
+import { seoPlugin } from "@emdash-cms/plugin-seo";
+
+emdash({
+	plugins: [seoPlugin({ maxTitleLength: 60 })],
+});
+```
+
+## リクエストフロー
+
+典型的なコンテンツリクエストは以下の経路をたどります：
+
+<Steps>
+	1. **Astroがリクエストを受信** — ページコンポーネントが実行 2. **コンテンツクエリ** —
+	`getEmDashCollection()`がAstroの`getLiveCollection()`を呼び出し 3. **ローダー実行** —
+	`emdashLoader`がKysely経由で適切な`ec_*`テーブルをクエリ 4. **データ返却** — エントリが
+	`id`、`slug`、`data`を持つAstroのエントリ形式にマッピング 5. **ページレンダリング** — コンポーネントが
+	コンテンツを受け取りHTMLをレンダリング
+</Steps>
+
+管理リクエストの場合：
+
+<Steps>
+	1. **ミドルウェアが認証** — セッショントークンを検証 2. **APIルートがリクエスト処理** — リポジトリ経由のCRUD
+	操作 3. **フック発火** — `beforeCreate`、`afterUpdate`など 4. **データベース
+	更新** — KyselyがSQLを実行 5. **レスポンス返却** — 管理SPAへのJSONレスポンス
+</Steps>
+
+## 仮想モジュール
+
+EmDashはビルド時に仮想モジュールを生成し、ランタイムを設定します：
+
+| モジュール                           | 目的                             |
+| -------------------------------- | ----------------------------------- |
+| `virtual:emdash/config`        | データベースとストレージの設定  |
+| `virtual:emdash/dialect`       | データベース方言ファクトリ            |
+| `virtual:emdash/plugin-admins` | プラグイン管理UIの静的インポート |
+
+このアプローチにより、バンドラーはプラグインコードを適切に解決し、ツリーシェイクできます。
+
+## 次のステップ
+
+<CardGrid>
+	<Card title="コレクション" icon="document">
+		[コンテンツコレクションとフィールドタイプ](/ja/concepts/collections/)について学びます。
+	</Card>
+	<Card title="コンテンツモデル" icon="open-book">
+		[データベースファーストのコンテンツモデル](/ja/concepts/content-model/)を理解します。
+	</Card>
+	<Card title="管理パネル" icon="setting">
+		[管理パネルのアーキテクチャ](/ja/concepts/admin-panel/)を探索します。
+	</Card>
+</CardGrid>

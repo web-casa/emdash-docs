@@ -1,0 +1,98 @@
+---
+title: EmDash 简介
+description: 了解 EmDash 是什么、如何工作，以及它是否适合您的项目。
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+EmDash 是一个 **Astro 原生内容管理系统**。它将熟悉的 CMS 模式——集合、分类法、菜单、小部件和精美的管理界面——直接引入您的 Astro 站点，并提供完整的 TypeScript 支持和可移植的部署方案。
+
+## EmDash 是什么
+
+EmDash 是专为 [Astro](https://astro.build) 构建的 CMS。它利用 Astro 6 的实时内容集合在运行时提供内容，无需重新构建。内容存储在 SQLite 兼容的数据库（D1、libSQL、本地 SQLite）中，媒体文件则存储在 S3 兼容的存储（R2、本地文件系统）中。
+
+**主要特性：**
+
+- **数据库优先的架构** — 集合和字段在数据库中定义，而非代码中。您可以直接从管理界面创建和修改内容类型。
+- **实时集合** — 内容更改立即可用。无需静态重新构建。
+- **插件系统** — 受 WordPress 启发的钩子、存储、设置和管理界面扩展。
+- **云可移植** — 可在 Cloudflare（Workers + D1 + R2）、Node.js、本地 SQLite 以及任何 S3 兼容的存储上运行。
+
+## EmDash 不是什么
+
+- **不是无头 CMS** — EmDash 与 Astro 紧密集成。它不是一个需要通过 API 调用的独立服务。
+- **不与 WordPress 兼容** — 没有 PHP，无法直接运行 WordPress 插件。但 WordPress 的内容和概念可以清晰地迁移过来。
+- **不是页面构建器** — EmDash 专注于结构化内容。对于可视化页面构建，请使用 Astro 组件。
+
+## EmDash 适合谁
+
+<CardGrid>
+	<Card title="机构开发者" icon="laptop">
+		利用可复用的插件和主题，快速搭建客户站点。无需担心 PHP 安全更新或插件冲突。
+	</Card>
+	<Card title="独立开发者" icon="seti:todo">
+		内置 CMS 的全栈框架。无需管理独立的无头 CMS。
+	</Card>
+	<Card title="内容编辑者" icon="pencil">
+		直观的管理面板。无需接触代码即可创建和编辑内容。
+	</Card>
+	<Card title="WordPress 用户" icon="right-arrow">
+		提供内容和插件的迁移路径。现代化的工具，熟悉的概念。
+	</Card>
+</CardGrid>
+
+## 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Your Astro Site                        │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                 EmDash Integration                  │  │
+│  │                                                       │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐   │  │
+│  │  │  Content    │  │   Admin     │  │   Plugins    │   │  │
+│  │  │  Engine     │  │   Panel     │  │              │   │  │
+│  │  └─────────────┘  └─────────────┘  └──────────────┘   │  │
+│  │                                                       │  │
+│  │  ┌───────────────────────────────────────────────────┐│  │
+│  │  │                  Data Layer                       ││  │
+│  │  │    SQLite/D1      ←→  Kysely  ←→  R2/S3/Local    ││  │
+│  │  └───────────────────────────────────────────────────┘│  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                   Astro Framework                     │  │
+│  │        Live Collections • Sessions • Middleware       │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+<Aside type="tip">
+	EmDash 是 Astro 原生且云可移植的。它可以在 Cloudflare（D1 + R2 + Workers）、Node.js、本地 SQLite 以及任何 S3 兼容的存储上运行。
+</Aside>
+
+## 核心概念
+
+在深入学习之前，请先熟悉以下关键概念：
+
+- **集合** — 在数据库中定义的内容类型（文章、页面、产品等）
+- **字段** — 集合的属性（标题、内容、价格等）
+- **分类法** — 分类系统（类别、标签、自定义分类法）
+- **菜单** — 可在管理界面编辑的导航结构
+- **小部件区域** — 可配置的内容区域，用于侧边栏和页脚
+- **插件** — 通过钩子、存储和界面添加功能的扩展
+
+## 后续步骤
+
+<CardGrid>
+	<Card title="快速开始" icon="rocket">
+		在 5 分钟内[创建您的第一个 EmDash 站点](/zh-cn/getting-started/)。
+	</Card>
+	<Card title="探索概念" icon="open-book">
+		了解[架构](/zh-cn/concepts/architecture/)和[内容模型](/zh-cn/concepts/content-model/)。
+	</Card>
+	<Card title="从 WordPress 迁移" icon="right-arrow">
+		[导入您的 WordPress 内容](/zh-cn/migration/from-wordpress/)并理解概念映射。
+	</Card>
+</CardGrid>

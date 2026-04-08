@@ -1,0 +1,474 @@
+---
+title: Portabilidade de Temas WordPress
+description: Converta temas WordPress para temas EmDash usando uma abordagem estruturada
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Os temas do WordPress podem ser convertidos sistematicamente para o EmDash. O design visual, a estrutura de conteúdo e os recursos dinâmicos são todos transferidos usando uma abordagem de três fases.
+
+<Aside type="tip" title="Migração Assistida por IA">
+	Agentes de codificação de IA são excelentes em conversões mecânicas, como a migração de templates. Alimente o agente com seus
+	arquivos de tema do WordPress junto com as tabelas de mapeamento de conceitos neste guia, e ele pode gerar um
+	primeiro rascunho sólido dos componentes Astro. Revise e refine a saída — o agente cuida das partes
+	entediantes enquanto você se concentra na qualidade.
+</Aside>
+
+## Abordagem de Três Fases
+
+<Steps>
+
+1. **Extração de Design**
+
+   Extraia variáveis CSS, fontes, cores e padrões de layout do tema WordPress. Analise o site ao vivo para capturar estilos computados e pontos de interrupção responsivos.
+
+2. **Conversão de Template**
+
+   Converta templates PHP em componentes Astro. Mapeie a hierarquia de templates do WordPress para rotas Astro e transforme tags de template em chamadas de API do EmDash.
+
+3. **Recursos Dinâmicos**
+
+   Migre menus de navegação, áreas de widgets, taxonomias e configurações do site para seus equivalentes no EmDash. Crie um arquivo de seed para capturar o modelo de conteúdo completo.
+
+</Steps>
+
+## Fase 1: Extração de Design
+
+### Localizar CSS e Tokens de Design
+
+| Arquivo        | Propósito                                    |
+| ------------- | ------------------------------------------ |
+| `style.css`   | Folha de estilos principal com cabeçalho do tema |
+| `assets/css/` | Folhas de estilos adicionais               |
+| `theme.json`  | Temas de bloco (WP 5.9+) - tokens estruturados |
+
+### Extrair Tokens de Design
+
+| Padrão WordPress | Variável EmDash  |
+| ----------------- | ------------------ |
+| Família da fonte do corpo | `--font-body`      |
+| Fonte de cabeçalho | `--font-heading`   |
+| Cor primária     | `--color-primary`  |
+| Plano de fundo   | `--color-base`     |
+| Cor do texto     | `--color-contrast` |
+| Largura do conteúdo | `--content-width`  |
+
+### Criar Layout Base
+
+Crie `src/layouts/Base.astro` com as variáveis CSS extraídas, estrutura de cabeçalho/rodapé, carregamento de fontes e pontos de interrupção responsivos:
+
+```astro title="src/layouts/Base.astro"
+---
+import { getSiteSettings, getMenu } from "emdash";
+import "../styles/global.css";
+
+const { title, description } = Astro.props;
+const settings = await getSiteSettings();
+const primaryMenu = await getMenu("primary");
+const pageTitle = title ? `${title} | ${settings.title}` : settings.title;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <header>
+      {settings.logo ? (
+        <img src={settings.logo.url} alt={settings.title} />
+      ) : (
+        <span>{settings.title}</span>
+      )}
+      <nav>
+        {primaryMenu?.items.map((item) => (
+          <a href={item.url}>{item.label}</a>
+        ))}
+      </nav>
+    </header>
+    <main><slot /></main>
+  </body>
+</html>
+```
+
+## Fase 2: Conversão de Template
+
+### Mapeamento da Hierarquia de Templates
+
+| Template WordPress          | Rota Astro                         |
+| --------------------------- | ----------------------------------- |
+| `index.php`                 | `src/pages/index.astro`             |
+| `single.php`                | `src/pages/posts/[slug].astro`      |
+| `single-{post_type}.php`    | `src/pages/{type}/[slug].astro`     |
+| `page.php`                  | `src/pages/[...slug].astro`         |
+| `archive.php`               | `src/pages/posts/index.astro`       |
+| `category.php`              | `src/pages/categories/[slug].astro` |
+| `tag.php`                   | `src/pages/tags/[slug].astro`       |
+| `search.php`                | `src/pages/search.astro`            |
+| `404.php`                   | `src/pages/404.astro`               |
+| `header.php` / `footer.php` | Parte de `src/layouts/Base.astro`    |
+| `sidebar.php`               | `src/components/Sidebar.astro`      |
+
+### Mapeamento de Tags de Template
+
+| Função WordPress            | Equivalente EmDash                          |
+| ----------------------------- | -------------------------------------------- |
+| `have_posts()` / `the_post()` | `getEmDashCollection()`                    |
+| `get_post()`                  | `getEmDashEntry()`                         |
+| `the_title()`                 | `post.data.title`                            |
+| `the_content()`               | `<PortableText value={post.data.content} />` |
+| `the_excerpt()`               | `post.data.excerpt`                          |
+| `the_permalink()`             | `/posts/${post.slug}`                        |
+| `the_post_thumbnail()`        | `post.data.featured_image`                   |
+| `get_the_date()`              | `post.data.publishedAt`                      |
+| `get_the_category()`          | `getEntryTerms(coll, id, "categories")`      |
+| `get_the_tags()`              | `getEntryTerms(coll, id, "tags")`            |
+
+### Convertendo O Loop
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php title="archive.php"
+<?php while (have_posts()) : the_post(); ?>
+  <article>
+    <h2><a href="<?php the_permalink(); ?>"><?php the_title(); ?></a>
+</h2>
+    <?php the_excerpt(); ?>
+  </article>
+<?php endwhile; ?>
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+astro title="src/pages/posts/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+where: { status: "published" },
+orderBy: { publishedAt: "desc" },
+});
+
+---
+
+<Base title="Blog">
+  {posts.map((post) => (
+    <article>
+      <h2><a href={`/posts/${post.slug}`}>{post.data.title}</a>
+</h2>
+      <p>{post.data.excerpt}</p>
+    </article>
+  ))}
+</Base>
+```
+</TabItem>
+</Tabs>
+
+### Convertendo Templates Individuais
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php title="single.php"
+<?php get_header(); ?>
+<article>
+  <h1><?php the_title(); ?></h1>
+  <?php the_content(); ?>
+  <div class="post-meta">
+    Posted in: <?php the_category(', '); ?>
+  </div>
+</article>
+<?php get_footer(); ?>
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEntryTerms } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+	const { entries: posts } = await getEmDashCollection("posts");
+	return posts.map((post) => ({
+		params: { slug: post.slug },
+		props: { post },
+	}));
+}
+
+const { post } = Astro.props;
+const categories = await getEntryTerms("posts", post.id, "categories");
+
+---
+
+<Base title={post.data.title}>
+  <article>
+    <h1>{post.data.title}</h1>
+    <PortableText value={post.data.content} />
+    <div class="post-meta">
+      Postado em: {categories.map((cat) => (
+        <a href={`/categories/${cat.slug}`}>{cat.label}</a>
+      ))}
+    </div>
+  </article>
+</Base>
+```
+</TabItem>
+</Tabs>
+
+### Convertendo Partes de Template
+
+As chamadas `get_template_part()` do WordPress tornam-se importações de componentes Astro. O parcial `template-parts/content-post.php` se torna um componente `PostCard.astro` que você importa e renderiza em um loop.
+
+## Fase 3: Recursos Dinâmicos
+
+### Menus de Navegação
+
+Identifique menus em `functions.php` e crie os menus correspondentes no EmDash:
+
+```
+astro title="src/components/PrimaryNav.astro"
+---
+import { getMenu } from "emdash";
+
+const menu = await getMenu("primary");
+---
+
+{menu && (
+  <nav class="primary-nav">
+    <ul>
+      {menu.items.map((item) => (
+        <li>
+          <a href={item.url} aria-current={Astro.url.pathname === item.url ? "page" : undefined}>
+            {item.label}
+          </a>
+          {item.children.length > 0 && (
+            <ul class="submenu">
+              {item.children.map((child) => (
+                <li><a href={child.url}>{child.label}</a>
+</li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+### Áreas de Widgets (Barras Laterais)
+
+Identifique áreas de widgets no tema e renderize-as:
+
+```
+astro title="src/components/Sidebar.astro"
+---
+import { getWidgetArea, getMenu } from "emdash";
+import { PortableText } from "emdash/ui";
+import RecentPosts from "../../themes/widgets/RecentPosts.astro";
+
+const sidebar = await getWidgetArea("sidebar");
+const widgetComponents = { "core:recent-posts": RecentPosts };
+---
+
+{sidebar && sidebar.widgets.length > 0 && (
+  <aside class="sidebar">
+    {sidebar.widgets.map(async (widget) => (
+      <div class="widget">
+        {widget.title && <h3>{widget.title}</h3>
+}
+        {widget.type === "content" && <PortableText value={widget.content} />}
+        {widget.type === "menu" && (
+          <nav>
+            {await getMenu(widget.menuName).then((m) =>
+              m?.items.map((item) => <a href={item.url}>{item.label}</a>
+)
+            )}
+          </nav>
+        )}
+        {widget.type === "component" && widgetComponents[widget.componentId] && (
+          <Fragment>
+            {(() => {
+              const Component = widgetComponents[widget.componentId];
+              return <Component {...widget.componentProps} />;
+            })()}
+          </Fragment>
+        )}
+      </div>
+    ))}
+  </aside>
+)}
+```
+
+### Mapeamento de Tipos de Widget
+
+| Widget do WordPress | Tipo de Widget no EmDash         |
+| ---------------- | -------------------------------- |
+| Texto/HTML Personalizado | `type: "content"`                |
+| Menu Personalizado      | `type: "menu"`                   |
+| Posts Recentes     | `component: "core:recent-posts"` |
+| Categorias       | `component: "core:categories"`   |
+| Nuvem de Tags        | `component: "core:tag-cloud"`    |
+| Busca           | `component: "core:search"`       |
+
+### Taxonomias
+
+Consulte taxonomias registradas no tema:
+
+```
+astro title="src/pages/genres/[slug].astro"
+---
+import { getTaxonomyTerms, getEntriesByTerm } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const genres = await getTaxonomyTerms("genre");
+  return genres.map((genre) => ({
+    params: { slug: genre.slug },
+    props: { genre },
+  }));
+}
+
+const { genre } = Astro.props;
+const books = await getEntriesByTerm("books", "genre", genre.slug);
+---
+
+<Base title={genre.label}>
+  <h1>{genre.label}</h1>
+  {books.map((book) => (
+    <article>
+      <h2><a href={`/books/${book.slug}`}>{book.data.title}</a>
+</h2>
+    </article>
+  ))}
+</Base>
+```
+
+### Mapeamento de Configurações do Site
+
+| Personalizador do WordPress | Configuração do EmDash |
+| -------------------- | ---------------- |
+| Título do Site           | `title`          |
+| Slogan              | `tagline`        |
+| Ícone do Site            | `favicon`        |
+| Logotipo Personalizado          | `logo`           |
+| Posts por página       | `postsPerPage`   |
+
+## Shortcodes para Portable Text
+
+Shortcodes do WordPress tornam-se blocos personalizados de Portable Text:
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php title="functions.php"
+add_shortcode('gallery', function($atts) {
+  $ids = explode(',', $atts['ids']);
+  return '<div class="gallery">...</div>
+';
+});
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+astro title="src/components/blocks/Gallery.astro"
+---
+const { images } = Astro.props;
+---
+
+<div class="gallery">
+	{images.map((img) => (
+		<img src={img.url} alt={img.alt || ""} loading="lazy" />
+	))}
+</div>
+```
+
+Registre com PortableText:
+
+```astro
+<PortableText value={content} components={{ gallery: Gallery }} />
+```
+
+</TabItem>
+</Tabs>
+
+## Estrutura do Arquivo de Semente
+
+Capture o modelo de conteúdo completo em um arquivo de semente. Inclua configurações, taxonomias, menus e áreas de widgets:
+
+```
+json title=".emdash/seed.json"
+{
+	"$schema": "https://emdashcms.com/seed.schema.json",
+	"version": "1",
+	"meta": { "name": "Ported Theme" },
+		"settings": { "title": "Meu site", "tagline": "Bem-vindo", "postsPerPage": 10 },
+	"taxonomies": [
+		{
+			"name": "category",
+				"label": "Categorias",
+			"hierarchical": true,
+			"collections": ["posts"]
+		}
+	],
+	"menus": [
+		{
+			"name": "primary",
+			"label": "Navegação principal",
+			"items": [
+				{ "type": "custom", "label": "Início", "url": "/" },
+				{ "type": "custom", "label": "Blog", "url": "/posts" }
+			]
+		}
+	],
+	"widgetAreas": [
+		{
+			"name": "sidebar",
+			"label": "Barra lateral principal",
+			"widgets": [
+				{
+					"type": "component",
+					"componentId": "core:recent-posts",
+					"props": { "count": 5 }
+				}
+			]
+		}
+	]
+}
+```
+
+Veja [Formato do Arquivo de Semente](/pt/themes/seed-files/) para a especificação completa.
+
+## Lista de Verificação de Portabilidade
+
+**Fase 1 (Design):** Variáveis CSS extraídas, carregamento de fontes, esquema de cores correspondente, pontos de interrupção responsivos funcionando.
+
+**Fase 2 (Modelos):** Página inicial, posts individuais, arquivos e página 404 renderizando corretamente.
+
+**Fase 3 (Dinâmico):** Configurações do site configuradas, menus funcionais, taxonomias consultáveis, áreas de widgets renderizando, arquivo de semente completo.
+
+## Casos Especiais
+
+### Temas Filhos
+
+Se o tema tiver um pai (verifique `style.css` por `Template:`), analise o tema pai primeiro, depois aplique as substituições do tema filho.
+
+### Temas de Blocos (FSE)
+
+Temas de blocos do WordPress 5.9+ usam `theme.json` para tokens de design e `templates/*.html` para marcação de blocos. Converta a marcação de blocos em componentes Astro e extraia tokens do `theme.json`.
+
+### Construtores de Páginas
+
+Conteúdo construído com Elementor, Divi ou similar é armazenado em meta de post, não em arquivos de tema. Este conteúdo é importado via WXR, não via portabilidade de tema. Foque a portabilidade do tema na estrutura — o conteúdo do construtor de páginas é renderizado através do Portable Text após a importação.
+
+## Próximos Passos
+
+- **[Criando Temas](/pt/themes/creating-themes/)** — Construa temas distribuíveis do EmDash
+- **[Formato do Arquivo de Semente](/pt/themes/seed-files/)** — Especificação completa do arquivo de semente
+- **[Migrar do WordPress](/pt/migration/from-wordpress/)** — Importe conteúdo do WordPress

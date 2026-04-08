@@ -1,0 +1,262 @@
+---
+title: 아키텍처
+description: EmDash의 내부 작동 방식—데이터베이스 우선 스키마, 라이브 컬렉션, 플러그인 시스템 및 관리자 패널.
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDash는 Astro와 깊게 통합되어 완전한 CMS 경험을 제공합니다. 이 페이지는 주요 아키텍처 결정과 각 구성 요소가 어떻게 조화를 이루는지 설명합니다.
+
+## 상위 수준 개요
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         내 Astro 사이트                         │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                    EmDash 통합                         │  │
+│  │                                                            │  │
+│  │  ┌──────────────┐   ┌──────────────┐   ┌───────────────┐   │  │
+│  │  │ 콘텐츠 API   │   │    관리자    │   │   플러그인    │   │  │
+│  │  │              │   │    패널      │   │               │   │  │
+│  │  └──────────────┘   └──────────────┘   └───────────────┘   │  │
+│  │                                                            │  │
+│  │  ┌──────────────────────────────────────────────────────┐  │  │
+│  │  │                    데이터 계층                      │  │  │
+│  │  │   데이터베이스 (D1/SQLite) + 스토리지 (R2/S3)      │  │  │
+│  │  └──────────────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                   Astro 프레임워크                      │  │
+│  │         Live Collections · Middleware · Sessions           │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+EmDash는 Astro 통합으로 실행됩니다. 관리자 패널과 REST API를 위한 라우트를 주입하고, 라이브 컬렉션을 위한 콘텐츠 로더를 제공하며, 데이터베이스 마이그레이션과 스토리지 연결을 관리합니다.
+
+## 데이터베이스 우선 스키마
+
+코드에서 스키마를 정의하는 전통적인 CMS와 달리, EmDash는 스키마 정의를 데이터베이스 자체에 저장합니다. 두 개의 시스템 테이블이 콘텐츠 구조를 추적합니다:
+
+- `_emdash_collections` — 컬렉션 메타데이터 (슬러그, 레이블, 기능)
+- `_emdash_fields` — 각 컬렉션에 대한 필드 정의
+
+관리자 UI를 통해 'products' 컬렉션을 title과 price 필드와 함께 생성하면, EmDash는 다음을 수행합니다:
+
+1. `_emdash_collections` 및 `_emdash_fields`에 레코드를 삽입합니다.
+2. 적절한 컬럼으로 `ec_products`를 생성하기 위해 `ALTER TABLE`을 실행합니다.
+
+이 설계는 다음을 가능하게 합니다:
+
+- **런타임 스키마 수정** — 코드 변경이나 재빌드 없이 콘텐츠 유형 생성 및 편집
+- **비개발자 친화적 설정** — 콘텐츠 편집자가 UI를 통해 콘텐츠 모델을 설계할 수 있음
+- **실제 SQL 컬럼** — 적절한 인덱싱, 외래 키 및 쿼리 최적화
+
+<Aside type="tip">
+	라이브 스키마에서 TypeScript 타입을 생성하려면 `npx emdash types`를 실행하세요. 이는 동적으로 정의된 컬렉션에 대한 타입 안전성을 제공합니다.
+</Aside>
+
+## 컬렉션별 테이블
+
+각 컬렉션은 `ec_` 접두사가 붙은 자체 SQLite 테이블을 가집니다:
+
+```sql
+-- Created when "posts" collection is added
+CREATE TABLE ec_posts (
+  -- System columns (always present)
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
+  status TEXT DEFAULT 'draft',  -- draft, published, scheduled
+  author_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  published_at TEXT,
+  deleted_at TEXT,              -- Soft delete
+  version INTEGER DEFAULT 1,    -- Optimistic locking
+
+  -- 콘텐츠 컬럼 (필드 정의에서 가져옴)
+  title TEXT NOT NULL,
+  content JSON,                 -- Portable Text
+  excerpt TEXT
+);
+```
+
+**JSON을 사용하는 단일 콘텐츠 테이블 대신 컬렉션별 테이블을 사용하는 이유는 무엇인가요?**
+
+- 실제 SQL 컬럼은 적절한 인덱싱과 쿼리를 가능하게 합니다.
+- 외래 키가 올바르게 작동합니다.
+- 스키마가 데이터베이스에서 자체 문서화됩니다.
+- 필드 접근에 JSON 파싱 오버헤드가 없습니다.
+- 데이터베이스 도구가 스키마를 직접 검사할 수 있습니다.
+
+## 라이브 컬렉션 통합
+
+EmDash는 Astro 6의 라이브 컬렉션을 사용하여 런타임에 콘텐츠를 제공합니다. 콘텐츠 변경 사항은 정적 재빌드 없이 즉시 사용 가능합니다.
+
+`emdashLoader()`는 Astro의 `LiveLoader` 인터페이스를 구현합니다:
+
+```ts
+// src/live.config.ts
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({ loader: emdashLoader() }),
+};
+```
+
+<Aside type="note">
+	단일 `_emdash` Astro 컬렉션이 모든 콘텐츠 유형을 래핑합니다. 로더는 `getEmDashCollection("posts")`를 호출할 때 내부적으로 유형별로 필터링합니다.
+</Aside>
+
+제공된 래퍼 함수를 사용하여 콘텐츠를 쿼리하세요:
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+// 모든 게시된 게시물 가져오기
+const { entries: posts } = await getEmDashCollection("posts");
+
+// 초안 가져오기
+const { entries: drafts } = await getEmDashCollection("posts", {
+	status: "draft",
+});
+
+// 슬러그로 단일 항목 가져오기
+const { entry: post } = await getEmDashEntry("posts", "my-post-slug");
+```
+
+## 라우트 주입
+
+EmDash 통합은 Astro의 `injectRoute` API를 사용하여 관리자 및 API 라우트를 추가합니다:
+
+| 경로 패턴                          | 목적                               |
+| ------------------------------------- | ------------------------------------- |
+| `/_emdash/admin/[...path]`          | 관리자 패널 SPA                       |
+| `/_emdash/api/manifest`             | 관리자 매니페스트 (컬렉션, 플러그인) |
+| `/_emdash/api/content/[collection]` | 콘텐츠 항목에 대한 CRUD              |
+| `/_emdash/api/media/*`              | 미디어 라이브러리 작업              |
+| `/_emdash/api/schema/*`             | 스키마 관리                     |
+| `/_emdash/api/settings`             | 사이트 설정                         |
+| `/_emdash/api/menus/*`              | 탐색 메뉴                      |
+| `/_emdash/api/taxonomies/*`         | 카테고리, 태그, 사용자 정의 분류법   |
+
+라우트는 `emdash` 패키지에서 주입됩니다—프로젝트에 아무것도 복사되지 않습니다.
+
+## 데이터 계층
+
+EmDash는 지원되는 모든 데이터베이스에서 타입 안전한 SQL 쿼리를 위해 [Kysely](https://kysely.dev)를 사용합니다:
+
+<CardGrid>
+  <Card title="SQLite" icon="laptop">
+    `sqlite({ url: "file:./data.db" })`를 사용한 로컬 개발
+  </Card>
+  <Card title="D1" icon="cloudflare">
+    `d1({ binding: "DB" })`를 사용한 Cloudflare의 서버리스 SQL
+  </Card>
+  <Card title="libSQL" icon="external">
+    `libsql({ url: "...", authToken: "..." })`를 사용한 원격 SQLite
+  </Card>
+</CardGrid>
+
+데이터베이스 구성은 `astro.config.mjs`에서 통합에 전달됩니다:
+
+```ts
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { sqlite } from "emdash/db";
+import { local } from "emdash/storage";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+## 스토리지 추상화
+
+미디어 파일은 데이터베이스와 별도로 저장됩니다. EmDash는 다음을 지원합니다:
+
+- **로컬 파일 시스템** — 개발 및 간단한 배포
+- **Cloudflare R2** — 에지에서 S3 호환 객체 스토리지
+- **S3 호환** — 모든 S3 호환 객체 스토리지
+
+업로드는 Workers 본문 크기 제한을 우회하기 위해 클라이언트에서 스토리지로 직접 업로드하는 서명된 URL을 사용합니다.
+
+## 플러그인 아키텍처
+
+플러그인은 WordPress에서 영감을 받은 훅 시스템을 통해 EmDash를 확장합니다:
+
+- **콘텐츠 훅** — `content:beforeSave`, `content:afterSave`, `content:beforeDelete`, `content:afterDelete`
+- **미디어 훅** — `media:beforeUpload`, `media:afterUpload`
+- **격리된 스토리지** — 각 플러그인은 네임스페이스 KV 접근 권한을 가집니다.
+- **관리자 UI 확장** — 대시보드 위젯, 설정 페이지, 사용자 정의 필드 편집기
+
+플러그인은 두 가지 모드로 실행될 수 있습니다:
+
+1. **신뢰됨** — 호스트 환경에 대한 전체 접근 권한 (일자 플러그인용)
+2. **샌드박스됨** — 기능 기반 권한을 가진 V8 격리 환경에서 실행 (Cloudflare의 타사 플러그인용)
+
+```ts
+// astro.config.mjs
+import { seoPlugin } from "@emdash-cms/plugin-seo";
+
+emdash({
+	plugins: [seoPlugin({ maxTitleLength: 60 })],
+});
+```
+
+## 요청 흐름
+
+일반적인 콘텐츠 요청은 다음 경로를 따릅니다:
+
+<Steps>
+	1. **Astro가 요청을 수신** — 페이지 컴포넌트 실행 2. **콘텐츠 쿼리** —
+	`getEmDashCollection()`이 Astro의 `getLiveCollection()`을 호출 3. **로더 실행** —
+	`emdashLoader`가 Kysely를 통해 적절한 `ec_*` 테이블을 쿼리 4. **데이터 반환** — 항목이
+	`id`, `slug`, `data`와 함께 Astro의 항목 형식으로 매핑됨 5. **페이지 렌더링** — 컴포넌트가
+	콘텐츠를 수신하고 HTML을 렌더링
+</Steps>
+
+관리자 요청의 경우:
+
+<Steps>
+	1. **미들웨어 인증** — 세션 토큰 검증 2. **API 라우트 요청 처리** — 리포지토리를 통한 CRUD
+	작업 3. **훅 실행** — `beforeCreate`, `afterUpdate` 등 4. **데이터베이스
+	업데이트** — Kysely가 SQL 실행 5. **응답 반환** — 관리자 SPA에 JSON 응답 반환
+</Steps>
+
+## 가상 모듈
+
+EmDash는 빌드 시 가상 모듈을 생성하여 런타임을 구성합니다:
+
+| 모듈                           | 목적                             |
+| -------------------------------- | ----------------------------------- |
+| `virtual:emdash/config`        | 데이터베이스 및 스토리지 구성  |
+| `virtual:emdash/dialect`       | 데이터베이스 방언 팩토리            |
+| `virtual:emdash/plugin-admins` | 플러그인 관리자 UI를 위한 정적 임포트 |
+
+이 접근 방식은 번들러가 플러그인 코드를 올바르게 해석하고 트리 쉐이킹할 수 있도록 보장합니다.
+
+## 다음 단계
+
+<CardGrid>
+	<Card title="컬렉션" icon="document">
+		[콘텐츠 컬렉션과 필드 유형](/ko/concepts/collections/)에 대해 알아보세요.
+	</Card>
+	<Card title="콘텐츠 모델" icon="open-book">
+		[데이터베이스 우선 콘텐츠 모델](/ko/concepts/content-model/)을 이해하세요.
+	</Card>
+	<Card title="관리자 패널" icon="setting">
+		[관리자 패널 아키텍처](/ko/concepts/admin-panel/)를 살펴보세요.
+	</Card>
+</CardGrid>

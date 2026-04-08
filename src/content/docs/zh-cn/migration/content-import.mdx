@@ -1,0 +1,427 @@
+---
+title: 内容导入
+description: 将内容从 WordPress 及其他来源导入 EmDash。
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 的导入系统采用可插拔的源架构。每个源都知道如何从特定平台探测、分析和获取内容。
+
+## 导入源
+
+| 源 ID           | 平台                  | 探测  | OAuth | 完整导入 |
+| --------------- | --------------------- | ----- | ----- | -------- |
+| `wxr`           | WordPress 导出文件    | 否    | 否    | 是       |
+| `wordpress-com` | WordPress.com         | 是    | 是    | 是       |
+| `wordpress-rest`| 自托管 WordPress      | 是    | 否    | 仅探测   |
+
+### WXR 文件上传
+
+最完整的导入方法。直接将 WordPress 扩展 RSS (WXR) 导出文件上传到管理仪表板。
+
+**功能：**
+
+- 所有文章类型（包括自定义类型）
+- 所有元字段
+- 草稿和私密文章
+- 完整的分类层级
+- 媒体附件元数据
+
+**如何获取 WXR 文件：**
+
+<Steps>
+
+1. 在 WordPress 管理面板，转到 **工具 → 导出**
+2. 选择 **所有内容** 或特定文章类型
+3. 点击 **下载导出文件**
+4. 将 `.xml` 文件上传到 EmDash
+
+</Steps>
+
+### WordPress.com OAuth
+
+对于托管在 WordPress.com 上的站点，通过 OAuth 连接进行导入，无需手动导出文件。
+
+<Steps>
+
+1. 输入您的 WordPress.com 站点 URL
+2. 点击 **使用 WordPress.com 连接**
+3. 在 WordPress.com 弹出窗口中授权 EmDash
+4. 选择要导入的内容
+
+</Steps>
+
+<Aside type="caution">
+	WordPress.com OAuth 需要环境变量 `WPCOM_CLIENT_ID` 和 `WPCOM_CLIENT_SECRET`。
+	请在 [developer.wordpress.com](https://developer.wordpress.com/apps/) 注册一个应用。
+</Aside>
+
+**包含内容：**
+
+- 已发布和草稿内容
+- 私密文章（需授权）
+- 通过 API 获取的媒体文件
+- 暴露给 REST API 的自定义字段
+
+### WordPress REST API 探测
+
+当您输入一个 URL 时，EmDash 会探测该站点以检测是否为 WordPress 并显示可用内容：
+
+```
+Detected: WordPress 6.4
+├── Posts: 127 (published)
+├── Pages: 12 (published)
+└── Media: 89 files
+
+Note: Drafts and private content require authentication
+or a full WXR export.
+```
+
+REST 探测仅用于信息展示。对于完整导入，它会建议上传 WXR 文件或通过 OAuth 连接（针对 WordPress.com）。
+
+## 导入流程
+
+所有源都遵循相同的流程：
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Connect   │────▶│   Analyze   │────▶│   Prepare   │────▶│   Execute   │
+│  (probe/    │     │  (schema    │     │  (create    │     │  (import    │
+│   upload)   │     │   check)    │     │   schema)   │     │   content)  │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+```
+
+### 步骤 1：连接
+
+输入 URL 进行探测或直接上传文件。
+
+**URL 探测** 会并行运行所有已注册的源。匹配置信度最高的结果将决定建议的下一步操作：
+
+- **WordPress.com 站点** → 提供 OAuth 连接
+- **自托管 WordPress** → 显示导出说明
+- **未知** → 建议文件上传
+
+### 步骤 2：分析
+
+源解析内容并检查模式兼容性：
+
+```
+Post Types:
+├── post (127) → posts [New collection]
+├── page (12)  → pages [Existing, compatible]
+├── product (45) → products [Add 3 fields]
+└── revision (234) → [Skip - internal type]
+
+Required Schema Changes:
+├── Create collection: posts
+├── Add fields to pages: featured_image
+└── Create collection: products
+```
+
+每种文章类型显示其状态：
+
+| 状态           | 含义                                       |
+| -------------- | ------------------------------------------ |
+| 就绪           | 集合已存在且字段兼容                       |
+| 新集合         | 将自动创建                                 |
+| 添加字段       | 集合已存在，将添加缺失字段                 |
+| 不兼容         | 字段类型冲突（需要手动修复）               |
+
+### 步骤 3：准备模式
+
+点击 **创建模式并导入** 以：
+
+1. 通过 SchemaRegistry 创建新集合
+2. 添加具有正确列类型的缺失字段
+3. 设置带有索引的内容表
+
+### 步骤 4：执行导入
+
+内容按顺序导入：
+
+- Gutenberg/HTML 转换为 Portable Text
+- WordPress 状态映射到 EmDash 状态
+- WordPress 作者映射到所有权 (`authorId`) 和展示署名
+- 创建并链接分类法
+- 可重用区块 (`wp_block`) 作为 [Sections](/zh-cn/guides/sections/) 导入
+- 实时显示进度
+
+作者导入行为：
+
+- 如果作者映射指向一个 EmDash 用户，则所有权将设置为该用户，并为同一用户创建/重用链接署名。
+- 如果没有用户映射，则根据 WordPress 作者身份创建/重用访客署名。
+- 导入的条目获得有序的署名归属，第一个署名被设置为 `primaryBylineId`。
+
+### 步骤 5：媒体导入（可选）
+
+内容导入后，可选择导入媒体：
+
+<Steps>
+
+1. **分析** — 按类型显示附件数量
+
+   ```
+   Media found:
+   ├── Images: 75 files
+   ├── Video: 10 files
+   └── Other: 4 files
+   ```
+
+2. **下载** — 从 WordPress URL 流式传输并显示进度
+
+   ```
+   Importing media...
+   ├── 45 of 89 (50%)
+   ├── Current: vacation-photo.jpg
+   └── Status: Uploading
+   ```
+
+3. **重写 URL** — 内容自动更新为新 URL
+
+</Steps>
+
+媒体导入使用内容哈希 (xxHash64) 进行去重。同一张图片在多篇文章中使用时只存储一次。
+
+## 源接口
+
+导入源实现标准接口：
+
+```typescript
+interface ImportSource {
+	/** Unique identifier */
+	id: string;
+
+	/** Display name */
+	name: string;
+
+	/** Probe a URL (optional) */
+	probe?(url: string): Promise<SourceProbeResult | null>;
+
+	/** Analyze content from this source */
+	analyze(input: SourceInput, context: ImportContext): Promise<ImportAnalysis>;
+
+	/** Stream content items */
+	fetchContent(input: SourceInput, options: FetchOptions): AsyncGenerator<NormalizedItem>;
+}
+```
+
+### 输入类型
+
+源接受不同的输入类型：
+
+```typescript
+// File upload (WXR)
+{ type: "file", file: File }
+
+// URL with optional token (REST API)
+{ type: "url", url: string, token?: string }
+
+// OAuth connection (WordPress.com)
+{ type: "oauth", url: string, accessToken: string }
+```
+
+### 标准化输出
+
+所有源都产生相同的标准化格式：
+
+```typescript
+interface NormalizedItem {
+	sourceId: string | number;
+	postType: string;
+	status: "publish" | "draft" | "pending" | "private" | "future";
+	slug: string;
+	title: string;
+	content: PortableTextBlock[];
+	excerpt?: string;
+	date: Date;
+	author?: string;
+	authors?: string[];
+	categories?: string[];
+	tags?: string[];
+	meta?: Record<string, unknown>;
+	featuredImage?: string;
+}
+```
+
+## API 端点
+
+导入系统暴露以下端点：
+
+### 探测 URL
+
+```http
+POST /_emdash/api/import/probe
+Content-Type: application/json
+
+{ "url": "https://example.com" }
+```
+
+返回检测到的平台和建议的操作。
+
+### 分析 WXR
+
+```http
+POST /_emdash/api/import/wordpress/analyze
+Content-Type: multipart/form-data
+
+file: [WordPress export .xml]
+```
+
+返回文章类型分析及模式兼容性。
+
+### 准备模式
+
+```http
+POST /_emdash/api/import/wordpress/prepare
+Content-Type: application/json
+
+{
+  "postTypes": [
+    { "name": "post", "collection": "posts", "enabled": true }
+  ]
+}
+```
+
+创建集合和字段。
+
+### 执行导入
+
+```http
+POST /_emdash/api/import/wordpress/execute
+Content-Type: multipart/form-data
+
+file: [WordPress export .xml]
+config: { "postTypeMappings": { "post": { "collection": "posts" } } }
+```
+
+将内容导入到指定的集合。
+
+### 导入媒体
+
+```http
+POST /_emdash/api/import/wordpress/media
+Content-Type: application/json
+
+{
+  "attachments": [{ "id": 123, "url": "https://..." }],
+  "stream": true
+}
+```
+
+在下载/上传过程中流式传输 NDJSON 进度更新。
+
+### 重写 URL
+
+```http
+POST /_emdash/api/import/wordpress/rewrite-urls
+Content-Type: application/json
+
+{
+  "urlMap": { "https://old.com/image.jpg": "/_emdash/media/abc123" }
+}
+```
+
+使用新的媒体 URL 更新 Portable Text 内容。
+
+## 错误处理
+
+### 可恢复错误
+
+- **网络超时** — 使用退避策略重试
+- **单个项目解析失败** — 记录日志，跳过，导入继续
+- **媒体下载失败** — 标记为需要手动处理
+
+### 致命错误
+
+- **无效的文件格式** — 导入停止并显示错误信息
+- **数据库连接丢失** — 导入暂停，允许恢复
+- **存储配额超出** — 导入停止，显示使用情况
+
+### 错误报告
+
+导入后：
+
+```
+Import Complete
+
+✓ 125 posts imported
+✓ 12 pages imported
+✓ 85 media references recorded
+
+⚠ 2 items had warnings:
+  - Post "Special Characters ñ" - title encoding fixed
+  - Page "About" - duplicate slug renamed to "about-1"
+
+✗ 1 item failed:
+  - Post ID 456 - content parsing error (saved as draft)
+```
+
+失败的项目将保存为草稿，原始内容保存在 `_importError` 中供审查。
+
+## 构建自定义源
+
+为其他平台创建源：
+
+```typescript title="src/import/custom-source.ts"
+import type { ImportSource } from "emdash/import";
+
+export const mySource: ImportSource = {
+	id: "my-platform",
+	name: "My Platform",
+	description: "Import from My Platform",
+	icon: "globe",
+	canProbe: true,
+
+	async probe(url) {
+		// Check if URL matches your platform
+		const response = await fetch(`${url}/api/info`);
+		if (!response.ok) return null;
+
+		return {
+			sourceId: "my-platform",
+			confidence: "definite",
+			detected: { platform: "my-platform" },
+			// ...
+		};
+	},
+
+	async analyze(input, context) {
+		// Parse and analyze content
+		// Return ImportAnalysis
+	},
+
+	async *fetchContent(input, options) {
+		// Yield NormalizedItem for each content piece
+		for (const item of items) {
+			yield {
+				sourceId: item.id,
+				postType: "post",
+				title: item.title,
+				content: convertToPortableText(item.body),
+				// ...
+			};
+		}
+	},
+};
+```
+
+在您的 EmDash 配置中注册该源：
+
+```typescript title="astro.config.mjs"
+import { mySource } from "./src/import/custom-source";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			import: {
+				sources: [mySource],
+			},
+		}),
+	],
+});
+```
+
+## 后续步骤
+
+- **[WordPress 迁移](/zh-cn/migration/from-wordpress/)** — 完整的 WordPress 迁移指南
+- **[插件移植](/zh-cn/migration/plugin-porting/)** — 将 WordPress 插件移植到 EmDash

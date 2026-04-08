@@ -1,0 +1,196 @@
+---
+title: プラグインシステム概要
+description: フック、ストレージ、設定、管理UIを追加するプラグインでEmDashを拡張します。
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+EmDashのプラグインシステムにより、コアコードを変更せずにCMSを拡張できます。プラグインはコンテンツライフサイクルイベントにフックし、独自のデータを保存し、管理者に設定を公開し、管理パネルにカスタムUIを追加できます。
+
+## 設計哲学
+
+EmDashプラグインは別個のアプリケーションではなく、**設定トランスフォーマー**です。これらはAstroサイトと同じプロセスで実行され、明確に定義されたインターフェースを通じて相互作用します。
+
+**主要原則:**
+
+- **宣言的** — フック、ストレージ、ルートは定義時に宣言され、動的に登録されません
+- **型安全** — 型付けされたコンテキストオブジェクトによる完全なTypeScriptサポート
+- **サンドボックス対応** — Cloudflare Workersでの分離実行のために設計されたAPI
+- **能力ベース** — プラグインは必要なものを宣言し、ランタイムがアクセスを強制します
+
+<Aside type="note">
+	EmDashプラグインはAstroインテグレーションではありません。これらはAstro設定内のEmDashインテグレーションに渡されます。両方を必要とするプラグインは、EmDashフックも登録するAstroインテグレーションとして出荷できます。
+</Aside>
+
+## プラグインができること
+
+<CardGrid>
+	<Card title="イベントにフック" icon="rocket">
+		コンテンツ保存、メディアアップロード、プラグインライフサイクルイベントの前後にコードを実行します。
+	</Card>
+	<Card title="データを保存" icon="document">
+		データベースマイグレーションを書かずに、インデックス付きコレクションにプラグイン固有のデータを永続化します。
+	</Card>
+	<Card title="設定を公開" icon="setting">
+		設定スキーマを宣言し、設定用の自動生成された管理UIを取得します。
+	</Card>
+	<Card title="管理ページを追加" icon="laptop">
+		Reactコンポーネントでカスタム管理ページとダッシュボードウィジェットを作成します。
+	</Card>
+	<Card title="APIルートを作成" icon="external">
+		プラグインの管理UIまたは外部インテグレーション用のエンドポイントを公開します。
+	</Card>
+	<Card title="HTTPリクエストを実行" icon="external">
+		セキュリティのため、宣言されたホスト制限で外部APIを呼び出します。
+	</Card>
+</CardGrid>
+
+## プラグインアーキテクチャ
+
+すべてのプラグインは`definePlugin()`で作成されます:
+
+```typescript
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "my-plugin",
+	version: "1.0.0",
+
+	// プラグインがアクセスを必要とするAPI
+	capabilities: ["read:content", "network:fetch"],
+
+	// プラグインがHTTPリクエストを送信できるホスト
+	allowedHosts: ["api.example.com"],
+
+	// 永続ストレージコレクション
+	storage: {
+		entries: {
+			indexes: ["userId", "createdAt"],
+		},
+	},
+
+	// イベントハンドラー
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			ctx.log.info("Content saved", { id: event.content.id });
+		},
+	},
+
+	// REST APIエンドポイント
+	routes: {
+		status: {
+			handler: async (ctx) => ({ ok: true }),
+		},
+	},
+
+	// 管理UI設定
+	admin: {
+		settingsSchema: {
+			apiKey: { type: "secret", label: "API Key" },
+		},
+		pages: [{ path: "/dashboard", label: "Dashboard" }],
+		widgets: [{ id: "status", size: "half" }],
+	},
+});
+```
+
+## プラグインコンテキスト
+
+すべてのフックとルートハンドラーは、以下へのアクセス権を持つ`PluginContext`オブジェクトを受け取ります:
+
+| プロパティ      | 説明                                          | 可用性                           |
+| ------------- | ---------------------------------------------------- | -------------------------------------- |
+| `ctx.storage` | プラグインのドキュメントコレクション                        | 常時 (宣言されている場合)                   |
+| `ctx.kv`      | 設定と状態のためのキーバリューストア               | 常時                                 |
+| `ctx.content` | サイトコンテンツの読み書き                              | `read:content`または`write:content`を持つ場合 |
+| `ctx.media`   | メディアファイルの読み書き                               | `read:media`または`write:media`を持つ場合     |
+| `ctx.http`    | 外部リクエストのためのHTTPクライアント                    | `network:fetch`を持つ場合                   |
+| `ctx.log`     | 構造化ロガー (debug, info, warn, error)         | 常時                                 |
+| `ctx.plugin`  | プラグインメタデータ (id, version)                        | 常時                                 |
+| `ctx.site`    | サイト情報: `name`, `url`, `locale`                   | 常時                                 |
+| `ctx.url()`   | パスから絶対URLを生成                    | 常時                                 |
+| `ctx.users`   | ユーザー情報の読み取り: `get()`, `getByEmail()`, `list()`    | `read:users`を持つ場合                      |
+| `ctx.cron`    | タスクのスケジュール: `schedule()`, `cancel()`, `list()`   | 常時                                 |
+| `ctx.email`   | メール送信: `send()`                                 | `email:send` + プロバイダー設定済みの場合 |
+
+コンテキストの形状はすべてのフックとルートで同一です。能力で制限されたプロパティは、プラグインが必要な能力を宣言した場合にのみ存在します。
+
+## 能力
+
+能力は、プラグインコンテキストでどのAPIが利用可能かを決定します:
+
+| 能力        | アクセス権を付与                                                       |
+| ----------------- | ---------------------------------------------------------------------- |
+| `read:content`    | `ctx.content.get()`, `ctx.content.list()`                              |
+| `write:content`   | `ctx.content.create()`, `ctx.content.update()`, `ctx.content.delete()` |
+| `read:media`      | `ctx.media.get()`, `ctx.media.list()`                                  |
+| `write:media`     | `ctx.media.getUploadUrl()`, `ctx.media.upload()`, `ctx.media.delete()` |
+| `network:fetch`   | `ctx.http.fetch()` (`allowedHosts`に制限)                      |
+| `network:fetch:any` | `ctx.http.fetch()` (無制限 — ユーザー設定URL用)         |
+| `read:users`      | `ctx.users.get()`, `ctx.users.getByEmail()`, `ctx.users.list()`       |
+| `email:send`      | `ctx.email.send()` (プロバイダープラグインが必要)                        |
+| `email:provide`   | `email:deliver`排他フックの登録 (トランスポートプロバイダー)           |
+| `email:intercept` | `email:beforeSend` / `email:afterSend`フックの登録                  |
+| `page:inject`     | `page:metadata` / `page:fragments`フックの登録                      |
+
+<Aside type="tip">
+	`write:content`は`read:content`を含意します。メディアも同様です。必要なものだけを宣言してください。
+</Aside>
+
+## 登録
+
+Astro設定でプラグインを登録します:
+
+```
+typescript title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import { emdash } from "emdash/astro";
+import seoPlugin from "@emdash-cms/plugin-seo";
+import auditLogPlugin from "@emdash-cms/plugin-audit-log";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			plugins: [seoPlugin({ generateSitemap: true }), auditLogPlugin({ retentionDays: 90 })],
+		}),
+	],
+});
+```
+
+プラグインはビルド時に解決されます。同じ優先度を持つフックの場合、順序が重要です—配列内で先に指定されたプラグインが最初に実行されます。
+
+## 実行モード
+
+EmDashは2つのプラグイン実行モードをサポートしています：
+
+| モード          | 説明                             | プラットフォーム        |
+| ------------- | --------------------------------------- | --------------- |
+| **信頼済み**   | プラグインはフルアクセス権限でプロセス内で実行されます | 任意             |
+| **サンドボックス化** | プラグインは分離されたV8ワーカーで実行されます      | Cloudflareのみ |
+
+信頼済みモード（デフォルト）では、機能は文書化された通りです—プラグインは何にでもアクセスできます。サンドボックス化モードでは、機能はランタイムレベルで強制されます。
+
+<Aside type="note">
+	サンドボックス化された実行には、Dynamic Worker Loaderを備えたCloudflare Workersが必要です。他のプラットフォームでは
+	信頼済みモードのみを使用します。各プラットフォームでのセキュリティ保証の完全な比較については、[プラグインサンドボックス](/ja/plugins/sandbox/)を参照してください。
+</Aside>
+
+## 次のステップ
+
+<CardGrid>
+	<Card title="プラグインを作成" icon="add-document">
+		ストレージ、フック、管理UIを備えた[最初のプラグインを構築](/ja/plugins/creating-plugins/)します。
+	</Card>
+	<Card title="利用可能なフック" icon="rocket">
+		コンテンツ、メディア、プラグインライフサイクルの[すべてのフックを閲覧](/ja/plugins/hooks/)します。
+	</Card>
+	<Card title="プラグインストレージ" icon="document">
+		[ストレージについて学び](/ja/plugins/storage/)、プラグインデータのクエリ方法を理解します。
+	</Card>
+	<Card title="管理UI" icon="laptop">
+		[管理ページを追加](/ja/plugins/admin-ui/)し、ダッシュボードウィジェットを設定します。
+	</Card>
+	<Card title="サンドボックスセキュリティ" icon="warning">
+		CloudflareとNode.jsのデプロイメント全体での[サンドボックス分離を理解](/ja/plugins/sandbox/)します。
+	</Card>
+</CardGrid>

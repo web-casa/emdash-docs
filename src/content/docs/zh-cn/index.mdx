@@ -1,0 +1,65 @@
+---
+title: HiEmdash Docs
+description: 由 EmDash 爱好者创建的第三方文档站点，在官方文档基础上补充了新手引导、常见问题和多语言翻译。
+lastUpdated: 2026-04-07
+template: splash
+hero:
+  tagline: 一个由社区维护的 EmDash 第三方文档站点，补充了新手更需要的引导、常见问题和多语言翻译。
+  actions:
+    - text: 开始使用
+      link: /zh-cn/getting-started/
+      icon: right-arrow
+    - text: 在 GitHub 上查看
+      link: https://github.com/emdash-cms/emdash
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## 为什么选择 HiEmdash Docs？
+
+<CardGrid stagger>
+	<Card title="对新手更友好" icon="document">
+		除了官方文档，这里还补充了更适合初学者阅读的引导和背景说明，帮助你更快进入状态。
+	</Card>
+	<Card title="多语言支持" icon="puzzle">
+		英文仍然作为源文档，同时提供简体中文翻译，后续也可以继续扩展到更多语言。
+	</Card>
+	<Card title="社区补充说明" icon="setting">
+		这里还整理了常见问题、实用提示和一些容易踩坑的细节，降低初次使用 EmDash 的门槛。
+	</Card>
+</CardGrid>
+
+## 这里能看到什么
+
+- **入门指南** — 更清晰地带你完成 EmDash 的上手配置
+- **常见问题** — 补充官方文档之外、初学者常遇到的问题
+- **多语言文档** — 保留英文原文，同时提供简体中文翻译
+- **迁移说明** — 面向 WordPress 用户和 Astro 开发者的额外上下文
+
+## 推荐阅读
+
+- [什么是 EmDash？](/zh-cn/what-is-emdash/)：快速理解 EmDash 的定位与适用场景
+- [Astro CMS 该怎么选？](/zh-cn/best-astro-cms/)：从实际需求出发评估 EmDash
+- [EmDash 与 WordPress 对比](/zh-cn/emdash-vs-wordpress/)：对比编辑体验、部署方式和技术栈
+- [如何从 WordPress 迁移到 Astro + EmDash](/zh-cn/wordpress-to-astro-with-emdash/)：先看整体迁移路线，再决定是否深入实施
+
+## 快速开始
+
+```bash
+# Create a new EmDash site
+npm create astro@latest -- --template @emdash-cms/template-blog
+
+# Start the dev server
+npm run dev
+
+# Visit the admin at http://localhost:4321/_emdash/admin
+```
+
+## 关于 EmDash
+
+- **Astro 原生 CMS** — 不是后加 Astro 适配器的通用 CMS，而是为 Astro 设计
+- **类型安全内容模型** — 结构化内容和 TypeScript 支持更容易协作和维护
+- **可扩展架构** — 支持插件、钩子、管理界面扩展和灵活部署
+- **兼顾 WordPress 使用习惯** — 菜单、小部件、分类法和迁移场景都考虑在内

@@ -1,0 +1,373 @@
+---
+title: Panel de Administración
+description: El panel de administración de EmDash—una SPA en React con TanStack Router, TanStack Query y componentes Kumo.
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+El panel de administración de EmDash es una aplicación de una sola página (SPA) en React incrustada en tu sitio Astro. Proporciona una interfaz completa de gestión de contenidos para editores y administradores.
+
+## Descripción General de la Arquitectura
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                    Astro Shell                                 │
+│  /_emdash/admin/[...path].astro                              │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                    React SPA                             │  │
+│  │                                                          │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐   │  │
+│  │  │  TanStack   │  │  TanStack   │  │     Kumo        │   │  │
+│  │  │   Router    │  │   Query     │  │   Components    │   │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────────┘   │  │
+│  │                                                          │  │
+│  │  ┌────────────────────────────────────────────────────┐  │  │
+│  │  │              REST API Client                       │  │  │
+│  │  │           /_emdash/api/*                         │  │  │
+│  │  └────────────────────────────────────────────────────┘  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────┘
+```
+
+El administrador es una aplicación React de "gran isla". Astro maneja la estructura base y la autenticación; toda la navegación y renderizado dentro del administrador se realiza en el lado del cliente.
+
+## Pila Tecnológica
+
+| Capa          | Tecnología              | Propósito                                  |
+| -------------- | ----------------------- | ------------------------------------------ |
+| **Enrutamiento** | TanStack Router         | Enrutamiento del lado del cliente con seguridad de tipos |
+| **Datos**      | TanStack Query          | Estado del servidor, caché, mutaciones     |
+| **Interfaz de Usuario** | Kumo              | Componentes accesibles (Base UI + Tailwind) |
+| **Tablas**     | TanStack Table          | Ordenación, filtrado, paginación           |
+| **Formularios** | React Hook Form + Zod   | Validación que coincide con el esquema del servidor |
+| **Iconos**     | Phosphor                | Iconografía consistente                    |
+| **Editor**     | TipTap                  | Edición de texto enriquecido (Portable Text) |
+
+<Aside type="note">
+	Kumo es el sistema de diseño de Cloudflare, construido sobre primitivas de Base UI con estilos Tailwind. Se
+	instala como una dependencia del paquete del administrador.
+</Aside>
+
+## Estructura de Rutas
+
+El administrador se monta en `/_emdash/admin/` y utiliza enrutamiento del lado del cliente:
+
+| Ruta                         | Pantalla                     |
+| ----------------------------- | ---------------------------- |
+| `/`                           | Panel de control             |
+| `/content/:collection`        | Lista de contenidos          |
+| `/content/:collection/:id`    | Editor de contenido          |
+| `/content/:collection/new`    | Nueva entrada                |
+| `/media`                      | Biblioteca multimedia        |
+| `/content-types`              | Constructor de esquemas (solo administradores) |
+| `/menus`                      | Menús de navegación          |
+| `/widgets`                    | Áreas de widgets             |
+| `/taxonomies`                 | Gestión de categorías/etiquetas |
+| `/settings`                   | Configuración del sitio      |
+| `/plugins/:pluginId/*`        | Páginas de plugins           |
+
+<Aside type="tip">
+	La ruta `/content-types` solo es visible para administradores. Los editores solo ven el contenido que
+	tienen permiso para gestionar.
+</Aside>
+
+## Interfaz de Usuario Basada en Manifiesto
+
+El administrador no codifica de forma rígida el conocimiento de colecciones o plugins. En su lugar, obtiene un manifiesto del servidor:
+
+```
+GET /_emdash/api/manifest
+```
+
+Respuesta:
+
+```json
+{
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Blog Posts",
+			"labelSingular": "Post",
+			"icon": "file-text",
+			"supports": ["drafts", "revisions", "preview"],
+			"fields": [
+				{ "slug": "title", "type": "string", "required": true },
+				{ "slug": "content", "type": "portableText" }
+			]
+		}
+	],
+	"plugins": [
+		{
+			"id": "audit-log",
+			"label": "Registro de auditoria",
+			"adminPages": [{ "path": "history", "label": "Historial de auditoria" }],
+			"widgets": [{ "id": "recent-activity", "title": "Actividad reciente" }]
+		}
+	],
+		"taxonomies": [{ "name": "category", "label": "Categorias", "hierarchical": true }],
+	"version": "abc123"
+}
+```
+
+El administrador construye su navegación, formularios y editores completamente a partir de este manifiesto. Beneficios:
+
+- **Los cambios en el esquema aparecen inmediatamente** — No se necesita reconstruir el administrador
+- **La interfaz de usuario del plugin se integra automáticamente** — Páginas y widgets del manifiesto
+- **Seguridad de tipos en el límite** — Los esquemas Zod permanecen en el servidor
+
+## Flujo de Datos
+
+<Steps>
+	1. **Carga la SPA del administrador** — TanStack Router se inicializa 2. **Obtener manifiesto** — TanStack Query almacena en caché
+	metadatos de colecciones/plugins 3. **Construir navegación** — Barra lateral generada desde el manifiesto 4. **Usuario
+	navega** — Enrutamiento del lado del cliente, sin recarga de página 5. **Obtener datos** — TanStack Query solicita
+	contenido de las APIs REST 6. **Renderizar formularios** — Editores de campos generados desde los descriptores de campo del manifiesto 7. **Enviar cambios** — Mutaciones vía TanStack Query, actualizaciones optimistas 8. **El servidor
+	valida** — Esquemas Zod en el servidor, los errores se devuelven como JSON
+</Steps>
+
+## Endpoints de la API REST
+
+El administrador se comunica exclusivamente a través de APIs REST:
+
+### APIs de Contenido
+
+| Método   | Endpoint                                   | Propósito              |
+| -------- | ------------------------------------------ | ---------------------- |
+| `GET`    | `/api/content/:collection`                 | Listar entradas        |
+| `POST`   | `/api/content/:collection`                 | Crear entrada          |
+| `GET`    | `/api/content/:collection/:id`             | Obtener entrada        |
+| `PUT`    | `/api/content/:collection/:id`             | Actualizar entrada     |
+| `DELETE` | `/api/content/:collection/:id`             | Eliminar entrada (soft delete) |
+| `GET`    | `/api/content/:collection/:id/revisions`   | Listar revisiones      |
+| `POST`   | `/api/content/:collection/:id/preview-url` | Generar URL de vista previa |
+
+### APIs de Esquema
+
+| Método   | Endpoint                                      | Propósito            |
+| -------- | --------------------------------------------- | -------------------- |
+| `GET`    | `/api/schema`                                 | Exportar esquema completo |
+| `GET`    | `/api/schema/collections`                     | Listar colecciones   |
+| `POST`   | `/api/schema/collections`                     | Crear colección      |
+| `PUT`    | `/api/schema/collections/:slug`               | Actualizar colección |
+| `DELETE` | `/api/schema/collections/:slug`               | Eliminar colección   |
+| `POST`   | `/api/schema/collections/:slug/fields`        | Añadir campo         |
+| `PUT`    | `/api/schema/collections/:slug/fields/:field` | Actualizar campo     |
+| `DELETE` | `/api/schema/collections/:slug/fields/:field` | Eliminar campo       |
+
+### APIs Multimedia
+
+| Método   | Endpoint                 | Propósito                 |
+| -------- | ------------------------ | ------------------------- |
+| `GET`    | `/api/media`             | Listar elementos multimedia |
+| `POST`   | `/api/media/upload-url`  | Obtener URL de subida firmada |
+| `POST`   | `/api/media/:id/confirm` | Confirmar subida completada |
+| `DELETE` | `/api/media/:id`         | Eliminar elemento multimedia |
+| `GET`    | `/api/media/file/:key`   | Servir archivo multimedia |
+
+### Otras APIs
+
+| Endpoint               | Propósito                  |
+| ---------------------- | -------------------------- |
+| `/api/settings`        | Configuración del sitio (GET/POST) |
+| `/api/menus/*`         | Menús de navegación        |
+| `/api/widget-areas/*`  | Gestión de widgets         |
+| `/api/taxonomies/*`    | Términos de taxonomía      |
+| `/api/admin/plugins/*` | Estado de los plugins      |
+
+## Paginación
+
+Todos los endpoints de lista utilizan paginación basada en cursor:
+
+```json
+{
+  "items": [...],
+  "nextCursor": "eyJpZCI6IjAxSjEyMzQ1NiJ9"
+}
+```
+
+Obtener la siguiente página:
+
+```
+GET /api/content/posts?cursor=eyJpZCI6IjAxSjEyMzQ1NiJ9
+```
+
+<Aside type="note">
+	La paginación por cursor proporciona resultados consistentes incluso cuando se agrega o elimina contenido entre solicitudes.
+</Aside>
+
+## Interfaz de Administración de Plugins
+
+Los plugins pueden extender el administrador con páginas y widgets del panel de administración. La integración genera un módulo virtual con importaciones estáticas:
+
+```ts
+// virtual:emdash/plugin-admins (generated)
+import * as pluginAdmin0 from "@emdash-cms/plugin-seo/admin";
+import * as pluginAdmin1 from "@emdash-cms/plugin-analytics/admin";
+
+export const pluginAdmins = {
+	seo: pluginAdmin0,
+	analytics: pluginAdmin1,
+};
+```
+
+### Páginas de Plugin
+
+Las páginas de plugin se montan bajo `/_emdash/admin/plugins/:pluginId/*`:
+
+```tsx
+// @emdash-cms/plugin-seo/src/admin.tsx
+export const pages = [
+	{
+		path: "settings",
+		component: SEOSettingsPage,
+		label: "SEO Settings",
+	},
+];
+```
+
+Se renderiza en: `/_emdash/admin/plugins/seo/settings`
+
+### Widgets del Panel de Control
+
+Los plugins pueden agregar widgets al panel de administración:
+
+```tsx
+export const widgets = [
+	{
+		id: "seo-overview",
+		component: SEOWidget,
+		title: "SEO Overview",
+		size: "half", // "full" | "half" | "third"
+	},
+];
+```
+
+<Aside type="caution">
+	Los plugins solo pueden montar páginas bajo su propio espacio de nombres (`/plugins/:pluginId/*`). No pueden anular rutas principales del administrador.
+</Aside>
+
+## Autenticación
+
+La ruta del shell del administrador aplica autenticación mediante middleware de Astro:
+
+```ts
+// Simplified middleware logic
+export async function onRequest({ request, locals }, next) {
+	const session = await getSession(request);
+
+	if (request.url.includes("/_emdash/admin")) {
+		if (!session?.user) {
+			return redirect("/_emdash/admin/login");
+		}
+		locals.user = session.user;
+	}
+
+	return next();
+}
+```
+
+El SPA del administrador en sí no maneja el inicio de sesión; esa es una página de Astro que establece una cookie de sesión.
+
+## Acceso Basado en Roles
+
+Diferentes roles ven diferentes partes del administrador:
+
+| Rol           | Secciones Visibles                           |
+| -------------- | -------------------------------------------- |
+| **Editor**     | Panel de control, colecciones asignadas, medios |
+| **Administrador** | + Tipos de contenido, todas las colecciones, configuraciones |
+| **Desarrollador** | + Acceso CLI, tipos generados              |
+
+El endpoint del manifiesto filtra colecciones y características según el rol del usuario solicitante.
+
+## Editor de Contenido
+
+El editor de contenido genera formularios dinámicamente basándose en definiciones de campo:
+
+```tsx
+// Simplified editor rendering
+function ContentEditor({ collection, fields }) {
+	return (
+		<form>
+			{fields.map((field) => (
+				<FieldWidget
+					key={field.slug}
+					type={field.type}
+					label={field.label}
+					required={field.required}
+					options={field.options}
+				/>
+			))}
+		</form>
+	);
+}
+```
+
+Cada tipo de campo tiene un widget correspondiente:
+
+| Tipo de Campo | Widget           |
+| -------------- | ---------------- |
+| `string`       | Entrada de texto |
+| `text`         | Área de texto    |
+| `number`       | Entrada numérica |
+| `boolean`      | Interruptor      |
+| `datetime`     | Selector de fecha/hora |
+| `select`       | Lista desplegable |
+| `multiSelect`  | Selección múltiple |
+| `portableText` | Editor TipTap    |
+| `image`        | Selector de medios |
+| `reference`    | Selector de entrada |
+
+## Editor de Texto Enriquecido
+
+Los campos de Texto Portátil utilizan TipTap (ProseMirror) para la edición:
+
+```
+User types → TipTap (ProseMirror JSON) → Save → Portable Text (DB)
+Load → Portable Text (DB) → TipTap (ProseMirror JSON) → Display
+```
+
+La conversión ocurre en los límites de carga/guardado mediante `portableTextToProsemirror()` y `prosemirrorToPortableText()`.
+
+Bloques admitidos:
+
+- Párrafos, encabezados (H1-H6)
+- Listas con viñetas y numeradas
+- Citas en bloque, bloques de código
+- Imágenes (desde la biblioteca multimedia)
+- Enlaces
+
+Los bloques desconocidos de plugins o importaciones se conservan como marcadores de posición de solo lectura.
+
+## Biblioteca de Medios
+
+La biblioteca multimedia proporciona:
+
+- Vistas de cuadrícula y lista
+- Búsqueda y filtrado por tipo, fecha
+- Carga por arrastrar y soltar
+- Vista previa de imagen con metadatos
+- Selección masiva y eliminación
+
+Las cargas utilizan URLs firmadas para carga directa de cliente a almacenamiento:
+
+<Steps>
+	1. **Solicitar URL de carga** — `POST /api/media/upload-url` 2. **Cargar directamente** — El cliente envía el archivo mediante PUT a la URL firmada (R2/S3) 3. **Confirmar carga** — `POST /api/media/:id/confirm` 4. **El servidor extrae metadatos** — Dimensiones, tipo MIME, etc.
+</Steps>
+
+Este enfoque evita los límites de tamaño del cuerpo de Workers y proporciona un progreso de carga real.
+
+## Próximos Pasos
+
+<CardGrid>
+	<Card title="Primeros Pasos" icon="rocket">
+		[Configura tu primer sitio EmDash](/es/getting-started/).
+	</Card>
+	<Card title="Desarrollo de Plugins" icon="puzzle">
+		[Construye extensiones de la interfaz de administración](/es/plugins/admin-ui/).
+	</Card>
+	<Card title="Arquitectura" icon="open-book">
+		Revisa la [arquitectura completa del sistema](/es/concepts/architecture/).
+	</Card>
+</CardGrid>

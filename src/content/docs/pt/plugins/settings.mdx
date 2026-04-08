@@ -1,0 +1,338 @@
+---
+title: Configurações de Plugin
+description: Configure plugins com esquemas de configurações e o armazenamento KV.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Os plugins precisam de configuração — chaves de API, flags de funcionalidade, preferências de exibição. O EmDash fornece dois mecanismos: um **esquema de configurações** para opções configuráveis pelo administrador e um **armazenamento KV** para acesso programático.
+
+## Esquema de Configurações
+
+Declare um esquema de configurações em `admin.settingsSchema` para gerar automaticamente uma interface de administração:
+
+```typescript
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "seo",
+	version: "1.0.0",
+
+	admin: {
+		settingsSchema: {
+			siteTitle: {
+				type: "string",
+					label: "Título do site",
+					description: "Usado nas tags de título e nos metadados",
+				default: "",
+			},
+			maxTitleLength: {
+				type: "number",
+				label: "Max Title Length",
+				description: "Characters before truncation",
+				default: 60,
+				min: 30,
+				max: 100,
+			},
+			generateSitemap: {
+				type: "boolean",
+				label: "Generate Sitemap",
+				description: "Automatically generate sitemap.xml",
+				default: true,
+			},
+			defaultRobots: {
+				type: "select",
+				label: "Default Robots",
+				options: [
+					{ value: "index,follow", label: "Index & Follow" },
+					{ value: "noindex,follow", label: "No Index, Follow" },
+					{ value: "noindex,nofollow", label: "No Index, No Follow" },
+				],
+				default: "index,follow",
+			},
+			apiKey: {
+				type: "secret",
+				label: "API Key",
+				description: "Encrypted at rest",
+			},
+		},
+	},
+});
+```
+
+O EmDash gera um formulário de configurações na seção de administração do plugin. Os usuários editam as configurações sem tocar no código.
+
+<Aside type="caution">
+	A partir de 7 de abril de 2026, esta interface de configurações gerada automaticamente documentada não parece estar totalmente conectada
+	ainda. Veja [issue #341](https://github.com/emdash-cms/emdash/issues/341) para a lacuna de
+	implementação atual antes de confiar apenas no `admin.settingsSchema`.
+</Aside>
+
+## Tipos de Campo
+
+### String
+
+Entrada de texto para strings de uma linha ou múltiplas linhas.
+
+```typescript
+siteTitle: {
+  type: "string",
+  label: "Título do site",
+  description: "Texto de ajuda opcional",
+  default: "Meu site",
+  multiline: false  // Defina como true para textarea
+}
+```
+
+### Number
+
+Entrada numérica com restrições opcionais de mínimo/máximo.
+
+```typescript
+maxItems: {
+  type: "number",
+  label: "Maximum Items",
+  default: 100,
+  min: 1,
+  max: 1000
+}
+```
+
+### Boolean
+
+Alternador para valores verdadeiro/falso.
+
+```typescript
+enabled: {
+  type: "boolean",
+  label: "Enabled",
+  description: "Turn this feature on or off",
+  default: true
+}
+```
+
+### Select
+
+Menu suspenso para opções predefinidas.
+
+```typescript
+theme: {
+  type: "select",
+  label: "Theme",
+  options: [
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+    { value: "auto", label: "System" }
+  ],
+  default: "auto"
+}
+```
+
+### Secret
+
+Campo criptografado para valores sensíveis, como chaves de API. Nunca enviado ao cliente após o salvamento.
+
+```typescript
+apiKey: {
+  type: "secret",
+  label: "API Key",
+  description: "Stored encrypted"
+}
+```
+
+<Aside type="caution">
+	Os campos secretos são criptografados em repouso usando a chave de criptografia do site. Eles nunca são expostos na
+	interface de administração após o salvamento inicial — apenas um espaço reservado mascarado é mostrado.
+</Aside>
+
+## Acessando Configurações
+
+Leia as configurações em hooks e rotas via `ctx.kv`:
+
+```typescript
+"content:beforeSave": async (event, ctx) => {
+  // Read a setting
+  const maxLength = await ctx.kv.get<number>("settings:maxTitleLength");
+  const apiKey = await ctx.kv.get<string>("settings:apiKey");
+
+  // Use padrões se não definido
+  const limit = maxLength ?? 60;
+
+  ctx.log.info("Usando comprimento máximo", { limit });
+  return event.content;
+}
+```
+
+As configurações são armazenadas com o prefixo `settings:` por convenção. Isso distingue valores configuráveis pelo usuário do estado interno do plugin.
+
+## API do Armazenamento KV
+
+O armazenamento KV (`ctx.kv`) é um armazenamento chave-valor de propósito geral para dados do plugin:
+
+```typescript
+interface KVAccess {
+	get<T>(key: string): Promise<T | null>;
+	set(key: string, value: unknown): Promise<void>;
+	delete(key: string): Promise<boolean>;
+	list(prefix?: string): Promise<Array<{ key: string; value: unknown }>>;
+}
+```
+
+### Lendo Valores
+
+```typescript
+// Get a single value
+const enabled = await ctx.kv.get<boolean>("settings:enabled");
+
+// Obter com tipo
+const config = await ctx.kv.get<{ url: string; timeout: number }>("state:config");
+```
+
+### Escrevendo Valores
+
+```typescript
+// Set a value
+await ctx.kv.set("settings:lastSync", new Date().toISOString());
+
+// Definir valores complexos
+await ctx.kv.set("state:cache", {
+	data: items,
+	expiry: Date.now() + 3600000,
+});
+```
+
+### Listando Valores
+
+```typescript
+// List all settings
+const settings = await ctx.kv.list("settings:");
+// Returns: [{ key: "settings:enabled", value: true }, ...]
+
+// Listar todas as chaves do plugin
+const all = await ctx.kv.list();
+```
+
+### Excluindo Valores
+
+```typescript
+const deleted = await ctx.kv.delete("state:tempData");
+// Returns true if key existed
+```
+
+## Convenções de Nomenclatura de Chaves
+
+Use prefixos para organizar os dados KV:
+
+| Prefixo     | Propósito                       | Exemplo           |
+| ----------- | ----------------------------- | ----------------- |
+| `settings:` | Preferências configuráveis pelo usuário | `settings:apiKey` |
+| `state:`    | Estado interno do plugin         | `state:lastSync`  |
+| `cache:`    | Dados em cache                   | `cache:results`   |
+
+```typescript
+// Good: clear prefixes
+await ctx.kv.set("settings:webhookUrl", url);
+await ctx.kv.set("state:lastRun", timestamp);
+await ctx.kv.set("cache:feed", feedData);
+
+// Evitar: sem prefixo, propósito não claro
+await ctx.kv.set("url", url);
+```
+
+<Aside type="tip">
+	O prefixo `settings:` é uma convenção para valores mostrados na interface de configurações gerada automaticamente. Outros
+	prefixos são para uso interno do plugin.
+</Aside>
+
+## Configurações vs Armazenamento vs KV
+
+Escolha o mecanismo de armazenamento correto:
+
+| Caso de Uso                 | Mecanismo                                          |
+| -------------------------- | -------------------------------------------------- |
+| Preferências editáveis pelo administrador | `admin.settingsSchema` + `ctx.kv` com `settings:` |
+| Estado interno do plugin      | `ctx.kv` com `state:`                             |
+| Coleções de documentos   | `ctx.storage`                                      |
+
+**Configurações** são para valores configuráveis pelo usuário — coisas que um administrador pode alterar. Eles recebem uma interface gerada automaticamente.
+
+**KV** é para estado interno, como timestamps, cursores de sincronização ou computações em cache. Sem interface, apenas código.
+
+**Armazenamento** é para coleções de documentos com consultas indexadas — envios de formulários, logs de auditoria, etc.
+
+## Carregando Configurações em Rotas
+
+Rotas de API podem expor configurações para componentes da interface de administração:
+
+```typescript
+routes: {
+  settings: {
+    handler: async (ctx) => {
+      const settings = await ctx.kv.list("settings:");
+      const result: Record<string, unknown> = {};
+
+      for (const entry of settings) {
+        const key = entry.key.replace("settings:", "");
+        result[key] = entry.value;
+      }
+
+      return result;
+    }
+  },
+
+  "settings/save": {
+    handler: async (ctx) => {
+      const input = ctx.input as Record<string, unknown>;
+
+      for (const [key, value] of Object.entries(input)) {
+        if (value !== undefined) {
+          await ctx.kv.set(`settings:${key}`, value);
+        }
+      }
+
+      return { success: true };
+    }
+  }
+}
+```
+
+## Valores Padrão
+
+As configurações do `settingsSchema` não são persistidas automaticamente. Elas são padrões na interface de administração. Seu código deve lidar com valores ausentes:
+
+```typescript
+"content:afterSave": async (event, ctx) => {
+  // Always provide a fallback
+  const enabled = await ctx.kv.get<boolean>("settings:enabled") ?? true;
+  const maxItems = await ctx.kv.get<number>("settings:maxItems") ?? 100;
+
+  if (!enabled) return;
+  // ...
+}
+```
+
+Alternativamente, persista os padrões em `plugin:install`:
+
+```typescript
+hooks: {
+  "plugin:install": async (_event, ctx) => {
+    // Persist schema defaults
+    await ctx.kv.set("settings:enabled", true);
+    await ctx.kv.set("settings:maxItems", 100);
+  }
+}
+```
+
+## Implementação do Armazenamento
+
+Os valores KV são armazenados na tabela `_options` com chaves com namespace do plugin:
+
+```sql
+INSERT INTO _options (name, value) VALUES
+  ('plugin:seo:settings:siteTitle', '"Meu site"'),
+  ('plugin:seo:settings:maxTitleLength', '60');
+```
+
+O prefixo `plugin:seo:` é adicionado automaticamente. Seu código usa `settings:siteTitle`, e o EmDash o armazena como `plugin:seo:settings:siteTitle`.
+
+Isso garante que os plugins não sobrescrevam acidentalmente os dados uns dos outros.

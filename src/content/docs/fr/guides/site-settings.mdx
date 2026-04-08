@@ -1,0 +1,330 @@
+---
+title: Paramètres du site
+description: Configurez les paramètres globaux tels que le titre du site, le logo et les liens sociaux.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Les paramètres du site sont des valeurs de configuration globales pour votre site : titre, slogan, logo, liens sociaux et préférences d'affichage. Les administrateurs les gèrent via l'interface d'administration, et vous y accédez dans vos modèles.
+
+## Interroger les paramètres
+
+Utilisez `getSiteSettings()` pour récupérer tous les paramètres du site :
+
+```astro title="src/layouts/Base.astro"
+---
+import { getSiteSettings } from "emdash";
+
+const settings = await getSiteSettings();
+---
+
+<html lang="en">
+  <head>
+    <title>{settings.title}</title>
+    {settings.favicon && (
+      <link rel="icon" href={settings.favicon.url} />
+    )}
+  </head>
+  <body>
+    <header>
+      {settings.logo ? (
+        <img src={settings.logo.url} alt={settings.logo.alt || settings.title} />
+      ) : (
+        <span class="site-title">{settings.title}</span>
+      )}
+      {settings.tagline && <p class="tagline">{settings.tagline}</p>
+}
+    </header>
+    <slot />
+  </body>
+</html>
+```
+
+## Paramètres disponibles
+
+EmDash fournit ces paramètres principaux :
+
+```ts
+interface SiteSettings {
+	// Identity
+	title: string;
+	tagline?: string;
+	logo?: MediaReference;
+	favicon?: MediaReference;
+
+	// URLs
+	url?: string;
+
+	// Affichage
+	postsPerPage: number;
+	dateFormat: string;
+	timezone: string;
+
+	// Social
+	social?: {
+		twitter?: string;
+		github?: string;
+		facebook?: string;
+		instagram?: string;
+		linkedin?: string;
+		youtube?: string;
+	};
+}
+
+interface MediaReference {
+	mediaId: string;
+	alt?: string;
+	url?: string; // URL résolue (lecture seule)
+}
+```
+
+## Récupérer des paramètres individuels
+
+Utilisez `getSiteSetting()` pour récupérer un seul paramètre par sa clé :
+
+```ts
+import { getSiteSetting } from "emdash";
+
+const title = await getSiteSetting("title");
+// Retourne : "Mon site" ou undefined
+
+const logo = await getSiteSetting("logo");
+// Retourne : { mediaId: "...", url: "/_emdash/api/media/file/..." }
+```
+
+C'est utile lorsque vous n'avez besoin que d'une ou deux valeurs et que vous voulez éviter de tout récupérer.
+
+## Utiliser les paramètres dans les composants
+
+### En-tête du site
+
+```
+astro title="src/components/Header.astro"
+---
+import { getSiteSettings, getMenu } from "emdash";
+
+const settings = await getSiteSettings();
+const menu = await getMenu("primary");
+---
+
+<header class="header">
+  <a href="/" class="logo">
+    {settings.logo ? (
+      <img
+        src={settings.logo.url}
+        alt={settings.logo.alt || settings.title}
+        width="150"
+        height="50"
+      />
+    ) : (
+      <span class="site-name">{settings.title}</span>
+    )}
+  </a>
+
+  {menu && (
+    <nav>
+      {menu.items.map(item => (
+        <a href={item.url}>{item.label}</a>
+      ))}
+    </nav>
+  )}
+</header>
+```
+
+### Liens sociaux
+
+```
+astro title="src/components/SocialLinks.astro"
+---
+import { getSiteSetting } from "emdash";
+
+const social = await getSiteSetting("social");
+
+const platforms = [
+  { key: "twitter", label: "Twitter", baseUrl: "https://twitter.com/" },
+  { key: "github", label: "GitHub", baseUrl: "https://github.com/" },
+  { key: "facebook", label: "Facebook", baseUrl: "https://facebook.com/" },
+  { key: "instagram", label: "Instagram", baseUrl: "https://instagram.com/" },
+  { key: "linkedin", label: "LinkedIn", baseUrl: "https://linkedin.com/in/" },
+  { key: "youtube", label: "YouTube", baseUrl: "https://youtube.com/@" },
+] as const;
+---
+
+{social && (
+  <div class="social-links">
+    {platforms.map(({ key, label, baseUrl }) => (
+      social[key] && (
+        <a
+          href={baseUrl + social[key]}
+          rel="noopener noreferrer"
+          target="_blank"
+          aria-label={label}
+        >
+          {label}
+        </a>
+      )
+    ))}
+  </div>
+)}
+```
+
+### Balises méta SEO
+
+```
+astro title="src/components/SEO.astro"
+---
+import { getSiteSettings } from "emdash";
+
+interface Props {
+  title?: string;
+  description?: string;
+  image?: string;
+}
+
+const settings = await getSiteSettings();
+const {
+  title,
+  description = settings.tagline,
+  image,
+} = Astro.props;
+
+const pageTitle = title
+  ? `${title} | ${settings.title}`
+  : settings.title;
+---
+
+<title>{pageTitle}</title>
+{description && <meta name="description" content={description} />}
+
+<!-- Open Graph -->
+<meta property="og:title" content={pageTitle} />
+{description && <meta property="og:description" content={description} />}
+{image && <meta property="og:image" content={image} />}
+{settings.url && <meta property="og:url" content={settings.url + Astro.url.pathname} />}
+
+<!-- Twitter -->
+{settings.social?.twitter && (
+  <meta name="twitter:site" content={settings.social.twitter} />
+)}
+<meta name="twitter:card" content={image ? "summary_large_image" : "summary"} />
+```
+
+## Formatage des dates
+
+Utilisez les paramètres `dateFormat` et `timezone` pour un affichage cohérent des dates :
+
+```
+astro title="src/components/PostDate.astro"
+---
+import { getSiteSetting } from "emdash";
+
+interface Props {
+  date: string;
+}
+
+const { date } = Astro.props;
+const dateFormat = await getSiteSetting("dateFormat") || "MMMM d, yyyy";
+const timezone = await getSiteSetting("timezone") || "UTC";
+
+// Formater en utilisant Intl.DateTimeFormat ou une bibliothèque comme date-fns
+const formatted = new Intl.DateTimeFormat("en-US", {
+  timeZone: timezone,
+  dateStyle: "long",
+}).format(new Date(date));
+---
+
+<time datetime={date}>{formatted}</time>
+```
+
+<Aside>
+	Le paramètre `dateFormat` utilise une chaîne de motif (par ex., "MMMM d, yyyy"). Vous pourriez avoir besoin d'une bibliothèque comme
+	`date-fns` pour analyser et appliquer ces motifs.
+</Aside>
+
+## API d'administration
+
+Récupérer les paramètres de manière programmatique :
+
+```http
+GET /_emdash/api/settings
+```
+
+Réponse :
+
+```json
+{
+	"title": "My EmDash Site",
+	"tagline": "A modern CMS",
+	"logo": {
+		"mediaId": "med_123",
+		"url": "/_emdash/api/media/file/abc123"
+	},
+	"postsPerPage": 10,
+	"dateFormat": "MMMM d, yyyy",
+	"timezone": "America/New_York",
+	"social": {
+		"twitter": "@handle",
+		"github": "username"
+	}
+}
+```
+
+Mettre à jour les paramètres (mises à jour partielles prises en charge) :
+
+```http
+POST /_emdash/api/settings
+Content-Type: application/json
+
+{
+  "title": "Nouveau titre du site",
+  "tagline": "Slogan mis à jour"
+}
+```
+
+Seuls les champs fournis sont modifiés. Les champs omis conservent leurs valeurs actuelles.
+
+## Références multimédias
+
+Les paramètres `logo` et `favicon` stockent des références multimédias. Lorsque vous les lisez, EmDash résout automatiquement la propriété `url` :
+
+```ts
+const logo = await getSiteSetting("logo");
+// {
+//   mediaId: "med_123",
+//   alt: "Site logo",
+//   url: "/_emdash/api/media/file/abc123"
+// }
+```
+
+Lors d'une mise à jour via l'API, fournissez uniquement le `mediaId` :
+
+```json
+{
+	"logo": {
+		"mediaId": "med_456",
+		"alt": "New logo"
+	}
+}
+```
+
+## Référence de l'API
+
+### `getSiteSettings()`
+
+Récupère tous les paramètres du site avec les URLs multimédias résolues.
+
+**Retourne :** `Promise<Partial<SiteSettings>>`
+
+Retourne un objet partiel. Les valeurs non définies sont `undefined`.
+
+### `getSiteSetting(key)`
+
+Récupère un seul paramètre par sa clé.
+
+**Paramètres :**
+
+- `key` — La clé du paramètre (par ex., `"title"`, `"logo"`, `"social"`)
+
+**Retourne :** `Promise<SiteSettings[K] | undefined>`
+
+Type-safe : le type de retour correspond à la clé que vous demandez.

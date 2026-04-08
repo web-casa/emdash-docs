@@ -1,0 +1,109 @@
+---
+title: Por que escolher EmDash para sites Astro?
+description: Descubra por que o EmDash se destaca como um CMS para Astro, desde conteúdo com segurança de tipos e arquitetura de implantação única até fluxos de trabalho de edição no estilo WordPress.
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+O EmDash é um CMS nativo do Astro que combina padrões tradicionais de CMS com desenvolvimento web moderno: uma interface de edição de conteúdo, integração com o framework Astro e opções flexíveis de implantação.
+
+## O Que Torna o EmDash Diferente
+
+### Arquitetura Nativa do Astro
+
+O EmDash é construído especificamente para o Astro, não adaptado de um CMS genérico. O conteúdo reside na mesma implantação do seu site, consultado através das Coleções de Conteúdo ao Vivo do Astro. Sem serviços separados, sem viagens de ida e volta de API, sem sincronização por webhook.
+
+### Modelo de Conteúdo Familiar
+
+Se você já usou o WordPress, os conceitos do EmDash parecerão familiares: coleções (como tipos de post), taxonomias, menus, áreas de widgets e uma biblioteca de mídia. O modelo mental se transfere — a implementação usa ferramentas modernas.
+
+### Integração com o Framework
+
+O EmDash é construído propositalmente para o Astro. Essa integração estreita permite consultas com segurança de tipos, cache em nível de componente e pré-visualização integrada.
+
+## Capacidades Principais
+
+<CardGrid>
+	<Card title="Implantação Única" icon="rocket">
+		Conteúdo e frontend são implantados juntos. Uma base de código, uma implantação, um sistema para gerenciar.
+	</Card>
+	<Card title="Segurança de Tipos" icon="approve-check">
+		O esquema reside no banco de dados. Os tipos TypeScript fluem do banco de dados para o template com
+		autocompletar total.
+	</Card>
+	<Card title="Atualizações ao Vivo" icon="star">
+		Construído sobre as Coleções de Conteúdo ao Vivo do Astro. As alterações de conteúdo aparecem instantaneamente — sem necessidade de
+		reconstruções.
+	</Card>
+	<Card title="Portabilidade para Nuvem" icon="setting">
+		Executa no Cloudflare Workers com D1 e R2, e também funciona com Node.js, SQLite e qualquer
+		armazenamento compatível com S3.
+	</Card>
+</CardGrid>
+
+## Como Ele Se Compara
+
+Diferentes abordagens de CMS atendem a diferentes necessidades:
+
+| Aspecto              | CMS Tradicional  | CMS Headless    | EmDash              |
+| ------------------- | ---------------- | --------------- | --------------------- |
+| **Arquitetura**    | Monolítica       | Desacoplada       | Integrada com Astro |
+| **Edição de conteúdo** | Admin integrado   | Admin integrado  | Admin integrado        |
+| **Frontend**        | Temas/templates | Traga o seu próprio  | Componentes Astro      |
+| **Implantação**      | Servidor único    | CMS + frontend  | Implantação única     |
+| **Segurança de tipos**     | Em tempo de execução          | Tipos de API       | TypeScript completo       |
+| **Atualizações de conteúdo** | Imediatas        | Webhook/reconstrução | Imediatas (SSR)       |
+| **Modelo de plugin**    | Mesmo processo     | Extensões de API  | Isolado com hooks  |
+
+## Implantação no Cloudflare
+
+O EmDash roda em qualquer plataforma com SQLite e armazenamento compatível com S3. Ele também suporta recursos específicos do Cloudflare:
+
+- **D1** — SQLite na borda com replicação automática
+- **R2** — Armazenamento compatível com S3 sem taxas de saída
+- **Workers** — Implantação global com inicializações rápidas
+
+## Migração de Plugins
+
+O EmDash fornece ferramentas para ajudar na migração da funcionalidade de plugins do WordPress:
+
+- **Mapeamento de conceitos** — Hooks, filtros e APIs do WordPress mapeiam para equivalentes do EmDash
+- **Guias de migração** — Documentação para portar padrões específicos de plugins
+- **Porte assistido por IA** — Documentação estruturada para ajudar ferramentas de IA a gerar plugins do EmDash a partir de código de plugins do WordPress
+
+Plugins complexos ainda precisam de revisão humana, mas para plugins simples, os guias de migração reduzem o esforço de porte.
+
+## Quando Usar o EmDash
+
+**O EmDash é projetado para:**
+
+- Novos projetos Astro que precisam de um CMS
+- Migrações do WordPress onde você deseja ferramentas modernas
+- Sites com editores de conteúdo que não devem tocar no código
+- Projetos implantando no Cloudflare
+- Sites onde a segurança de tipos e a experiência do desenvolvedor importam
+
+**O EmDash pode não ser ideal para:**
+
+- Projetos não-Astro (é fortemente acoplado ao Astro)
+- E-commerce (recursos na escala do WooCommerce ainda não estão disponíveis)
+- Arquiteturas headless existentes com as quais você está satisfeito
+- Projetos que exigem o ecossistema específico de plugins do WordPress
+
+## Comece Agora
+
+<CardGrid>
+	<Card title="Início Rápido" icon="rocket">
+		[Crie seu primeiro site](/pt/getting-started/) em menos de 5 minutos.
+	</Card>
+	<Card title="Guia de Migração" icon="right-arrow">
+		[Migre do WordPress](/pt/migration/from-wordpress/) com importação de conteúdo e mapeamento de conceitos.
+	</Card>
+</CardGrid>
+
+## Leitura Adicional
+
+- [O Que É o EmDash?](/pt/what-is-emdash/)
+- [Melhor CMS para Astro](/pt/best-astro-cms/)
+- [EmDash vs WordPress](/pt/emdash-vs-wordpress/)

@@ -1,0 +1,714 @@
+---
+title: フックリファレンス
+description: EmDashの機能を拡張するためのプラグインフック。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+フックを使用すると、プラグインはコンテンツ、メディア、メール、コメント、ページのライフサイクルにおける特定のポイントで、EmDashの動作をインターセプトおよび変更できます。
+
+## フック概要
+
+| フック                    | トリガー                               | 変更可能          | 排他的 |
+| ----------------------- | ------------------------------------- | ----------------- | --------- |
+| `content:beforeSave`    | コンテンツ保存前               | コンテンツデータ      | いいえ        |
+| `content:afterSave`     | コンテンツ保存後                | なし           | いいえ        |
+| `content:beforeDelete`  | コンテンツ削除前             | キャンセル可能        | いいえ        |
+| `content:afterDelete`   | コンテンツ削除後              | なし           | いいえ        |
+| `media:beforeUpload`    | ファイルアップロード前               | ファイルメタデータ     | いいえ        |
+| `media:afterUpload`     | ファイルアップロード後                | なし           | いいえ        |
+| `cron`                  | スケジュールタスク実行時                  | なし           | いいえ        |
+| `email:beforeSend`      | メール配信前                 | メッセージ、キャンセル可能 | いいえ      |
+| `email:deliver`         | トランスポート経由でのメール配信           | なし           | はい       |
+| `email:afterSend`       | メール配信成功後       | なし           | いいえ        |
+| `comment:beforeCreate`  | コメント保存前              | コメント、キャンセル可能 | いいえ      |
+| `comment:moderate`      | コメント承認ステータス決定        | ステータス            | はい       |
+| `comment:afterCreate`   | コメント保存後               | なし           | いいえ        |
+| `comment:afterModerate` | 管理者がコメントステータス変更後    | なし           | いいえ        |
+| `page:metadata`         | 公開ページヘッドレンダリング時            | タグ追加   | いいえ        |
+| `page:fragments`        | 公開ページボディレンダリング時            | スクリプト挿入    | いいえ        |
+| `plugin:install`        | プラグイン初回インストール時        | なし           | いいえ        |
+| `plugin:activate`       | プラグイン有効化時                | なし           | いいえ        |
+| `plugin:deactivate`     | プラグイン無効化時               | なし           | いいえ        |
+| `plugin:uninstall`      | プラグイン削除時                | なし           | いいえ        |
+
+## コンテンツフック
+
+### `content:beforeSave`
+
+コンテンツがデータベースに保存される前に実行されます。コンテンツの検証、変換、または拡充に使用します。
+
+```ts
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "my-plugin",
+	version: "1.0.0",
+	hooks: {
+		"content:beforeSave": async (event, ctx) => {
+			const { content, collection, isNew } = event;
+
+			// タイムスタンプを追加
+			if (isNew) {
+				content.createdBy = "system";
+			}
+			content.modifiedAt = new Date().toISOString();
+
+			// 変更されたコンテンツを返す
+			return content;
+		},
+	},
+});
+```
+
+#### イベント
+
+```ts
+interface ContentHookEvent {
+	content: Record<string, unknown>; // Content data
+	collection: string; // Collection slug
+	isNew: boolean; // True for creates, false for updates
+}
+```
+
+#### 戻り値
+
+- 変更されたコンテンツオブジェクトを返して変更を適用
+- `void` を返して変更せずに通過
+
+### `content:afterSave`
+
+コンテンツが保存された後に実行されます。通知、キャッシュ無効化、外部同期などの副作用に使用します。
+
+```ts
+hooks: {
+  "content:afterSave": async (event, ctx) => {
+    const { content, collection, isNew } = event;
+
+    if (collection === "posts" && content.status === "published") {
+      // 外部サービスに通知
+      await ctx.http?.fetch("https://api.example.com/notify", {
+        method: "POST",
+        body: JSON.stringify({ postId: content.id }),
+      });
+    }
+  },
+}
+```
+
+#### 戻り値
+
+戻り値は期待されていません。
+
+### `content:beforeDelete`
+
+コンテンツが削除される前に実行されます。削除の検証または防止に使用します。
+
+```ts
+hooks: {
+  "content:beforeDelete": async (event, ctx) => {
+    const { id, collection } = event;
+
+    // 保護されたコンテンツの削除を防止
+    const item = await ctx.content?.get(collection, id);
+    if (item?.data.protected) {
+      return false; // Cancel deletion
+    }
+
+    // 削除を許可
+    return true;
+  },
+}
+```
+
+#### イベント
+
+```ts
+interface ContentDeleteEvent {
+	id: string; // Entry ID
+	collection: string; // Collection slug
+}
+```
+
+#### 戻り値
+
+- `false` を返して削除をキャンセル
+- `true` または `void` を返して許可
+
+### `content:afterDelete`
+
+コンテンツが削除された後に実行されます。クリーンアップタスクに使用します。
+
+```ts
+hooks: {
+  "content:afterDelete": async (event, ctx) => {
+    const { id, collection } = event;
+
+    // 関連データをクリーンアップ
+    await ctx.storage.relatedItems.delete(`${collection}:${id}`);
+  },
+}
+```
+
+## メディアフック
+
+### `media:beforeUpload`
+
+ファイルがアップロードされる前に実行されます。ファイルの検証、名前変更、または拒否に使用します。
+
+```ts
+hooks: {
+  "media:beforeUpload": async (event, ctx) => {
+    const { file } = event;
+
+    // 10MBを超えるファイルを拒否
+    if (file.size > 10 * 1024 * 1024) {
+      throw new Error("File too large");
+    }
+
+    // ファイル名を変更
+    return {
+      name: `${Date.now()}-${file.name}`,
+      type: file.type,
+      size: file.size,
+    };
+  },
+}
+```
+
+#### イベント
+
+```ts
+interface MediaUploadEvent {
+	file: {
+		name: string; // Original filename
+		type: string; // MIME type
+		size: number; // Size in bytes
+	};
+}
+```
+
+#### 戻り値
+
+- 変更されたファイルメタデータを返して変更を適用
+- `void` を返して変更せずに通過
+- 例外をスローしてアップロードを拒否
+
+### `media:afterUpload`
+
+ファイルがアップロードされた後に実行されます。処理、サムネイル作成、またはメタデータ抽出に使用します。
+
+```ts
+hooks: {
+  "media:afterUpload": async (event, ctx) => {
+    const { media } = event;
+
+    if (media.mimeType.startsWith("image/")) {
+      // 画像メタデータを保存
+      await ctx.kv.set(`media:${media.id}:analyzed`, {
+        processedAt: new Date().toISOString(),
+      });
+    }
+  },
+}
+```
+
+#### イベント
+
+```ts
+interface MediaAfterUploadEvent {
+	media: {
+		id: string;
+		filename: string;
+		mimeType: string;
+		size: number | null;
+		url: string;
+		createdAt: string;
+	};
+}
+```
+
+## ライフサイクルフック
+
+### `plugin:install`
+
+プラグインが初めてインストールされたときに実行されます。初期設定、ストレージコレクションの作成、またはデータのシードに使用します。
+
+```ts
+hooks: {
+  "plugin:install": async (event, ctx) => {
+    // Initialize default settings
+    await ctx.kv.set("settings:enabled", true);
+    await ctx.kv.set("settings:threshold", 100);
+
+    ctx.log.info("プラグインが正常にインストールされました");
+  },
+}
+```
+
+### `plugin:activate`
+
+プラグインが有効化されたとき（インストール後または再有効化時）に実行されます。
+
+```ts
+hooks: {
+  "plugin:activate": async (event, ctx) => {
+    ctx.log.info("Plugin activated");
+  },
+}
+```
+
+### `plugin:deactivate`
+
+プラグインが無効化されたときに実行されます。
+
+```ts
+hooks: {
+  "plugin:deactivate": async (event, ctx) => {
+    ctx.log.info("Plugin deactivated");
+  },
+}
+```
+
+### `plugin:uninstall`
+
+プラグインが削除されたときに実行されます。クリーンアップに使用します。
+
+```ts
+hooks: {
+  "plugin:uninstall": async (event, ctx) => {
+    const { deleteData } = event;
+
+    if (deleteData) {
+      // すべてのプラグインデータをクリーンアップ
+      const items = await ctx.kv.list("settings:");
+      for (const { key } of items) {
+        await ctx.kv.delete(key);
+      }
+    }
+
+    ctx.log.info("プラグインがアンインストールされました");
+  },
+}
+```
+
+#### イベント
+
+```ts
+interface UninstallEvent {
+	deleteData: boolean; // User chose to delete data
+}
+```
+
+## Cronフック
+
+### `cron`
+
+スケジュールされたタスクが実行されるときに発火します。`ctx.cron.schedule()` でタスクをスケジュールします。
+
+```ts
+hooks: {
+  "cron": async (event, ctx) => {
+    if (event.name === "daily-sync") {
+      const data = await ctx.http?.fetch("https://api.example.com/data");
+      ctx.log.info("Sync complete");
+    }
+  },
+}
+```
+
+#### イベント
+
+```ts
+interface CronEvent {
+	name: string;
+	data?: Record<string, unknown>;
+	scheduledAt: string;
+}
+```
+
+## メールフック
+
+メールフックはパイプラインを形成します: `email:beforeSend` → `email:deliver` → `email:afterSend`。
+
+### `email:beforeSend`
+
+**機能:** `email:intercept`
+
+配信前に実行されるミドルウェアフック。メッセージの変換または配信キャンセルを行います。
+
+```ts
+hooks: {
+  "email:beforeSend": async (event, ctx) => {
+	    // すべてのメールにフッターを追加
+    return {
+      ...event.message,
+	      text: event.message.text + "\n\n—私のサイトから送信",
+    };
+
+    // または false を返して配信をキャンセル
+  },
+}
+```
+
+#### イベント
+
+```ts
+interface EmailBeforeSendEvent {
+	message: { to: string; subject: string; text: string; html?: string };
+	source: string;
+}
+```
+
+#### 戻り値
+
+- 変更されたメッセージを返して変換
+- `false` を返して配信をキャンセル
+- `void` を返して変更せずに通過
+
+### `email:deliver`
+
+**機能:** `email:provide` | **排他的:** はい
+
+トランスポートプロバイダー。メールを配信できるプラグインは1つのみです。メールサービスを介して実際にメッセージを送信する責任があります。
+
+```ts
+hooks: {
+  "email:deliver": {
+    exclusive: true,
+    handler: async (event, ctx) => {
+      await sendViaSES(event.message);
+    },
+  },
+}
+```
+
+### `email:afterSend`
+
+**機能:** `email:intercept`
+
+配信成功後のファイアアンドフォーゲットフック。エラーは記録されますが伝播しません。
+
+```ts
+hooks: {
+  "email:afterSend": async (event, ctx) => {
+    await ctx.kv.set(`email:log:${Date.now()}`, {
+      to: event.message.to,
+      subject: event.message.subject,
+    });
+  },
+}
+```
+
+## コメントフック
+
+コメントフックはパイプラインを形成します: `comment:beforeCreate` → `comment:moderate` → `comment:afterCreate`。`comment:afterModerate`フックは、管理者がコメントのステータスを変更したときに個別に発火します。
+
+### `comment:beforeCreate`
+
+**権限:** `read:users`
+
+コメントが保存される前のミドルウェアフック。コメントの拡充、検証、または拒否を行います。
+
+```ts
+hooks: {
+  "comment:beforeCreate": async (event, ctx) => {
+    // Reject comments with links
+    if (event.comment.body.includes("http")) {
+      return false;
+    }
+  },
+}
+```
+
+#### イベント
+
+```ts
+interface CommentBeforeCreateEvent {
+	comment: {
+		collection: string;
+		contentId: string;
+		parentId: string | null;
+		authorName: string;
+		authorEmail: string;
+		authorUserId: string | null;
+		body: string;
+		ipHash: string | null;
+		userAgent: string | null;
+	};
+	metadata: Record<string, unknown>;
+}
+```
+
+#### 戻り値
+
+- 変更したイベントを返すと変換されます
+- `false` を返すと拒否されます
+- `void` を返すと通過します
+
+### `comment:moderate`
+
+**権限:** `read:users` | **排他的:** はい
+
+コメントが承認、保留、スパムのいずれかを決定します。アクティブなモデレーションプロバイダーは一つだけです。
+
+```ts
+hooks: {
+  "comment:moderate": {
+    exclusive: true,
+    handler: async (event, ctx) => {
+      const score = await checkSpam(event.comment);
+      return {
+        status: score > 0.8 ? "spam" : score > 0.5 ? "pending" : "approved",
+        reason: `Spam score: ${score}`,
+      };
+    },
+  },
+}
+```
+
+#### イベント
+
+```ts
+interface CommentModerateEvent {
+	comment: { /* same as beforeCreate */ };
+	metadata: Record<string, unknown>;
+	collectionSettings: {
+		commentsEnabled: boolean;
+		commentsModeration: "all" | "first_time" | "none";
+		commentsClosedAfterDays: number;
+		commentsAutoApproveUsers: boolean;
+	};
+	priorApprovedCount: number;
+}
+```
+
+#### 戻り値
+
+```ts
+{ status: "approved" | "pending" | "spam"; reason?: string }
+```
+
+### `comment:afterCreate`
+
+**権限:** `read:users`
+
+コメントが保存された後のファイアアンドフォーゲットフック。通知などに使用します。
+
+```ts
+hooks: {
+  "comment:afterCreate": async (event, ctx) => {
+    if (event.comment.status === "approved") {
+      await ctx.email?.send({
+        to: event.contentAuthor?.email,
+        subject: `New comment on "${event.content.title}"`,
+        text: `${event.comment.authorName} commented: ${event.comment.body}`,
+      });
+    }
+  },
+}
+```
+
+### `comment:afterModerate`
+
+**権限:** `read:users`
+
+管理者が手動でコメントのステータスを変更したときのファイアアンドフォーゲットフック。
+
+#### イベント
+
+```ts
+interface CommentAfterModerateEvent {
+	comment: { id: string; /* ... */ };
+	previousStatus: string;
+	newStatus: string;
+	moderator: { id: string; name: string | null };
+}
+```
+
+## ページフック
+
+ページフックは公開ページをレンダリングするときに実行されます。プラグインがメタデータやスクリプトを注入できるようにします。
+
+### `page:metadata`
+
+**権限:** `page:inject`
+
+メタタグ、Open Graphプロパティ、JSON-LD構造化データ、またはリンクタグをページのheadに追加します。
+
+```ts
+hooks: {
+  "page:metadata": async (event, ctx) => {
+    return [
+      { kind: "meta", name: "generator", content: "EmDash" },
+      { kind: "property", property: "og:site_name", content: event.page.siteName },
+      { kind: "jsonld", graph: { "@type": "WebSite", name: event.page.siteName } },
+    ];
+  },
+}
+```
+
+#### 貢献タイプ
+
+```ts
+type PageMetadataContribution =
+	| { kind: "meta"; name: string; content: string; key?: string }
+	| { kind: "property"; property: string; content: string; key?: string }
+	| { kind: "link"; rel: string; href: string; hreflang?: string; key?: string }
+	| { kind: "jsonld"; id?: string; graph: Record<string, unknown> };
+```
+
+`key`フィールドは貢献の重複排除を行います — 特定のキーを持つ最後の貢献のみが使用されます。
+
+### `page:fragments`
+
+**権限:** `page:inject`
+
+スクリプトやHTMLをページに注入します。信頼された（ネイティブ）プラグインのみが利用できます。
+
+```ts
+hooks: {
+  "page:fragments": async (event, ctx) => {
+    return [
+      {
+        kind: "external-script",
+        placement: "body:end",
+        src: "https://analytics.example.com/script.js",
+        async: true,
+      },
+      {
+        kind: "inline-script",
+        placement: "head",
+        code: `window.siteId = "abc123";`,
+      },
+    ];
+  },
+}
+```
+
+#### 貢献タイプ
+
+```ts
+type PageFragmentContribution =
+	| {
+			kind: "external-script";
+			placement: "head" | "body:start" | "body:end";
+			src: string;
+			async?: boolean;
+			defer?: boolean;
+			attributes?: Record<string, string>;
+			key?: string;
+		}
+	| {
+			kind: "inline-script";
+			placement: "head" | "body:start" | "body:end";
+			code: string;
+			attributes?: Record<string, string>;
+			key?: string;
+		}
+	| {
+			kind: "html";
+			placement: "head" | "body:start" | "body:end";
+			html: string;
+			key?: string;
+		};
+```
+
+## フック設定
+
+フックはハンドラー関数または設定オブジェクトのいずれかを受け入れます:
+
+```ts
+hooks: {
+  // Simple handler
+  "content:afterSave": async (event, ctx) => { ... },
+
+  // 設定付き
+  "content:beforeSave": {
+    priority: 50,        // 低い方が先に実行される（デフォルト: 100）
+    timeout: 10000,      // 最大実行時間（ミリ秒）（デフォルト: 5000）
+    dependencies: [],    // これらのプラグインの後に実行
+    errorPolicy: "abort", // "continue" または "abort"（デフォルト）
+    handler: async (event, ctx) => { ... },
+  },
+}
+```
+
+### 設定オプション
+
+| オプション         | 型         | デフォルト   | 説明                                          |
+| -------------- | ---------- | --------- | ---------------------------------------------------- |
+| `priority`     | `number`   | `100`     | 実行順序（低い = 早い）                    |
+| `timeout`      | `number`   | `5000`    | 最大実行時間（ミリ秒）                   |
+| `dependencies` | `string[]` | `[]`      | 先に実行する必要があるプラグインID                       |
+| `errorPolicy`  | `string`   | `"abort"` | `"continue"` でエラーを無視                        |
+| `exclusive`    | `boolean`  | `false`   | 一つのプラグインのみがアクティブプロバイダーになれる（`email:deliver`、`comment:moderate`などのプロバイダーパターンフック用） |
+
+## プラグインコンテキスト
+
+すべてのフックは、プラグインAPIへのアクセス権を持つコンテキストオブジェクトを受け取ります:
+
+```ts
+interface PluginContext {
+	plugin: { id: string; version: string };
+	storage: PluginStorage;
+	kv: KVAccess;
+	content?: ContentAccess;
+	media?: MediaAccess;
+	http?: HttpAccess;
+	log: LogAccess;
+	site: { name: string; url: string; locale: string };
+	url(path: string): string;
+	users?: UserAccess;
+	cron?: CronAccess;
+	email?: EmailAccess;
+}
+```
+
+権限要件とメソッドの詳細については、[プラグイン概要 — プラグインコンテキスト](/ja/plugins/overview/#plugin-context)を参照してください。
+
+<Aside>
+	コンテキストAPIはプラグインの権限によって制限されます。必要な権限はプラグイン
+	定義で宣言してください。
+</Aside>
+
+## エラーハンドリング
+
+フック内のエラーは記録され、`errorPolicy`に基づいて処理されます:
+
+- `"abort"`（デフォルト） — 実行を停止し、適用可能な場合はトランザクションをロールバック
+- `"continue"` — エラーを記録し、次のフックに続行
+
+```ts
+hooks: {
+  "content:beforeSave": {
+    errorPolicy: "continue", // Don't block save if this fails
+    handler: async (event, ctx) => {
+      try {
+        await ctx.http?.fetch("https://api.example.com/validate");
+      } catch (error) {
+        ctx.log.warn("Validation service unavailable", error);
+      }
+    },
+  },
+}
+```
+
+## 実行順序
+
+フックは次の順序で実行されます:
+
+1. `priority`でソート（昇順）
+2. `dependencies`を持つプラグインは、その依存関係の後に実行
+3. 同じ優先度内では、順序は決定的ですが未指定
+
+```ts
+// This runs first (priority 10)
+{ priority: 10, handler: ... }
+
+// これは2番目に実行される（優先度 50）
+{ priority: 50, handler: ... }
+
+// これは最後に実行される（デフォルト優先度 100）
+{ handler: ... }
+```

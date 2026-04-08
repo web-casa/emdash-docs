@@ -1,0 +1,48 @@
+---
+title: WordPress to Astro with EmDash
+description: Understand the WordPress to Astro migration path with EmDash, including why teams consider it, what changes, and how to approach the move safely.
+lastUpdated: 2026-04-07
+sidebar:
+  label: WordPress to Astro
+---
+
+Moving from WordPress to Astro usually raises two separate questions:
+
+1. How do we modernize the frontend?
+2. How do we keep a usable CMS for editors?
+
+EmDash is interesting because it addresses both at once. Astro becomes the application and rendering layer, while EmDash provides the content management workflow that WordPress teams are used to.
+
+## Why Teams Consider This Move
+
+- Better control over frontend architecture
+- A more modern TypeScript-based development workflow
+- The ability to keep editor-friendly publishing concepts
+- Fewer compromises than running Astro with a completely separate CMS
+
+## What Changes in Practice
+
+- Themes become Astro layouts and components
+- `WP_Query` becomes EmDash content query functions
+- WordPress post types and taxonomies map to EmDash collections and taxonomy structures
+- Content import happens through EmDash’s migration tools instead of manual copy-paste
+
+## What Usually Stays Familiar
+
+- Editors still work with a CMS UI
+- Posts, pages, taxonomies, media, and navigation remain recognizable concepts
+- Migration planning still revolves around content, redirects, media, and taxonomy integrity
+
+## Recommended Migration Order
+
+1. Evaluate EmDash with a pilot Astro project
+2. Review [EmDash vs WordPress](/emdash-vs-wordpress/) and [What Is EmDash?](/what-is-emdash/)
+3. Test content import on a representative WordPress export
+4. Validate redirects, media handling, and custom field mapping
+5. Move one smaller site or section before committing to a large migration
+
+## Continue With
+
+- [Migrate from WordPress to EmDash](/migration/from-wordpress/)
+- [EmDash for WordPress Developers](/coming-from/wordpress/)
+- [FAQ](/faq/)

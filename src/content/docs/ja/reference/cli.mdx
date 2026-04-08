@@ -1,0 +1,624 @@
+---
+title: CLI リファレンス
+description: EmDash CMS のコマンドラインインターフェース。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash CLIは、EmDash CMSインスタンスの管理 — データベース設定、型生成、コンテンツCRUD、スキーマ管理、メディアなど — のためのコマンドを提供します。
+
+## インストール
+
+CLIは`emdash`パッケージに含まれています：
+
+```bash
+npm install emdash
+```
+
+コマンドは`npx emdash`で実行するか、`package.json`にスクリプトを追加します。バイナリは簡潔さのために`em`としても利用可能です。
+
+## 認証
+
+実行中のEmDashインスタンスと通信するコマンド（`init`、`seed`、`export-seed`、`auth secret`を除くすべて）は、以下の順序で認証を解決します：
+
+1. **`--token`フラグ** — コマンドラインでの明示的なトークン
+2. **`EMDASH_TOKEN`環境変数**
+3. **保存された認証情報** `~/.config/emdash/auth.json`から（`emdash login`で保存）
+4. **開発バイパス** — URLがlocalhostでトークンが利用できない場合、開発バイパスエンドポイントを介して自動的に認証
+
+ほとんどのコマンドは`--url`（デフォルト`http://localhost:4321`）と`--token`フラグを受け付けます。ローカルの開発サーバーを対象とする場合、トークンは必要ありません。
+
+## 共通フラグ
+
+これらのフラグはすべてのリモートコマンドで利用可能です：
+
+| フラグ      | エイリアス | 説明                 | デフォルト                  |
+| --------- | ----- | --------------------------- | ------------------------ |
+| `--url`   | `-u`  | EmDashインスタンスURL       | `http://localhost:4321`  |
+| `--token` | `-t`  | 認証トークン                  | 環境変数/保存済み認証情報から    |
+| `--json`  |       | JSONとして出力（パイプ用） | TTYから自動検出   |
+
+## 出力
+
+標準出力がTTYの場合、CLIはconsolaで結果を整形表示します。パイプされた場合や`--json`が設定されている場合、標準出力に生のJSONを出力します — `jq`や他のツールに適しています。
+
+## コマンド
+
+### `emdash init`
+
+コアスキーマとオプションのテンプレートデータでデータベースを初期化します。
+
+```bash
+npx emdash init [options]
+```
+
+#### オプション
+
+| オプション       | エイリアス | 説明            | デフォルト           |
+| ------------ | ----- | ---------------------- | ----------------- |
+| `--database` | `-d`  | データベースファイルパス     | `./data.db`       |
+| `--cwd`      |       | 作業ディレクトリ      | カレントディレクトリ  |
+| `--force`    | `-f`  | スキーマとシードを再実行 | `false`           |
+
+#### 動作
+
+1. `package.json`から`emdash`設定を読み取る
+2. 必要に応じてデータベースファイルを作成
+3. コアマイグレーションを実行（システムテーブルを作成）
+4. 設定されている場合、テンプレート`schema.sql`を実行
+5. 設定されている場合、テンプレート`seed.sql`を実行
+
+<Aside>
+	データベースにすでにコレクションが含まれている場合、`init`は`--force`が使用されない限りスキーマとシードをスキップします。
+</Aside>
+
+### `emdash dev`
+
+自動データベース設定で開発サーバーを起動します。
+
+```bash
+npx emdash dev [options]
+```
+
+#### オプション
+
+| オプション       | エイリアス | 説明                              | デフォルト           |
+| ------------ | ----- | ---------------------------------------- | ----------------- |
+| `--database` | `-d`  | データベースファイルパス                       | `./data.db`       |
+| `--types`    | `-t`  | 起動前にリモートから型を生成 | `false`         |
+| `--port`     | `-p`  | 開発サーバーポート                          | `4321`            |
+| `--cwd`      |       | 作業ディレクトリ                        | カレントディレクトリ  |
+
+#### 例
+
+```bash
+# Start dev server
+npx emdash dev
+
+# カスタムポート
+npx emdash dev --port 3000
+
+# 起動前にリモートから型を生成
+npx emdash dev --types
+```
+
+#### 動作
+
+1. 保留中のデータベースマイグレーションをチェックして実行
+2. `--types`が設定されている場合、リモートインスタンスからTypeScript型を生成（URLは`EMDASH_URL`環境変数または`package.json`の`emdash.url`から）
+3. `EMDASH_DATABASE_URL`を設定してAstro開発サーバーを起動
+
+### `emdash types`
+
+実行中のEmDashインスタンスのスキーマからTypeScript型を生成します。
+
+```bash
+npx emdash types [options]
+```
+
+#### オプション
+
+| オプション     | エイリアス | 説明              | デフォルト              |
+| ---------- | ----- | ------------------------ | -------------------- |
+| `--url`    | `-u`  | EmDashインスタンスURL    | `http://localhost:4321` |
+| `--token`  | `-t`  | 認証トークン               | 環境変数/保存済み認証情報から |
+| `--output` | `-o`  | 型の出力パス    | `.emdash/types.ts` |
+| `--cwd`    |       | 作業ディレクトリ        | カレントディレクトリ    |
+
+#### 例
+
+```bash
+# Generate types from local dev server
+npx emdash types
+
+# リモートインスタンスから生成
+npx emdash types --url https://my-site.pages.dev
+
+# カスタム出力パス
+npx emdash types --output src/types/emdash.ts
+```
+
+#### 動作
+
+1. インスタンスからスキーマを取得
+2. TypeScript型定義を生成
+3. 出力ファイルに型を書き込み
+4. 参照用に`schema.json`を隣接して書き込み
+
+### `emdash login`
+
+OAuth Device Flowを使用してEmDashインスタンスにログインします。
+
+```bash
+npx emdash login [options]
+```
+
+#### オプション
+
+| オプション  | エイリアス | 説明           | デフォルト                |
+| ------- | ----- | --------------------- | ---------------------- |
+| `--url` | `-u`  | EmDashインスタンスURL | `http://localhost:4321` |
+
+#### 動作
+
+1. インスタンスから認証エンドポイントを検出
+2. localhostで認証が設定されていない場合、自動的に開発バイパスを使用
+3. それ以外の場合、OAuth Device Flowを開始 — コードを表示しブラウザを開く
+4. 認可をポーリングし、認証情報を`~/.config/emdash/auth.json`に保存
+
+保存された認証情報は、同じインスタンスを対象とするすべての後続コマンドで自動的に使用されます。
+
+### `emdash logout`
+
+ログアウトして保存された認証情報を削除します。
+
+```bash
+npx emdash logout [options]
+```
+
+#### オプション
+
+| オプション  | エイリアス | 説明           | デフォルト                |
+| ------- | ----- | --------------------- | ---------------------- |
+| `--url` | `-u`  | EmDashインスタンスURL | `http://localhost:4321` |
+
+### `emdash whoami`
+
+現在認証されているユーザーを表示します。
+
+```bash
+npx emdash whoami [options]
+```
+
+#### オプション
+
+| オプション    | エイリアス | 説明           | デフォルト                |
+| --------- | ----- | --------------------- | ---------------------- |
+| `--url`   | `-u`  | EmDashインスタンスURL | `http://localhost:4321` |
+| `--token` | `-t`  | 認証トークン            | 環境変数/保存済み認証情報から  |
+| `--json`  |       | JSONとして出力        |                        |
+
+メールアドレス、名前、ロール、認証方法、インスタンスURLを表示します。
+
+### `emdash content`
+
+コンテンツアイテムを管理します。すべてのサブコマンドは`EmDashClient`を介してリモートAPIを使用します。
+
+#### `content list <collection>`
+
+```bash
+npx emdash content list posts
+npx emdash content list posts --status published --limit 10
+```
+
+| オプション     | 説明          |
+| ---------- | -------------------- |
+| `--status` | ステータスでフィルタ     |
+| `--limit`  | 最大アイテム数        |
+| `--cursor` | ページネーションカーソル    |
+
+#### `content get <collection> <id>`
+
+```bash
+npx emdash content get posts 01ABC123
+npx emdash content get posts 01ABC123 --raw
+```
+
+| オプション | 説明                                      |
+| ------- | ------------------------------------------------ |
+| `--raw` | 生のPortable Textを返す（マークダウン変換をスキップ） |
+
+レスポンスには `_rev` トークンが含まれます — `content update` に渡して、上書きする前に現在の状態を確認したことを証明します。
+
+#### `content create <collection>`
+
+```bash
+npx emdash content create posts --data '{"title": "Hello"}'
+npx emdash content create posts --file post.json --slug hello-world
+cat post.json | npx emdash content create posts --stdin
+```
+
+| オプション     | 説明                    |
+| ---------- | ------------------------------ |
+| `--data`   | コンテンツデータを含むJSON文字列  |
+| `--file`   | JSONファイルからデータを読み込む     |
+| `--stdin`  | 標準入力からデータを読み込む           |
+| `--slug`   | コンテンツスラッグ                   |
+| `--status` | 初期ステータス（draft, published） |
+
+データは `--data`、`--file`、`--stdin` のうちのいずれか1つを介して提供してください。
+
+#### `content update <collection> <id>`
+
+書き込み前に読み取りが必要なファイルエディターのように — 現在の状態を確認したことを証明するために、事前の `get` から取得した `_rev` トークンを提供する必要があります。これにより、未確認の変更を誤って上書きすることを防ぎます。
+
+```bash
+# 1. Read the item, note the _rev
+npx emdash content get posts 01ABC123
+
+# 2. ステップ1の _rev を使用して更新
+npx emdash content update posts 01ABC123 \
+  --rev MToyMDI2LTAyLTE0... \
+  --data '{"title": "Updated"}'
+```
+
+| オプション   | 説明                            |
+| -------- | -------------------------------------- |
+| `--rev`  | `get` から取得したリビジョントークン（必須）   |
+| `--data` | コンテンツデータを含むJSON文字列          |
+| `--file` | JSONファイルからデータを読み込む             |
+
+アイテムが `get` 実行後に変更されている場合、サーバーは409 Conflictを返します — 再読み込みして再度試してください。
+
+#### `content delete <collection> <id>`
+
+```bash
+npx emdash content delete posts 01ABC123
+```
+
+コンテンツアイテムをソフト削除します（ゴミ箱に移動）。
+
+#### `content publish <collection> <id>`
+
+```bash
+npx emdash content publish posts 01ABC123
+```
+
+#### `content unpublish <collection> <id>`
+
+```bash
+npx emdash content unpublish posts 01ABC123
+```
+
+#### `content schedule <collection> <id>`
+
+```bash
+npx emdash content schedule posts 01ABC123 --at 2026-03-01T09:00:00Z
+```
+
+| オプション | 説明                     |
+| ------ | ------------------------------- |
+| `--at` | ISO 8601日時形式（必須）    |
+
+#### `content restore <collection> <id>`
+
+```bash
+npx emdash content restore posts 01ABC123
+```
+
+ゴミ箱にあるコンテンツアイテムを復元します。
+
+### `emdash schema`
+
+コレクションとフィールドを管理します。
+
+#### `schema list`
+
+```bash
+npx emdash schema list
+```
+
+すべてのコレクションを一覧表示します。
+
+#### `schema get <collection>`
+
+```bash
+npx emdash schema get posts
+```
+
+コレクションとそのすべてのフィールドを表示します。
+
+#### `schema create <collection>`
+
+```bash
+npx emdash schema create articles --label Articles
+npx emdash schema create articles --label Articles --label-singular Article --description "Blog articles"
+```
+
+| オプション             | 説明                     |
+| ------------------ | ------------------------------- |
+| `--label`          | コレクションラベル（必須）     |
+| `--label-singular` | 単数形ラベル                  |
+| `--description`    | コレクション説明          |
+
+#### `schema delete <collection>`
+
+```bash
+npx emdash schema delete articles
+npx emdash schema delete articles --force
+```
+
+| オプション    | 説明         |
+| --------- | ------------------- |
+| `--force` | 確認をスキップ   |
+
+`--force` が設定されていない限り、確認を求めます。
+
+#### `schema add-field <collection> <field>`
+
+```bash
+npx emdash schema add-field posts body --type portableText --label "Body Content"
+npx emdash schema add-field posts featured --type boolean --required
+```
+
+| オプション       | 説明                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| `--type`     | フィールドタイプ: string, text, number, integer, boolean, datetime, image, reference, portableText, json（必須） |
+| `--label`    | フィールドラベル（デフォルトはフィールドスラッグ）                                                             |
+| `--required` | フィールドが必須かどうか                                                                    |
+
+#### `schema remove-field <collection> <field>`
+
+```bash
+npx emdash schema remove-field posts featured
+```
+
+### `emdash media`
+
+メディアアイテムを管理します。
+
+#### `media list`
+
+```bash
+npx emdash media list
+npx emdash media list --mime image/png --limit 20
+```
+
+| オプション     | 説明              |
+| ---------- | ------------------------ |
+| `--mime`   | MIMEタイプでフィルタリング      |
+| `--limit`  | アイテム数          |
+| `--cursor` | ページネーションカーソル        |
+
+#### `media upload <file>`
+
+```bash
+npx emdash media upload ./photo.jpg
+npx emdash media upload ./photo.jpg --alt "A sunset" --caption "Taken in Bristol"
+```
+
+| オプション      | 説明    |
+| ----------- | -------------- |
+| `--alt`     | 代替テキスト       |
+| `--caption` | キャプションテキスト   |
+
+#### `media get <id>`
+
+```bash
+npx emdash media get 01MEDIA123
+```
+
+#### `media delete <id>`
+
+```bash
+npx emdash media delete 01MEDIA123
+```
+
+### `emdash search`
+
+コンテンツ全体で全文検索を実行します。
+
+```bash
+npx emdash search "hello world"
+npx emdash search "hello" --collection posts --limit 5
+```
+
+| オプション         | エイリアス | 説明          |
+| -------------- | ----- | -------------------- |
+| `--collection` | `-c`  | コレクションでフィルタリング |
+| `--limit`      | `-l`  | 最大結果数      |
+
+### `emdash taxonomy`
+
+タクソノミーとタームを管理します。
+
+#### `taxonomy list`
+
+```bash
+npx emdash taxonomy list
+```
+
+#### `taxonomy terms <name>`
+
+```bash
+npx emdash taxonomy terms categories
+npx emdash taxonomy terms tags --limit 50
+```
+
+| オプション     | エイリアス | 説明       |
+| ---------- | ----- | ----------------- |
+| `--limit`  | `-l`  | 最大ターム数     |
+| `--cursor` |       | ページネーションカーソル |
+
+#### `taxonomy add-term <taxonomy>`
+
+```bash
+npx emdash taxonomy add-term categories --name "Tech" --slug tech
+npx emdash taxonomy add-term categories --name "Frontend" --parent 01PARENT123
+```
+
+| オプション     | 説明                              |
+| ---------- | ---------------------------------------- |
+| `--name`   | タームラベル（必須）                    |
+| `--slug`   | タームスラッグ（デフォルトはスラッグ化された名前）   |
+| `--parent` | 親タームID（階層型タクソノミー用） |
+
+### `emdash menu`
+
+ナビゲーションメニューを管理します。
+
+#### `menu list`
+
+```bash
+npx emdash menu list
+```
+
+#### `menu get <name>`
+
+```bash
+npx emdash menu get primary
+```
+
+メニューとそのすべてのアイテムを返します。
+
+### `emdash seed`
+
+シードファイルをデータベースに適用します。このコマンドはローカルのSQLiteファイルに対して直接動作します（実行中のサーバーは不要です）。
+
+```bash
+npx emdash seed [path] [options]
+```
+
+#### 引数
+
+| 引数 | 説明       | デフォルト               |
+| -------- | ----------------- | --------------------- |
+| `path`   | シードファイルへのパス | `.emdash/seed.json` |
+
+#### オプション
+
+| Option             | Alias | Description                             | Default                     |
+| ------------------ | ----- | --------------------------------------- | --------------------------- |
+| `--database`       | `-d`  | データベースファイルパス                      | `./data.db`                 |
+| `--cwd`            |       | 作業ディレクトリ                       | カレントディレクトリ           |
+| `--validate`       |       | 検証のみ、適用しない              | `false`                     |
+| `--no-content`     |       | サンプルコンテンツをスキップ                     | `false`                     |
+| `--on-conflict`    |       | 競合処理: skip, update, error  | `skip`                      |
+| `--uploads-dir`    |       | メディアアップロード用ディレクトリ             | `.emdash/uploads`         |
+| `--media-base-url` |       | メディアファイルのベースURL                | `/_emdash/api/media/file` |
+| `--base-url`       |       | サイトのベースURL (絶対メディアURL用) |                             |
+
+#### シードファイルの解決
+
+コマンドは以下の順序でシードファイルを探します:
+
+1. 位置引数 (指定された場合)
+2. `.emdash/seed.json` (慣例)
+3. `package.json` の `emdash.seed` フィールドからのパス
+
+### `emdash export-seed`
+
+データベーススキーマとコンテンツをシードファイルとしてエクスポートします。ローカルのSQLiteファイルに対して直接動作します。
+
+```bash
+npx emdash export-seed [options] > seed.json
+```
+
+#### オプション
+
+| Option           | Alias | Description                                          | Default           |
+| ---------------- | ----- | ---------------------------------------------------- | ----------------- |
+| `--database`     | `-d`  | データベースファイルパス                                   | `./data.db`       |
+| `--cwd`          |       | 作業ディレクトリ                                    | カレントディレクトリ |
+| `--with-content` |       | コンテンツを含める (all またはカンマ区切りのコレクション) |                   |
+| `--no-pretty`    |       | JSONフォーマットを無効化                              | `false`           |
+
+#### 出力形式
+
+エクスポートされたシードファイルには以下が含まれます:
+
+- **設定**: サイトタイトル、タグライン、ソーシャルリンク
+- **コレクション**: フィールドを含むすべてのコレクション定義
+- **タクソノミー**: タクソノミー定義と用語
+- **メニュー**: アイテムを含むナビゲーションメニュー
+- **ウィジェットエリア**: ウィジェットエリアとウィジェット
+- **コンテンツ** (要求された場合): `$media` 参照と移植性のための `$ref:` 構文を含むエントリ
+
+### `emdash auth secret`
+
+デプロイメント用の安全な認証シークレットを生成します。
+
+```bash
+npx emdash auth secret
+```
+
+`EMDASH_AUTH_SECRET` に適したランダムなシークレットを出力します。
+
+## 生成されるファイル
+
+### `.emdash/types.ts`
+
+`emdash types` によって生成されるTypeScriptインターフェース:
+
+```ts
+// Generated by EmDash CLI
+// Do not edit manually - run `emdash types` to regenerate
+
+import type { PortableTextBlock } from "emdash";
+
+export interface Post {
+	id: string;
+	title: string;
+	content: PortableTextBlock[];
+	publishedAt: Date | null;
+}
+```
+
+### `.emdash/schema.json`
+
+ツーリング用の生のスキーマエクスポート:
+
+```json
+{
+  "version": "a1b2c3d4",
+  "collections": [
+    {
+      "slug": "posts",
+      "label": "Posts",
+      "fields": [...]
+    }
+  ]
+}
+```
+
+## 環境変数
+
+| Variable                  | Description                              |
+| ------------------------- | ---------------------------------------- |
+| `EMDASH_DATABASE_URL`   | データベースURL (`dev` によって自動的に設定) |
+| `EMDASH_TOKEN`          | リモート操作用の認証トークン          |
+| `EMDASH_URL`            | `types` および `dev --types` 用のデフォルトリモートURL |
+| `EMDASH_AUTH_SECRET`    | パスキー認証用のシークレット         |
+| `EMDASH_PREVIEW_SECRET` | プレビュートークン生成用のシークレット       |
+
+## パッケージスクリプト
+
+```json
+{
+	"scripts": {
+		"dev": "emdash dev",
+		"init": "emdash init",
+		"types": "emdash types",
+		"seed": "emdash seed",
+		"export-seed": "emdash export-seed",
+		"db:reset": "rm -f data.db && emdash init"
+	}
+}
+```
+
+## 終了コード
+
+| Code | Description                              |
+| ---- | ---------------------------------------- |
+| `0`  | 成功                                  |
+| `1`  | エラー (設定、ネットワーク、データベース) |

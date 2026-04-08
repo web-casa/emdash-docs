@@ -1,0 +1,337 @@
+---
+title: プレビューモード
+description: 公開前に下書きコンテンツの安全なプレビューを有効にします。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDashのプレビューシステムにより、編集者は安全で時間制限付きのURLを通じて未公開コンテンツを確認できます。プレビューリンクはHMAC-SHA256署名付きトークンを使用しており、レビュアーと共有しても下書きコンテンツ全体を公開することはありません。
+
+## 仕組み
+
+1. 管理者が下書き投稿のプレビューURLを生成します
+2. URLには有効期限付きの署名済み`_preview`クエリパラメータが含まれます
+3. EmDashのミドルウェアが自動的にトークンを検証し、リクエストコンテキストを設定します
+4. テンプレートコードは通常通り`getEmDashEntry()`を呼び出します — 下書きコンテンツが自動的に提供されます
+
+プレビューは**暗黙的**です。テンプレートコードはトークンを処理したりプレビューオプションを渡したりする必要はありません — ミドルウェアとクエリ関数が`AsyncLocalStorage`を通じてすべてを処理します。
+
+## プレビューの設定
+
+環境変数にプレビューシークレットを追加します：
+
+```bash title=".env"
+EMDASH_PREVIEW_SECRET="your-random-secret-key-here"
+```
+
+安全なランダム文字列を生成します。このシークレットはプレビュートークンの署名と検証に使用されます。
+
+以上です。既存のテンプレートはプレビューと自動的に連携します：
+
+```
+astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+
+// 特別なプレビュー処理は不要 — ミドルウェアが
+// _previewトークンを検出し、下書きコンテンツを自動的に提供します
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+{isPreview && (
+  <div class="preview-banner">
+    You are viewing a preview. This content is not published.
+  </div>
+)}
+
+<article>
+  <h1>{entry.data.title}</h1>
+</article>
+```
+
+`isPreview`フラグは、有効なプレビュートークン経由で下書きコンテンツが提供されている場合に`true`になります。
+
+## プレビューURLの生成
+
+`getPreviewUrl()`を使用してプレビューリンクを作成します：
+
+```ts
+import { getPreviewUrl } from "emdash";
+
+const previewUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	expiresIn: "1h",
+});
+// 戻り値: /posts/my-draft-post?_preview=eyJjaWQ...
+```
+
+絶対リンク用のベースURLを指定する場合：
+
+```ts
+const fullUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	baseUrl: "https://example.com",
+});
+// Returns: https://example.com/posts/my-draft-post?_preview=eyJjaWQ...
+```
+
+カスタムパスパターンを指定する場合：
+
+```ts
+const blogUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	pathPattern: "/blog/{id}",
+});
+// Returns: /blog/my-draft-post?_preview=eyJjaWQ...
+```
+
+## トークンの有効期限
+
+プレビューリンクの有効期間を制御します：
+
+```ts
+// Valid for 1 hour (default)
+await getPreviewUrl({ ..., expiresIn: "1h" });
+
+// 30分間有効
+await getPreviewUrl({ ..., expiresIn: "30m" });
+
+// 1日間有効
+await getPreviewUrl({ ..., expiresIn: "1d" });
+
+// 2週間有効
+await getPreviewUrl({ ..., expiresIn: "2w" });
+
+// 3600秒間有効
+await getPreviewUrl({ ..., expiresIn: 3600 });
+```
+
+対応単位：`s`（秒）、`m`（分）、`h`（時間）、`d`（日）、`w`（週）。
+
+## トークンの検証
+
+`verifyPreviewToken()`を使用して受信したプレビューリクエストを検証します：
+
+```ts
+import { verifyPreviewToken } from "emdash";
+
+// URLから（_previewクエリパラメータを抽出）
+const result = await verifyPreviewToken({
+	url: Astro.url,
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+});
+
+// またはトークンを直接指定
+const result = await verifyPreviewToken({
+	token: someTokenString,
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+});
+```
+
+結果はトークンが有効かどうかを示します：
+
+```ts
+if (result.valid) {
+	// Token is valid
+	console.log(result.payload.cid); // "posts:my-draft-post"
+	console.log(result.payload.exp); // Expiry timestamp
+	console.log(result.payload.iat); // Issued-at timestamp
+} else {
+	// Token is invalid
+	console.log(result.error);
+	// "none" - no token present
+	// "malformed" - token structure is invalid
+	// "invalid" - signature verification failed
+	// "expired" - token has expired
+}
+```
+
+## プレビューインジケーター
+
+コンテンツがプレビューされている場合に視覚的なインジケーターを表示できます。`getEmDashEntry`から返される`isPreview`フラグは、下書きコンテンツが提供されているタイミングを教えてくれます：
+
+```astro
+{isPreview && (
+  <div class="preview-banner" role="alert">
+    <strong>Preview</strong>
+ — You are viewing unpublished content.
+    <a href={Astro.url.pathname}>Exit preview</a>
+  </div>
+)}
+```
+
+<Aside type="tip">
+	ビジュアル編集を使用する認証済み編集者の場合、EmDashは編集/プレビューモードを示す
+	フローティングツールバーを自動的に挿入します。共有プレビューリンク用のカスタムプレビューバナーのみが必要です。
+</Aside>
+
+## ヘルパー関数
+
+### `isPreviewRequest(url)`
+
+URLにプレビュートークンが含まれているか確認します：
+
+```ts
+import { isPreviewRequest } from "emdash";
+
+if (isPreviewRequest(Astro.url)) {
+	// Handle preview request
+}
+```
+
+### `getPreviewToken(url)`
+
+URLからトークン文字列を抽出します：
+
+```ts
+import { getPreviewToken } from "emdash";
+
+const token = getPreviewToken(Astro.url);
+// トークン文字列またはnullを返します
+```
+
+### `parseContentId(contentId)`
+
+コンテンツIDをコレクションとIDに解析します：
+
+```ts
+import { parseContentId } from "emdash";
+
+const { collection, id } = parseContentId("posts:my-draft-post");
+// { collection: "posts", id: "my-draft-post" }
+```
+
+## トークン形式
+
+プレビュートークンはコンパクトな形式を使用します：`base64url(payload).base64url(signature)`
+
+ペイロードには以下が含まれます：
+
+- `cid` — `collection:id`形式のコンテンツID
+- `exp` — 有効期限タイムスタンプ（エポックからの秒数）
+- `iat` — 発行タイムスタンプ（エポックからの秒数）
+
+トークンはプレビューシークレットを使用したHMAC-SHA256で署名されます。
+
+<Aside type="caution">
+	`EMDASH_PREVIEW_SECRET`は安全に保管してください。このシークレットを持っている人は、
+	あらゆるコンテンツの有効なプレビュートークンを生成できます。
+</Aside>
+
+## 完全な例
+
+プレビューとビジュアル編集をサポートする完全なブログ投稿ページ：
+
+```
+astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import BaseLayout from "../../../layouts/Base.astro";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+
+// プレビューは自動的 — ミドルウェアがトークン検証を処理します
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+<BaseLayout title={entry.data.title}>
+  {isPreview && (
+    <div class="preview-banner" role="alert">
+      <strong>Preview</strong>
+ — This content is not published.
+    </div>
+  )}
+
+  <article {...entry.edit}>
+    <header>
+      <h1 {...entry.edit.title}>{entry.data.title}</h1>
+      {entry.data.publishedAt && (
+        <time datetime={entry.data.publishedAt.toISOString()}>
+          {entry.data.publishedAt.toLocaleDateString()}
+        </time>
+      )}
+      {isPreview && !entry.data.publishedAt && (
+        <span class="draft-indicator">Draft</span>
+      )}
+    </header>
+
+    <div class="content" {...entry.edit.content}>
+      <PortableText value={entry.data.content} />
+    </div>
+  </article>
+</BaseLayout>
+```
+
+`{...entry.edit}`と`{...entry.edit.title}`のスプレッドに注目 — これらは認証済み編集者のビジュアル編集を可能にする`data-emdash-ref`属性を追加します。本番環境では出力は生成されません。
+
+## APIリファレンス
+
+### `getPreviewUrl(options)`
+
+署名付きトークンを含むプレビューURLを生成します。
+
+**オプション：**
+
+- `collection` — コレクションスラッグ（文字列）
+- `id` — コンテンツIDまたはスラッグ（文字列）
+- `secret` — 署名シークレット（文字列）
+- `expiresIn` — トークンの有効期間（デフォルト：`"1h"`）
+- `baseUrl` — 絶対リンク用のオプショナルベースURL
+- `pathPattern` — `{collection}`と`{id}`プレースホルダーを含むURLパターン（デフォルト：`"/{collection}/{id}"`）
+
+**戻り値：** `Promise<string>`
+
+### `verifyPreviewToken(options)`
+
+プレビュートークンを検証します。
+
+**オプション：**
+
+- `secret` — 検証シークレット（文字列）
+- `url` — トークンを抽出するURL、または
+- `token` — トークン文字列を直接指定
+
+**戻り値：** `Promise<VerifyPreviewTokenResult>`
+
+```ts
+type VerifyPreviewTokenResult =
+	| { valid: true; payload: PreviewTokenPayload }
+	| { valid: false; error: "invalid" | "expired" | "malformed" | "none" };
+```
+
+### `generatePreviewToken(options)`
+
+URLを構築せずにトークンを生成します。
+
+**オプション：**
+
+- `contentId` — `collection:id`形式のコンテンツID
+- `expiresIn` — トークンの有効期間（デフォルト：`"1h"`）
+- `secret` — 署名シークレット
+
+**戻り値：** `Promise<string>`

@@ -1,0 +1,551 @@
+---
+title: WordPress開発者向けAstro
+description: 既に知っているWordPressの概念を通じてAstroの基礎を学びましょう
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Astroは、コンテンツ中心のウェブサイトを構築するためのウェブフレームワークです。EmDashを使用する場合、AstroはWordPressテーマに取って代わり、テンプレート、ルーティング、レンダリングを処理します。
+
+このガイドでは、既に理解しているWordPressの概念に対応させながら、Astroの基礎を学びます。
+
+## 主要なパラダイムシフト
+
+<CardGrid>
+	<Card title="デフォルトでサーバーサイドレンダリング" icon="laptop">
+		PHPと同様に、Astroのコードはサーバー上で実行されます。PHPとは異なり、デフォルトではJavaScriptを一切含まない静的なHTMLを出力します。
+	</Card>
+	<Card title="明示的に追加しない限りJavaScriptゼロ" icon="rocket">
+		WordPressはjQueryやテーマスクリプトを自動的に読み込みます。Astroは、明示的に追加しない限りブラウザに何も送信しません。
+	</Card>
+	<Card title="コンポーネントベースのアーキテクチャ" icon="puzzle">
+		散在するテンプレートタグやインクルードの代わりに、組み合わせ可能で自己完結型のコンポーネントで構築します。
+	</Card>
+	<Card title="ファイルベースのルーティング" icon="document">
+		リライトルールや`query_vars`は不要です。`src/pages/`内のファイル構造が直接URLを定義します。
+	</Card>
+</CardGrid>
+
+## プロジェクト構造
+
+WordPressテーマはマジックファイル名を持つフラットな構造ですが、Astroは明示的なディレクトリを使用します：
+
+| WordPress                   | Astro              | 目的               |
+| --------------------------- | ------------------ | ------------------ |
+| `index.php`, `single.php`   | `src/pages/`       | ルート（URL）      |
+| `template-parts/`           | `src/components/`  | 再利用可能なUI部品 |
+| `header.php` + `footer.php` | `src/layouts/`     | ページラッパー     |
+| `style.css`                 | `src/styles/`      | グローバルCSS      |
+| `functions.php`             | `astro.config.mjs` | サイト設定         |
+
+典型的なAstroプロジェクト：
+
+```
+src/
+├── components/        # Reusable UI (Header, PostCard, etc.)
+├── layouts/           # Page shells (Base.astro)
+├── pages/             # Routes - files become URLs
+│   ├── index.astro    # → /
+│   ├── posts/
+│   │   ├── index.astro      # → /posts
+│   │   └── [slug].astro     # → /posts/hello-world
+│   └── [slug].astro   # → /about, /contact, etc.
+└── styles/
+    └── global.css
+```
+
+## Astroコンポーネント
+
+`.astro`ファイルは、PHPテンプレートに相当するAstroのファイルです。各ファイルは2つの部分で構成されます：
+
+1. **Frontmatter**（`---`フェンスの間） — サーバーサイドコード。テンプレート上部のPHPのようなもの
+2. **テンプレート** — 式を含むHTML。PHPテンプレートの残りの部分のようなもの
+
+```
+astro title="src/components/PostCard.astro"
+---
+// Frontmatter: runs on server, never sent to browser
+interface Props {
+  title: string;
+  excerpt: string;
+  url: string;
+}
+
+const { title, excerpt, url } = Astro.props;
+---
+<!-- Template: outputs HTML -->
+<article class="post-card">
+  <h2><a href={url}>{title}</a>
+</h2>
+  <p>{excerpt}</p>
+</article>
+```
+
+PHPとの主な違い：
+
+- **Frontmatterは隔離されています。** そこで宣言された変数はテンプレート内で利用可能ですが、コード自体がブラウザに到達することはありません。
+- **インポートはFrontmatterで行います。** コンポーネント、データ、ユーティリティ — すべて上部でインポートします。
+- **TypeScriptが動作します。** `interface Props`でプロップの型を定義し、エディタのオートコンプリートと検証を利用できます。
+
+## テンプレート式
+
+Astroテンプレートは`<?php ?>`タグの代わりに`{curly braces}`を使用します。構文はJSXに似ていますが、純粋なHTMLを出力します。
+
+<Tabs>
+<TabItem label="Astro">
+
+```
+astro title="src/components/PostList.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts");
+const showTitle = true;
+---
+{showTitle && <h1>最新の投稿</h1>
+}
+
+{posts.length > 0 ? (
+  <ul>
+    {posts.map(post => (
+      <li>
+        <a href={`/posts/${post.id}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+) : (
+  <p>投稿が見つかりません。</p>
+)}
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```
+php title="template-parts/post-list.php"
+<?php
+$posts = new WP_Query(['post_type' => 'post']);
+$show_title = true;
+?>
+
+<?php if ($show_title): ?>
+  <h1>最新の投稿</h1>
+<?php endif; ?>
+
+<?php if ($posts->have_posts()): ?>
+  <ul>
+    <?php while ($posts->have_posts()): $posts->the_post(); ?>
+      <li>
+        <a href="<?php the_permalink(); ?>"><?php the_title(); ?></a>
+      </li>
+    <?php endwhile; wp_reset_postdata(); ?>
+  </ul>
+<?php else: ?>
+  <p>投稿が見つかりません。</p>
+<?php endif; ?>
+```
+
+</TabItem>
+</Tabs>
+
+### 式のパターン
+
+| パターン                                | 目的               |
+| -------------------------------------- | --------------------- |
+| `{variable}`                           | 値を出力             |
+| `{condition && <Element />}`           | 条件付きレンダリング |
+| `{condition ? <A /> : <B />}`          | If/else               |
+| `{items.map(item => <Li>{item}</Li>)}` | ループ                 |
+
+<Aside>
+	PHPとは異なり、出力をエスケープする必要はありません。Astroはデフォルトで式をエスケープし、XSS脆弱性を防ぎます。
+</Aside>
+
+## プロップとスロット
+
+コンポーネントは、**プロップ**（関数の引数のようなもの）と**スロット**（`do_action`挿入ポイントのようなもの）を通じてデータを受け取ります。
+
+<Tabs>
+<TabItem label="Astro">
+
+```
+astro title="src/components/Card.astro"
+---
+interface Props {
+  title: string;
+  featured?: boolean;
+}
+
+const { title, featured = false } = Astro.props;
+---
+
+<article class:list={["card", { featured }]}>
+  <h2>{title}</h2>
+  <slot />
+  <slot name="footer" />
+</article>
+```
+
+使用例：
+
+```astro
+<Card title="Hello" featured>
+  <p>This goes in the default slot.</p>
+  <footer slot="footer">Footer content</footer>
+</Card>
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```
+php title="template-parts/card.php"
+<?php
+// Usage: get_template_part('template-parts/card', null, [
+//   'title' => 'Hello',
+//   'featured' => true
+// ]);
+
+$title = $args['title'] ?? '';
+$featured = $args['featured'] ?? false;
+$class = $featured ? 'card featured' : 'card';
+?>
+<article class="<?php echo esc_attr($class); ?>">
+  <h2><?php echo esc_html($title); ?></h2>
+  <?php
+  // スロットに直接相当するものはありません。
+  // WordPressは同様のパターンにdo_action()を使用します：
+  do_action('card_content');
+  do_action('card_footer');
+  ?>
+</article>
+```
+
+</TabItem>
+</Tabs>
+
+### プロップ vs `$args`
+
+WordPressでは、`get_template_part()`が`$args`配列を介してデータを渡します。Astroのプロップは型付けされ、分割代入されます：
+
+```astro
+---
+// Type-safe with defaults
+interface Props {
+  title: string;
+  count?: number;
+}
+const { title, count = 10 } = Astro.props;
+---
+```
+
+### スロット vs フック
+
+WordPressは挿入ポイントを作成するために`do_action()`を使用します。Astroはスロットを使用します：
+
+| WordPress                     | Astro                    |
+| ----------------------------- | ------------------------ |
+| `do_action('before_content')` | `<slot name="before" />` |
+| デフォルトコンテンツエリア    | `<slot />`               |
+| `do_action('after_content')`  | `<slot name="after" />`  |
+
+違い：スロットは呼び出し元で子要素を受け取りますが、WordPressのフックは別の場所で`add_action()`呼び出しを必要とします。
+
+## レイアウト
+
+レイアウトは、共通のHTML構造（`<head>`、ヘッダー、フッター、およびページ間で共有されるもの）でページをラップします。これは`header.php` + `footer.php`に取って代わります。
+
+```
+astro title="src/layouts/Base.astro"
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = "My EmDash Site" } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header>
+      <nav><!-- Navigation --></nav>
+    </header>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer>
+      <p>&copy; {new Date().getFullYear()}</p>
+    </footer>
+  </body>
+</html>
+```
+
+レイアウトをページで使用する:
+
+```
+astro title="src/pages/index.astro"
+---
+import Base from "../../layouts/Base.astro";
+---
+<Base title="ホーム">
+  <h1>ようこそ</h1>
+  <p>ページの内容は slot に入ります。</p>
+</Base>
+```
+
+<Aside type="tip">
+	`get_header()`や`get_footer()`とは異なり、レイアウトはHTML構造全体を1つのファイルに保持します。これにより、ページ構造全体を把握しやすくなり、セクション間でのデータ受け渡しも容易になります。
+</Aside>
+
+## スタイリング
+
+Astroは複数のスタイリング手法を提供しています。最も特徴的なのは**スコープ付きスタイル**です。
+
+### スコープ付きスタイル
+
+`<style>`タグ内のスタイルは、自動的にそのコンポーネントにスコープされます:
+
+```
+astro title="src/components/Card.astro"
+<article class="card">
+  <h2>Title</h2>
+</article>
+
+<style>
+  /* このコンポーネント内の.cardのみに影響 */
+  .card {
+    padding: 1rem;
+    border: 1px solid #ddd;
+  }
+
+  h2 {
+    color: navy;
+  }
+</style>
+```
+
+生成されるHTMLには、スタイルの漏れを防ぐための一意のクラス名が含まれます。これで特異性の戦いはもう終わりです。
+
+### グローバルスタイル
+
+サイト全体のスタイルには、CSSファイルを作成し、レイアウトでインポートします:
+
+```
+astro title="src/layouts/Base.astro"
+---
+import "../styles/global.css";
+---
+```
+
+### 条件付きクラス
+
+`class:list`ディレクティブは、手動でのクラス文字列構築を置き換えます:
+
+<Tabs>
+<TabItem label="Astro">
+
+```astro
+---
+const { featured, size = "medium" } = Astro.props;
+---
+<article class:list={[
+  "card",
+  size,
+  { featured, "has-border": true }
+]}>
+```
+
+出力: `<article class="card medium featured has-border">`
+
+</TabItem>
+<TabItem label="PHP">
+
+```
+php
+<?php
+$classes = ['card', $size];
+if ($featured) $classes[] = 'featured';
+if (true) $classes[] = 'has-border';
+?>
+<article class="<?php echo esc_attr(implode(' ', $classes)); ?>">
+```
+
+</TabItem>
+</Tabs>
+
+## クライアントサイドJavaScript
+
+AstroはデフォルトでJavaScriptを一切送信しません。これはWordPressからの最大の考え方の転換です。
+
+### インタラクティブ性の追加
+
+単純なインタラクションには、`<script>`タグを追加します:
+
+```
+astro title="src/components/MobileMenu.astro"
+<button id="menu-toggle">Menu</button>
+<nav id="mobile-menu" hidden>
+  <slot />
+</nav>
+
+<script>
+  const toggle = document.getElementById("menu-toggle");
+  const menu = document.getElementById("mobile-menu");
+
+  toggle?.addEventListener("click", () => {
+    menu?.toggleAttribute("hidden");
+  });
+</script>
+```
+
+スクリプトは自動的にバンドルされ、重複排除されます。このコンポーネントがページに2回出現しても、スクリプトは1回だけ実行されます。
+
+### 高度: インタラクティブコンポーネント
+
+より複雑なインタラクティブ性には、AstroはオンデマンドでJavaScriptコンポーネント（React、Vue、Svelte）を読み込むことができます。これはオプションです。ほとんどのサイトは`<script>`タグだけで十分に機能します。
+
+```
+astro title="src/pages/index.astro"
+---
+import SearchWidget from "../../components/SearchWidget.jsx";
+---
+<!-- Only load JavaScript when the search box scrolls into view -->
+<SearchWidget client:visible />
+```
+
+| ディレクティブ       | JavaScriptの読み込みタイミング          |
+| ---------------- | ------------------------------ |
+| `client:load`    | ページ読み込み直後             |
+| `client:visible` | コンポーネントがビューポートに入った時 |
+| `client:idle`    | ブラウザがアイドル状態の時     |
+
+<Aside type="tip">
+これは完全にオプションです。React、Vue、またはいかなるJavaScriptフレームワークにも触れずに、完全なEmDashサイトを構築できます。`<script>`タグのアプローチで、ほとんどのインタラクティブなニーズに対応できます。
+</Aside>
+
+## ルーティング
+
+Astroは**ファイルベースルーティング**を使用します。`src/pages/`内のファイルがURLになります:
+
+| ファイル                           | URL                  |
+| ------------------------------ | -------------------- |
+| `src/pages/index.astro`        | `/`                  |
+| `src/pages/about.astro`        | `/about`             |
+| `src/pages/posts/index.astro`  | `/posts`             |
+| `src/pages/posts/[slug].astro` | `/posts/hello-world` |
+| `src/pages/[...slug].astro`    | 任意のパス（キャッチオール） |
+
+### ダイナミックルート
+
+CMSコンテンツには、ダイナミックセグメントにブラケット構文を使用します:
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+import Base from "../../../layouts/Base.astro";
+import { PortableText } from "emdash/ui";
+
+// For static builds, define which pages to generate
+export async function getStaticPaths() {
+  const { entries: posts } = await getEmDashCollection("posts");
+  return posts.map(post => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+---
+<Base title={post.data.title}>
+  <article>
+    <h1>{post.data.title}</h1>
+    <PortableText value={post.data.content} />
+  </article>
+</Base>
+```
+
+### WordPressとの比較
+
+| WordPress                              | Astro                               |
+| -------------------------------------- | ----------------------------------- |
+| テンプレート階層 (`single-post.php`)   | 明示的なファイル: `posts/[slug].astro` |
+| リライトルール + `query_vars`          | ファイル構造                        |
+| `$wp_query`がテンプレートを決定        | URLが直接ファイルにマッピング       |
+| `add_rewrite_rule()`                   | ファイルまたはフォルダを作成        |
+
+<Aside type="tip">
+	WordPressがどのテンプレートを使用するか推測する必要はもうありません。URL `/posts/hello` は常に `src/pages/posts/[slug].astro` を読み込みます。
+</Aside>
+
+## WordPressの概念が存在する場所
+
+WordPress機能のAstro/EmDash相当機能を見つけるためのリファレンス:
+
+### テンプレート
+
+| WordPress                | Astro/EmDash                     |
+| ------------------------ | ---------------------------------- |
+| テンプレート階層         | `src/pages/`内のファイルベースルーティング |
+| `get_template_part()`    | コンポーネントのインポートと使用   |
+| `the_content()`          | `<PortableText value={content} />` |
+| `the_title()`, `the_*()` | `post.data.title`経由でアクセス    |
+| テンプレートタグ         | テンプレート式 `{value}`     |
+| `body_class()`           | `class:list`ディレクティブ         |
+
+### データとクエリ
+
+| WordPress         | Astro/EmDash                         |
+| ----------------- | -------------------------------------- |
+| `WP_Query`        | `getEmDashCollection(type, filters)` |
+| `get_post()`      | `getEmDashEntry(type, id)`           |
+| `get_posts()`     | `getEmDashCollection(type)`          |
+| `get_the_terms()` | `entry.data.categories`経由でアクセス |
+| `get_post_meta()` | `entry.data.fieldName`経由でアクセス  |
+| `get_option()`    | `getSiteSettings()`                    |
+| `wp_nav_menu()`   | `getMenu(location)`                    |
+
+### 拡張性
+
+| WordPress               | Astro/EmDash                        |
+| ----------------------- | ------------------------------------- |
+| `add_action()`          | EmDashフック、Astroミドルウェア    |
+| `add_filter()`          | EmDashフック                        |
+| `add_shortcode()`       | Portable Textカスタムブロック         |
+| `register_block_type()` | Portable Textカスタムブロック         |
+| `register_sidebar()`    | EmDashウィジェットエリア            |
+| プラグイン              | Astroインテグレーション + EmDashプラグイン |
+
+### コンテンツタイプ
+
+| WordPress              | Astro/EmDash                        |
+| ---------------------- | ------------------------------------- |
+| `register_post_type()` | 管理UIでコレクションを作成            |
+| `register_taxonomy()`  | 管理UIでタクソノミーを作成            |
+| `register_meta()`      | コレクションスキーマにフィールドを追加 |
+| 投稿ステータス         | エントリステータス（下書き、公開済みなど） |
+| アイキャッチ画像       | メディア参照フィールド                |
+| Gutenbergブロック      | Portable Textブロック                 |
+
+## まとめ
+
+WordPressからAstroへの移行は大きく、しかし論理的です:
+
+1. **PHPテンプレート → Astroコンポーネント** — 同じ考え方（サーバーコード + HTML）、より良い構成
+2. **テンプレートタグ → Propsとインポート** — グローバル変数ではなく明示的なデータフロー
+3. **テーマファイル → ページディレクトリ** — URLがファイル構造と一致
+4. **フック → スロットとミドルウェア** — より予測可能な挿入ポイント
+5. **デフォルトのjQuery → デフォルトでゼロJS** — インタラクティブ性を意図的に追加
+
+最初のEmDashサイトを構築するには[はじめに](/ja/getting-started/)ガイドから始めるか、CMSデータのクエリとレンダリング方法を学ぶには[コンテンツの操作](/ja/guides/working-with-content/)を参照してください。

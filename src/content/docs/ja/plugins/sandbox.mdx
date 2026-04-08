@@ -1,0 +1,203 @@
+---
+title: プラグインサンドボックス
+description: EmDashが信頼されていないプラグインをCloudflare WorkersとNode.jsデプロイメントでどのように隔離するかについて。
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDashは、プラグインを**信頼済み**と**サンドボックス化**の2つの実行モードで実行することをサポートしています。このページでは、各モードの動作方法、提供される保護機能、および異なるデプロイメントターゲットに対するセキュリティ上の影響について説明します。
+
+## 実行モード
+
+| | 信頼済み | サンドボックス化 |
+|---|---|---|
+| **実行環境** | メインプロセス | 分離されたV8アイソレート (Dynamic Worker Loader) |
+| **機能** | アドバイザリー (強制なし) | 実行時に強制 |
+| **リソース制限** | なし | CPU、メモリ、サブリクエスト、実時間 |
+| **ネットワークアクセス** | 無制限 | ブロック済み; `ctx.http`経由でのみ、ホスト許可リスト付き |
+| **データアクセス** | データベースへのフルアクセス | RPCブリッジ経由で宣言された機能にスコープ化 |
+| **利用可能なプラットフォーム** | すべてのプラットフォーム | Cloudflare Workersのみ |
+
+## 信頼済みモード
+
+信頼済みプラグインは、Astroサイトと同じプロセス内で実行されます。これらはnpmパッケージまたはローカルファイルから読み込まれ、`astro.config.mjs`で設定されます:
+
+```typescript title="astro.config.mjs"
+import myPlugin from "@emdash-cms/plugin-analytics";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			plugins: [myPlugin()],
+		}),
+	],
+});
+```
+
+信頼済みモードでは:
+
+- **機能は文書化されたものであり、強制されません。** `["read:content"]`を宣言するプラグインでも、プロセス内のあらゆるものにアクセスできます。`capabilities`フィールドは、プラグインが*使用を意図している*ものを管理者に伝えます。
+- **リソース制限はありません。** CPU、メモリ、ネットワーク使用量は無制限です。不正な動作をするプラグインは、リクエスト全体を停止させる可能性があります。
+- **プロセスへのフルアクセス。** プラグインは、AstroサイトとNode.js/Workersランタイムを共有します。任意のモジュールをインポートし、環境変数にアクセスし、ファイルシステムの読み書き（Node.js上で）が可能です。
+
+<Aside type="caution" title="セキュリティ上の影響">
+	信頼済みモードでは、信頼できるソース（レビュー済みのnpmパッケージ、または自身で記述したコード）からのみ信頼済みプラグインをインストールしてください。悪意のあるプラグインは、アプリケーションコードと同じアクセス権を持ちます。
+</Aside>
+
+## サンドボックス化モード (Cloudflare Workers)
+
+サンドボックス化プラグインは、Cloudflareの[Dynamic Worker Loader](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/) APIによって提供される分離されたV8アイソレート内で実行されます。各プラグインは、強制された制限付きの独自のアイソレートを取得します。
+
+サンドボックス化を有効にするには、Astro設定でサンドボックスランナーを設定します:
+
+```
+typescript title="astro.config.mjs"
+export default defineConfig({
+	integrations: [
+		emdash({
+			sandboxRunner: "@emdash-cms/cloudflare/sandbox",
+			sandboxed: [
+				{
+					manifest: seoPluginManifest,
+					code: seoPluginCode,
+				},
+			],
+		}),
+	],
+});
+```
+
+### サンドボックスが強制する内容
+
+<Steps>
+
+1. **機能の強制**
+
+   プラグインが`capabilities: ["read:content"]`を宣言した場合、`ctx.content.get()`と`ctx.content.list()`のみを呼び出すことができます。`ctx.content.create()`を試みると、権限エラーがスローされます。これはRPCブリッジによって強制されます — プラグインは直接データベースアクセスを持たないため、これを回避できません。
+
+2. **リソース制限**
+
+   すべての呼び出し（フックまたはルート呼び出し）は、以下の制限で実行されます:
+
+   | リソース | デフォルト | 強制者 |
+   |---|---|---|
+   | CPU時間 | 50ms | Worker Loader (V8アイソレート) |
+   | サブリクエスト | 呼び出しごとに10回 | Worker Loader (V8アイソレート) |
+   | 実時間 | 30秒 | EmDashランナー (`Promise.race`) |
+   | メモリ | ~128MB | V8プラットフォーム上限 (プラグインごとに設定不可) |
+
+   CPUまたはサブリクエストの制限を超えると、Worker Loaderがアイソレートを中止し、例外をスローします。実時間制限を超えると、EmDashが呼び出しプロミスを拒否します。メモリはV8プラットフォーム上限によって制限されますが、プラグインごとに設定することはできません。
+
+   これらは組み込みのデフォルト値です。カスタム制限は、`SandboxOptions.limits`経由で異なる値を渡すカスタム`SandboxRunnerFactory`を提供することで設定できます。EmDash統合設定を介したサイトごとの設定は、まだ実装されていません。
+
+3. **ネットワーク分離**
+
+   サンドボックス化されたプラグインは `globalOutbound: null` を持ちます — 直接の `fetch()` 呼び出しはV8レベルでブロックされます。プラグインは `ctx.http.fetch()` を使用する必要があり、これはブリッジを介してプロキシされます。ブリッジは、ターゲットホストをプラグインの `allowedHosts` リストに対して検証します。
+
+4. **ストレージのスコープ化**
+
+   すべてのストレージ操作（KV、コレクション）はプラグインのIDにスコープ化されます。プラグインは他のプラグインのデータを読み取ることができません。コンテンツとメディアへのアクセスはブリッジを介して行われ、すべての呼び出しで権限がチェックされます。
+
+5. **機能制限**
+
+   一部の機能は信頼済みモードでのみ利用可能です:
+
+   - **APIルート** — カスタムRESTエンドポイント（`routes`）は利用できません。サンドボックス化されたプラグインは、Block Kit管理ページとフックを介してユーザーと対話します。
+   - **Portable Textブロックタイプ** — PTブロックはサイト側レンダリング用のAstroコンポーネント（`componentsEntry`）を必要とし、ビルド時にnpmから読み込まれます。サンドボックス化されたプラグインは実行時にインストールされ、コンポーネントを同梱できません。
+   - **カスタムReact管理ページ** — サンドボックス化されたプラグインは、Reactコンポーネントを同梱する代わりに、管理UIにBlock Kitを使用します。
+
+   `emdash plugin bundle` コマンドは、プラグインがこれらの機能を宣言している場合に警告を表示します。
+
+</Steps>
+
+### アーキテクチャ
+
+サンドボックス化されたプラグインは、RPCブリッジを介してEmDashと通信します:
+
+```
+┌─────────────────────┐     RPC      ┌──────────────────────┐
+│  Plugin Isolate     │ ◄──────────► │  PluginBridge        │
+│  (Worker Loader)    │   (binding)  │  (WorkerEntrypoint)  │
+│                     │              │                      │
+│  ctx.kv.get(k)      │──────────────│► kvGet(k)            │
+│  ctx.content.list() │──────────────│► contentList()       │
+│  ctx.http.fetch(u)  │──────────────│► httpFetch(u)        │
+└─────────────────────┘              └──────────────────────┘
+                                            │
+                                            ▼
+                                     ┌──────────────┐
+                                     │  D1 / R2     │
+                                     └──────────────┘
+```
+
+プラグインのコードはV8アイソレートで実行されます。すべてのメソッドがブリッジへのプロキシである `ctx` オブジェクトを受け取ります。ブリッジはメインのEmDashワーカーで実行され、権限を検証した後に実際のデータベース/ストレージ操作を実行します。
+
+### Wrangler設定
+
+サンドボックス化にはDynamic Worker Loaderが必要です。`wrangler.jsonc` に追加してください:
+
+```
+jsonc
+{
+	"worker_loaders": [{ "binding": "LOADER" }],
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "emdash-media" }],
+	"d1_databases": [{ "binding": "DB", "database_name": "emdash" }]
+}
+```
+
+## Node.jsデプロイメント
+
+<Aside type="danger" title="Node.jsでは分離なし">
+	Node.jsはプラグインのサンドボックス化をサポートしていません。すべてのプラグインは設定に関係なく信頼済みモードで実行されます。V8アイソレート境界、リソース制限、およびランタイムレベルでの権限強制はありません。
+</Aside>
+
+Node.js（またはCloudflare以外のプラットフォーム）にデプロイする場合:
+
+- `NoopSandboxRunner` が使用されます。これは `isAvailable() === false` を返します。
+- サンドボックス化されたプラグインの読み込みを試みると `SandboxNotAvailableError` がスローされます。
+- すべてのプラグインは、`plugins` 配列で信頼済みプラグインとして登録する必要があります。
+- 権限宣言は純粋に情報提供のためのものであり、強制されません。
+
+### セキュリティへの影響
+
+| 脅威 | Cloudflare（サンドボックス化） | Node.js（信頼済みのみ） |
+|---|---|---|
+| プラグインが読み取るべきでないデータを読み取る | ブリッジの機能チェックによりブロック | **防止されない** — プラグインはDBにフルアクセス可能 |
+| プラグインが未承認のネットワーク呼び出しを行う | `globalOutbound: null` + ホスト許可リストによりブロック | **防止されない** — プラグインは直接`fetch()`を呼び出せる |
+| プラグインがCPUを枯渇させる | Worker Loaderによりアイソレートが中止 | **防止されない** — イベントループをブロックする |
+| プラグインがメモリを枯渇させる | Worker Loaderによりアイソレートが終了 | **防止されない** — プロセスをクラッシュさせる可能性あり |
+| プラグインが環境変数にアクセスする | アクセス不可（分離されたV8コンテキスト） | **防止されない** — `process.env`を共有 |
+| プラグインがファイルシステムにアクセスする | Workers内ではファイルシステムなし | **防止されない** — `fs`へのフルアクセス可能 |
+
+### Node.jsデプロイメントのための推奨事項
+
+1. **信頼できるソースからのみプラグインをインストールする。** インストール前にプラグインのソースコードを確認してください。既知のメンテナーが公開したプラグインを優先します。
+2. **機能宣言をレビューチェックリストとして使用する。** 機能が強制されなくても、プラグインの意図された範囲を文書化します。ネットワークアクセスを必要としないプラグインが`["network:fetch"]`を宣言している場合は疑わしいです。
+3. **リソース使用量を監視する。** プロセスレベルの監視（例：`--max-old-space-size`、ヘルスチェック）を使用して、暴走するプラグインを検出します。
+4. **信頼できないプラグインにはCloudflareを検討する。** 未知のソース（例：マーケットプレイス）からのプラグインを実行する必要がある場合は、サンドボックス化が利用可能なCloudflare Workersにデプロイしてください。
+
+## 同じAPI、異なる保証
+
+プラグインのコードは、実行モードに関係なく同一です。`definePlugin()` API、コンテキストの形状、フック、ルート、ストレージはすべて同じように機能します。変化するのは**強制力**です：
+
+```typescript
+// This plugin works in both trusted and sandboxed mode
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+	capabilities: ["read:content", "network:fetch"],
+	allowedHosts: ["api.analytics.example.com"],
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			// In trusted mode: ctx.http is always present (capabilities not enforced)
+			// In sandboxed mode: ctx.http is present because "network:fetch" is declared
+			await ctx.http.fetch("https://api.analytics.example.com/track", {
+				method: "POST",
+				body: JSON.stringify({ contentId: event.content.id }),
+			});
+		},
+	},
+});
+```
+
+目標は、プラグイン作者が信頼済みモードでローカル開発（より迅速な反復、デバッグの容易さ）を行い、コード変更なしで本番環境のサンドボックス化モードにデプロイできるようにすることです。

@@ -1,0 +1,410 @@
+---
+title: 管理パネルUI
+description: EmDash管理パネルに管理ページとダッシュボードウィジェットを追加します。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+プラグインは、カスタムページやダッシュボードウィジェットで管理パネルを拡張できます。これらは、コアの管理機能と共にレンダリングされるReactコンポーネントです。
+
+## 管理エントリーポイント
+
+管理UIを持つプラグインは、`admin`エントリーポイントからコンポーネントをエクスポートします：
+
+```typescript title="src/admin.tsx"
+import { SEOSettingsPage } from "../../plugins/components/SEOSettingsPage";
+import { SEODashboardWidget } from "../../plugins/components/SEODashboardWidget";
+
+// Dashboard widgets
+export const widgets = {
+	"seo-overview": SEODashboardWidget,
+};
+
+// Admin pages
+export const pages = {
+	"/settings": SEOSettingsPage,
+};
+```
+
+`package.json`でエントリーポイントを設定します：
+
+```
+json title="package.json"
+{
+	"exports": {
+		".": "./dist/index.js",
+		"./admin": "./dist/admin.js"
+	}
+}
+```
+
+プラグイン定義で参照します：
+
+```
+typescript title="src/index.ts"
+definePlugin({
+	id: "seo",
+	version: "1.0.0",
+
+	admin: {
+		entry: "@my-org/plugin-seo/admin",
+		pages: [{ path: "/settings", label: "SEO Settings", icon: "settings" }],
+		widgets: [{ id: "seo-overview", title: "SEO Overview", size: "half" }],
+	},
+});
+```
+
+## 管理ページ
+
+管理ページは、フックを介してプラグインコンテキストを受け取るReactコンポーネントです。
+
+### ページ定義
+
+`admin.pages`でページを定義します：
+
+```typescript
+admin: {
+	pages: [
+		{
+			path: "/settings", // URL path (relative to plugin base)
+			label: "Settings", // Sidebar label
+			icon: "settings", // Icon name (optional)
+		},
+		{
+			path: "/reports",
+			label: "Reports",
+			icon: "chart",
+		},
+	];
+}
+```
+
+ページは`/_emdash/admin/plugins/<plugin-id>/<path>`にマウントされます。
+
+### ページコンポーネント
+
+```
+typescript title="src/components/SettingsPage.tsx"
+import { useState, useEffect } from "react";
+import { usePluginAPI } from "@emdash-cms/admin";
+
+export function SettingsPage() {
+  const api = usePluginAPI();
+  const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get("settings").then(setSettings);
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    await api.post("settings/save", settings);
+    setSaving(false);
+  };
+
+  return (
+    <div>
+      <h1>プラグイン設定</h1>
+
+      <label>
+        サイトタイトル
+        <input
+          type="text"
+          value={settings.siteTitle || ""}
+          onChange={(e) => setSettings({ ...settings, siteTitle: e.target.value })}
+        />
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={settings.enabled ?? true}
+          onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
+        />
+        有効
+      </label>
+
+      <button onClick={handleSave} disabled={saving}>
+        {saving ? "Saving..." : "Save Settings"}
+      </button>
+    </div>
+  );
+}
+```
+
+### プラグインAPIフック
+
+`usePluginAPI()`を使用してプラグインのルートを呼び出します：
+
+```typescript
+import { usePluginAPI } from "@emdash-cms/admin";
+
+function MyComponent() {
+	const api = usePluginAPI();
+
+	// プラグインルートへのGETリクエスト
+	const data = await api.get("status");
+
+	// ボディ付きPOSTリクエスト
+	await api.post("settings/save", { enabled: true });
+
+	// URLパラメータ付き
+	const result = await api.get("history?limit=50");
+}
+```
+
+このフックは、ルートURLに自動的にプラグインIDプレフィックスを追加します。
+
+## ダッシュボードウィジェット
+
+ウィジェットは管理ダッシュボードに表示され、一目で情報を提供します。
+
+### ウィジェット定義
+
+`admin.widgets`でウィジェットを定義します：
+
+```typescript
+admin: {
+	widgets: [
+		{
+			id: "seo-overview", // Unique widget ID
+			title: "SEO Overview", // Widget title (optional)
+			size: "half", // "full" | "half" | "third"
+		},
+	];
+}
+```
+
+### ウィジェットコンポーネント
+
+```
+typescript title="src/components/SEOWidget.tsx"
+import { useState, useEffect } from "react";
+import { usePluginAPI } from "@emdash-cms/admin";
+
+export function SEOWidget() {
+  const api = usePluginAPI();
+  const [data, setData] = useState({ score: 0, issues: [] });
+
+  useEffect(() => {
+    api.get("analyze").then(setData);
+  }, []);
+
+  return (
+    <div className="widget-content">
+      <div className="score">{data.score}%</div>
+      <ul>
+        {data.issues.map((issue, i) => (
+          <li key={i}>{issue.message}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### ウィジェットサイズ
+
+| サイズ   | 説明                     |
+| ------- | ------------------------- |
+| `full`  | ダッシュボード全体の幅      |
+| `half`  | ダッシュボードの半分の幅     |
+| `third` | ダッシュボードの1/3の幅     |
+
+ウィジェットは画面幅に基づいて自動的に折り返されます。
+
+## エクスポート構造
+
+管理エントリーポイントは2つのオブジェクトをエクスポートします：
+
+```
+typescript title="src/admin.tsx"
+import { SettingsPage } from "../../plugins/components/SettingsPage";
+import { ReportsPage } from "../../plugins/components/ReportsPage";
+import { StatusWidget } from "../../plugins/components/StatusWidget";
+import { OverviewWidget } from "../../plugins/components/OverviewWidget";
+
+// Pages keyed by path
+export const pages = {
+	"/settings": SettingsPage,
+	"/reports": ReportsPage,
+};
+
+// Widgets keyed by ID
+export const widgets = {
+	status: StatusWidget,
+	overview: OverviewWidget,
+};
+```
+
+<Aside type="caution">
+	`pages`内のページパスは、`admin.pages`内の`path`値と一致する必要があります。ウィジェットキーは、
+	`admin.widgets`内の`id`値と一致する必要があります。
+</Aside>
+
+## 管理コンポーネントの使用
+
+EmDashは一般的なパターン用に事前構築されたコンポーネントを提供します：
+
+```typescript
+import {
+  Card,
+  Button,
+  Input,
+  Select,
+  Toggle,
+  Table,
+  Pagination,
+  Alert,
+  Loading
+} from "@emdash-cms/admin";
+
+function SettingsPage() {
+  return (
+    <Card title="Settings">
+      <Input label="API Key" type="password" />
+      <Toggle label="Enabled" defaultChecked />
+      <Button variant="primary">Save</Button>
+    </Card>
+  );
+}
+```
+
+## 自動生成される設定UI
+
+プラグインが設定フォームのみを必要とする場合は、カスタムコンポーネントなしで`admin.settingsSchema`を使用します：
+
+```typescript
+admin: {
+  settingsSchema: {
+    apiKey: { type: "secret", label: "API Key" },
+    enabled: { type: "boolean", label: "Enabled", default: true }
+  }
+}
+```
+
+EmDashは設定ページを自動的に生成します。基本的な設定以外の機能にはカスタムページのみを追加してください。
+
+## ナビゲーション
+
+プラグインページは、プラグイン名の下にある管理サイドバーに表示されます。順序は`admin.pages`配列と一致します。
+
+```typescript
+admin: {
+	pages: [
+		{ path: "/settings", label: "Settings", icon: "settings" }, // First
+		{ path: "/history", label: "History", icon: "history" }, // Second
+		{ path: "/reports", label: "Reports", icon: "chart" }, // Third
+	];
+}
+```
+
+## ビルド設定
+
+管理コンポーネントには別のビルドエントリーポイントが必要です。バンドラーを設定します：
+
+<Tabs>
+  <TabItem label="tsdown">
+```
+typescript title="tsdown.config.ts"
+export default {
+  entry: {
+    index: "src/index.ts",
+    admin: "src/admin.tsx"
+  },
+  format: "esm",
+  dts: true,
+  external: ["react", "react-dom", "emdash", "@emdash-cms/admin"]
+};
+```
+  </TabItem>
+  <TabItem label="tsup">
+```
+typescript title="tsup.config.ts"
+export default {
+  entry: ["src/index.ts", "src/admin.tsx"],
+  format: "esm",
+  dts: true,
+  external: ["react", "react-dom", "emdash", "@emdash-cms/admin"]
+};
+```
+  </TabItem>
+</Tabs>
+
+重複バンドルを避けるため、ReactとEmDash管理を外部依存関係として保持してください。
+
+## プラグインの有効化/無効化
+
+プラグインが管理パネルで無効化された場合：
+
+- サイドバーリンクは非表示になります
+- ダッシュボードウィジェットはレンダリングされません
+- 管理ページは404を返します
+- バックエンドフックは（データ安全性のために）引き続き実行されます
+
+プラグインは有効状態を確認できます：
+
+```typescript
+const enabled = await ctx.kv.get<boolean>("_emdash:enabled");
+```
+
+## 例：完全な管理UI
+
+```
+typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+
+	capabilities: ["network:fetch"],
+	allowedHosts: ["api.analytics.example.com"],
+
+	storage: {
+		events: { indexes: ["type", "createdAt"] },
+	},
+
+	admin: {
+		entry: "@my-org/plugin-analytics/admin",
+		settingsSchema: {
+			trackingId: { type: "string", label: "Tracking ID" },
+			enabled: { type: "boolean", label: "Enabled", default: true },
+		},
+		pages: [
+			{ path: "/dashboard", label: "Dashboard", icon: "chart" },
+			{ path: "/settings", label: "Settings", icon: "settings" },
+		],
+		widgets: [{ id: "events-today", title: "Events Today", size: "third" }],
+	},
+
+	routes: {
+		stats: {
+			handler: async (ctx) => {
+				const today = new Date().toISOString().split("T")[0];
+				const count = await ctx.storage.events!.count({
+					createdAt: { gte: today },
+				});
+				return { today: count };
+			},
+		},
+	},
+});
+```
+
+```
+typescript title="src/admin.tsx"
+import { EventsWidget } from "../../plugins/components/EventsWidget";
+import { DashboardPage } from "../../plugins/components/DashboardPage";
+import { SettingsPage } from "../../plugins/components/SettingsPage";
+
+export const widgets = {
+	"events-today": EventsWidget,
+};
+
+export const pages = {
+	"/dashboard": DashboardPage,
+	"/settings": SettingsPage,
+};
+```

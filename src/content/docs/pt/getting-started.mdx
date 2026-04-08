@@ -1,0 +1,267 @@
+---
+title: Introdução ao EmDash
+description: Instale o EmDash, execute o assistente de configuração, publique seu primeiro post e aprenda a estrutura básica do projeto Astro com EmDash.
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+import dashboardImg from "../../../assets/screenshots/admin-dashboard.png";
+import postEditorImg from "../../../assets/screenshots/admin-post-editor.png";
+
+Este guia orienta você na criação do seu primeiro site com EmDash, desde a instalação até a publicação do seu primeiro post.
+
+Se você ainda está avaliando se o EmDash é o CMS Astro certo para você, comece com [O que é o EmDash?](/pt/what-is-emdash/) ou [Melhor CMS Astro](/pt/best-astro-cms/) e depois retorne a este guia de configuração.
+
+## Pré-requisitos
+
+- **Node.js** v22.12.0 ou superior (versões com números ímpares não são suportadas)
+- **npm**, **pnpm** ou **yarn**
+- Um editor de código (VS Code recomendado)
+
+## Criar um Novo Projeto
+
+<Tabs>
+<TabItem label="npm">
+```bash 
+npm create emdash@latest
+```
+</TabItem>
+<TabItem label="pnpm">
+```
+bash 
+pnpm create emdash@latest
+```
+</TabItem>
+<TabItem label="yarn">
+```
+bash 
+yarn create emdash
+```
+</TabItem>
+</Tabs>
+
+Siga as instruções para nomear seu projeto e configurar suas preferências.
+
+## Iniciar o Servidor de Desenvolvimento
+
+<Steps>
+
+1. Navegue até o diretório do seu projeto:
+
+   ```bash
+   cd my-emdash-site
+   ```
+
+2. Instale as dependências:
+
+   ```bash
+   npm install
+   ```
+
+3. Inicie o servidor de desenvolvimento:
+
+   ```bash
+   npm run dev
+   ```
+
+4. Abra seu navegador em `http://localhost:4321`
+
+</Steps>
+
+## Concluir o Assistente de Configuração
+
+Na sua primeira visita ao painel administrativo, o Assistente de Configuração do EmDash guia você pela configuração inicial:
+
+<Steps>
+
+1. Navegue até `http://localhost:4321/_emdash/admin`
+
+2. Você será redirecionado para o Assistente de Configuração. Insira:
+   - **Título do Site** — O nome do seu site
+   - **Slogan** — Uma breve descrição
+   - **E-mail do Administrador** — Seu endereço de e-mail
+
+3. Clique em **Criar Site** para registrar sua chave de acesso
+
+4. Seu navegador solicitará que você crie uma chave de acesso usando Touch ID, Face ID, Windows Hello ou uma chave de segurança
+
+</Steps>
+
+Assim que sua chave de acesso for registrada, você estará logado e será redirecionado para o painel administrativo.
+
+<img src={dashboardImg.src} alt="EmDash admin dashboard showing content overview, recent activity, and navigation sidebar" />
+
+<Aside>
+	O EmDash usa autenticação por chave de acesso em vez de senhas. As chaves de acesso são mais seguras e funcionam com
+	o gerenciador de senhas integrado do seu navegador. Consulte o [guia de Autenticação](/pt/guides/authentication/)
+	para mais detalhes.
+</Aside>
+
+## Seu Primeiro Post
+
+<Steps>
+
+1. Na barra lateral administrativa, clique em **Posts** em Conteúdo.
+
+2. Clique em **Novo Post**.
+
+3. Insira um título e escreva algum conteúdo usando o editor de texto rico.
+
+   <img src={postEditorImg.src} alt="EmDash post editor with rich text toolbar and publish sidebar" />
+
+4. Defina o status como **Publicado** e clique em **Salvar**.
+
+5. Visite a página inicial do seu site para ver seu post ao vivo — sem necessidade de reconstruir o site!
+
+</Steps>
+
+<Aside type="tip">
+	O EmDash usa Coleções de Conteúdo ao Vivo. As alterações aparecem imediatamente sem reconstruir seu site.
+</Aside>
+
+## Estrutura do Projeto
+
+Seu projeto EmDash segue uma estrutura Astro padrão com algumas adições:
+
+```
+my-emdash-site/
+├── astro.config.mjs      # Astro + EmDash configuration
+├── src/
+│   ├── live.config.ts    # Live Collections configuration
+│   ├── pages/
+│   │   ├── index.astro   # Homepage
+│   │   └── posts/
+│   │       └── [...slug].astro  # Dynamic post pages
+│   ├── layouts/
+│   │   └── Base.astro    # Base layout
+│   └── components/       # Your Astro components
+├── .emdash/
+│   ├── seed.json         # Template seed file
+│   └── types.ts          # Generated TypeScript types
+└── package.json
+```
+
+## Arquivos de Configuração
+
+### astro.config.mjs
+
+Isso configura o EmDash como uma integração do Astro:
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+### src/live.config.ts
+
+Isso conecta o EmDash ao sistema de conteúdo do Astro:
+
+```
+ts title="src/live.config.ts"
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({ loader: emdashLoader() }),
+};
+```
+
+<Aside>
+	O EmDash usa uma única coleção `_emdash` que roteia internamente para seus tipos de conteúdo (posts,
+	páginas, produtos, etc.). Isso mantém seu `live.config.ts` mínimo.
+</Aside>
+
+### Variáveis de Ambiente
+
+Para implantações em produção, você precisará definir:
+
+```bash
+# Required for authentication
+EMDASH_AUTH_SECRET=your-secret-here
+
+# Opcional: para pré-visualização de conteúdo
+EMDASH_PREVIEW_SECRET=your-preview-secret
+```
+
+Gere um segredo de autenticação seguro com:
+
+```bash
+npx emdash auth secret
+```
+
+## Consultar Conteúdo em Páginas
+
+Use as funções de consulta do EmDash em suas páginas Astro. Elas seguem o padrão de coleções ao vivo do Astro, retornando `{ entries, error }` para coleções e `{ entry, error }` para entradas individuais:
+
+```
+astro title="src/pages/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import Base from "../../layouts/Base.astro";
+
+const { entries: posts } = await getEmDashCollection("posts");
+---
+
+<Base title="Início">
+  <h1>Posts mais recentes</h1>
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/posts/${post.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+Para entradas individuais:
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+
+if (!post) {
+  return Astro.redirect("/404");
+}
+---
+
+<h1>{post.data.title}</h1>
+```
+
+## Gerar Tipos TypeScript
+
+Para segurança total de tipos, gere tipos a partir do esquema do seu banco de dados:
+
+```bash
+npx emdash types
+```
+
+Isso cria `.emdash/types.ts` com interfaces para todas as suas coleções. Seu editor agora autocompletará nomes de campos e detectará erros de tipo.
+
+## Próximos Passos
+
+Agora você tem um site EmDash funcionando! Aqui está para onde ir a seguir:
+
+- **[Conceitos Fundamentais](/pt/concepts/architecture/)** — Entenda como o EmDash funciona internamente
+- **[Trabalhando com Conteúdo](/pt/guides/working-with-content/)** — Aprenda a consultar e renderizar conteúdo
+- **[Biblioteca de Mídia](/pt/guides/media-library/)** — Faça upload e gerencie imagens e arquivos
+- **[Criar um Blog](/pt/guides/create-a-blog/)** — Construa um blog completo com categorias e tags
+- **[Implantar no Cloudflare](/pt/deployment/cloudflare/)** — Leve seu site para produção

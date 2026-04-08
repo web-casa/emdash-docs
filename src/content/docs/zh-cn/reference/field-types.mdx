@@ -1,0 +1,428 @@
+---
+title: 字段类型参考
+description: EmDash 所有字段类型的完整参考。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash 支持 14 种字段类型用于定义内容模式。每种类型都映射到一种 SQLite 列类型，并提供相应的管理界面。
+
+## 概述
+
+| 类型             | SQLite 列    | 描述                     |
+| ---------------- | ------------ | ------------------------ |
+| `string`         | TEXT         | 短文本输入               |
+| `text`           | TEXT         | 多行文本                 |
+| `number`         | REAL         | 十进制数字               |
+| `integer`        | INTEGER      | 整数                     |
+| `boolean`        | INTEGER      | 真/假                    |
+| `datetime`       | TEXT         | 日期和时间               |
+| `select`         | TEXT         | 从选项中选择单个值       |
+| `multiSelect`    | JSON         | 多选                     |
+| `portableText`   | JSON         | 富文本内容               |
+| `image`          | TEXT         | 图片引用                 |
+| `file`           | TEXT         | 文件引用                 |
+| `reference`      | TEXT         | 引用另一条目             |
+| `json`           | JSON         | 任意 JSON 数据           |
+| `slug`           | TEXT         | URL 安全标识符           |
+
+## 文本类型
+
+### `string`
+
+简短的单行文本。用于标题、名称和短值。
+
+```ts
+{
+  slug: "title",
+  label: "Title",
+  type: "string",
+  required: true,
+  validation: {
+    minLength: 1,
+    maxLength: 200,
+  },
+}
+```
+
+**验证选项：**
+
+- `minLength` — 最小字符数
+- `maxLength` — 最大字符数
+- `pattern` — 匹配的正则表达式模式
+
+**组件选项：**
+
+- 无特定选项
+
+### `text`
+
+多行纯文本。用于描述、摘要和较长的纯文本。
+
+```ts
+{
+  slug: "excerpt",
+  label: "Excerpt",
+  type: "text",
+  options: {
+    rows: 3,
+  },
+}
+```
+
+**验证选项：**
+
+- `minLength` — 最小字符数
+- `maxLength` — 最大字符数
+
+**组件选项：**
+
+- `rows` — 文本区域的行数（默认：3）
+
+### `slug`
+
+URL 安全标识符。可从其他字段自动生成或手动输入。
+
+```ts
+{
+  slug: "slug",
+  label: "URL Slug",
+  type: "slug",
+  required: true,
+  unique: true,
+}
+```
+
+Slug 会自动清理：转换为小写，空格替换为连字符，特殊字符被移除。
+
+## 数字类型
+
+### `number`
+
+十进制数字。用于价格、评分和测量值。
+
+```ts
+{
+  slug: "price",
+  label: "Price",
+  type: "number",
+  required: true,
+  validation: {
+    min: 0,
+    max: 999999.99,
+  },
+}
+```
+
+**验证选项：**
+
+- `min` — 最小值
+- `max` — 最大值
+
+存储为 SQLite REAL（64 位浮点数）。
+
+### `integer`
+
+整数。用于数量、计数和顺序值。
+
+```ts
+{
+  slug: "quantity",
+  label: "Quantity",
+  type: "integer",
+  defaultValue: 1,
+  validation: {
+    min: 0,
+    max: 1000,
+  },
+}
+```
+
+**验证选项：**
+
+- `min` — 最小值
+- `max` — 最大值
+
+存储为 SQLite INTEGER。
+
+### `boolean`
+
+真或假。用于开关和标志。
+
+```ts
+{
+  slug: "featured",
+  label: "Featured",
+  type: "boolean",
+  defaultValue: false,
+}
+```
+
+存储为 SQLite INTEGER（0 或 1）。
+
+## 日期和时间
+
+### `datetime`
+
+日期和时间值。以 ISO 8601 格式存储。
+
+```ts
+{
+  slug: "publishedAt",
+  label: "Published At",
+  type: "datetime",
+}
+```
+
+**验证选项：**
+
+- `min` — 最小日期（ISO 字符串）
+- `max` — 最大日期（ISO 字符串）
+
+**存储格式：** `2025-01-24T12:00:00.000Z`
+
+## 选择类型
+
+### `select`
+
+从预定义选项中进行单选。
+
+```ts
+{
+  slug: "status",
+  label: "Status",
+  type: "select",
+  required: true,
+  defaultValue: "draft",
+  validation: {
+    options: ["draft", "published", "archived"],
+  },
+}
+```
+
+**验证选项：**
+
+- `options` — 允许值的数组（必需）
+
+存储为包含所选值的 TEXT。
+
+### `multiSelect`
+
+从预定义选项中进行多选。
+
+```ts
+{
+  slug: "tags",
+  label: "Tags",
+  type: "multiSelect",
+  validation: {
+    options: ["news", "tutorial", "review", "opinion"],
+  },
+}
+```
+
+**验证选项：**
+
+- `options` — 允许值的数组（必需）
+
+存储为 JSON 数组：`["news", "tutorial"]`
+
+## 富内容类型
+
+### `portableText`
+
+使用 Portable Text 格式的富文本内容。支持标题、列表、链接、图片和自定义块。
+
+```ts
+{
+  slug: "content",
+  label: "Content",
+  type: "portableText",
+  required: true,
+}
+```
+
+存储为 Portable Text 块的 JSON 数组：
+
+```json
+[
+	{
+		"_type": "block",
+		"style": "normal",
+		"children": [{ "_type": "span", "text": "Hello world" }]
+	}
+]
+```
+
+插件可以向编辑器添加自定义块类型（嵌入、小部件等）。这些类型会出现在斜杠命令菜单中，并自动在网站上渲染。请参阅 [创建插件 — Portable Text 块类型](/zh-cn/plugins/creating-plugins/#portable-text-block-types)。
+
+<Aside>
+	Portable Text 是一种结构化富文本规范。详情请参阅
+	[portabletext.org](https://portabletext.org)。
+</Aside>
+
+## 媒体类型
+
+### `image`
+
+对已上传图片的引用。包含尺寸和替代文本等元数据。
+
+```ts
+{
+  slug: "featuredImage",
+  label: "Featured Image",
+  type: "image",
+  options: {
+    showPreview: true,
+  },
+}
+```
+
+**组件选项：**
+
+- `showPreview` — 在管理界面中显示图片预览（默认：true）
+
+**存储值：**
+
+```json
+{
+	"id": "01HXK5MZSN...",
+	"url": "https://cdn.example.com/image.jpg",
+	"alt": "Description",
+	"width": 1920,
+	"height": 1080
+}
+```
+
+### `file`
+
+对已上传文件（文档、PDF 等）的引用。
+
+```ts
+{
+  slug: "document",
+  label: "Document",
+  type: "file",
+}
+```
+
+**存储值：**
+
+```json
+{
+	"id": "01HXK5MZSN...",
+	"url": "https://cdn.example.com/doc.pdf",
+	"filename": "report.pdf",
+	"mimeType": "application/pdf",
+	"size": 102400
+}
+```
+
+## 关系类型
+
+### `reference`
+
+对另一个内容条目的引用。
+
+```ts
+{
+  slug: "author",
+  label: "Author",
+  type: "reference",
+  required: true,
+  options: {
+    collection: "authors",
+  },
+}
+```
+
+**组件选项：**
+
+- `collection` — 目标集合的 slug（必需）
+- `allowMultiple` — 允许多个引用（默认：false）
+
+**单个引用存储值：**
+
+```json
+"01HXK5MZSN..."
+```
+
+**多个引用存储值：**
+
+```json
+["01HXK5MZSN...", "01HXK6NATS..."]
+```
+
+## 灵活类型
+
+### `json`
+
+任意 JSON 数据。用于复杂的嵌套结构、第三方集成或无固定模式的数据。
+
+```ts
+{
+  slug: "metadata",
+  label: "Metadata",
+  type: "json",
+}
+```
+
+按原样存储在 SQLite JSON 列中。
+
+<Aside type="caution">JSON 字段没有验证。请谨慎用于真正动态的数据。</Aside>
+
+## 字段属性
+
+所有字段都支持以下通用属性：
+
+| 属性           | 类型         | 描述                         |
+| -------------- | ------------ | ---------------------------- |
+| `slug`         | `string`     | 唯一标识符（必需）           |
+| `label`        | `string`     | 显示名称（必需）             |
+| `type`         | `FieldType`  | 字段类型（必需）             |
+| `required`     | `boolean`    | 要求必须填写值（默认：false）|
+| `unique`       | `boolean`    | 强制唯一性（默认：false）    |
+| `defaultValue` | `unknown`    | 新条目的默认值               |
+| `validation`   | `object`     | 类型特定的验证规则           |
+| `widget`       | `string`     | 自定义组件覆盖               |
+| `options`      | `object`     | 组件配置                     |
+| `sortOrder`    | `number`     | 在管理界面中的显示顺序       |
+
+## 保留字段 Slug
+
+以下 slug 是保留的，不能使用：
+
+- `id`
+- `slug`
+- `status`
+- `author_id`
+- `created_at`
+- `updated_at`
+- `published_at`
+- `deleted_at`
+- `version`
+
+## TypeScript 类型
+
+导入字段类型以供编程使用：
+
+```ts
+import type { FieldType, Field, CreateFieldInput } from "emdash";
+
+const fieldTypes: FieldType[] = [
+	"string",
+	"text",
+	"number",
+	"integer",
+	"boolean",
+	"datetime",
+	"select",
+	"multiSelect",
+	"portableText",
+	"image",
+	"file",
+	"reference",
+	"json",
+	"slug",
+];
+```

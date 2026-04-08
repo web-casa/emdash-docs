@@ -1,0 +1,48 @@
+---
+title: EmDash vs WordPress
+description: EmDashとWordPressを、編集体験、デプロイモデル、拡張性、および最新のAstroベースサイトへの適合性の観点から比較します。
+lastUpdated: 2026-04-07
+sidebar:
+  label: EmDash vs WordPress
+---
+
+
+EmDashとWordPressは同じ問題の一部を解決しますが、非常に異なる前提で行います。
+
+WordPressは成熟した汎用CMSで、巨大なエコシステムを持っています。EmDashは、型安全なコンテンツモデル、モダンなアプリケーションスタック、Astroを離れることなくWordPress風の編集ワークフローを求めるチームに焦点を当てた、より新しいAstroネイティブのCMSです。
+
+## 高レベル比較
+
+| 領域 | WordPress | EmDash |
+| --- | --- | --- |
+| 主要スタック | PHP + MySQL | Astro + TypeScript + ランタイムストレージ |
+| 編集モデル | 組み込み管理UI | 組み込み管理UI |
+| フロントエンドモデル | テーマとPHPテンプレート | Astroコンポーネントとルート |
+| デプロイメントスタイル | 従来型CMSデプロイメント | 単一のAstro指向デプロイメント |
+| 型安全性 | デフォルトでは限定的 | 開発者体験のコア部分 |
+| プラグインの方向性 | 巨大な既存エコシステム | より小さく、新しく、焦点を絞ったエコシステム |
+
+## WordPressが依然として優位な点
+
+- 今日、巨大なプラグインマーケットプレイスが必要
+- チームが既に多くの成熟したWordPressサイトを運用している
+- プロジェクトが確立されたWordPress固有のコマースまたはマーケティングプラグインに依存している
+
+## EmDashがより魅力的な点
+
+- フロントエンドが既にAstroにある
+- 別個のヘッドレスCMSなしでランタイムコンテンツ更新を望む
+- より強力なTypeScriptエルゴノミクスを備えたWordPress風の編集パターンを望む
+- CMSとフロントエンドの分割ではなく、単一のアプリケーションサーフェスを好む
+
+## 移行マインドセット
+
+ほとんどのチームにとって、本当の比較は「どちらのCMSが普遍的に優れているか？」ではなく、「どちらのモデルがこのサイトの次のバージョンにより適しているか？」です。
+
+次のステップがコンテンツ重視のWordPressサイトをAstroに移行することである場合、EmDashは、実装をモダンなAstroスタックに移行しながら、慣れ親しんだ公開コンセプトを維持するため、しばしば魅力的です。
+
+## 関連記事
+
+- [EmDashとは？](/ja/what-is-emdash/)
+- [EmDashを使用したWordPressからAstroへの移行](/ja/wordpress-to-astro-with-emdash/)
+- [WordPressからEmDashへの移行](/ja/migration/from-wordpress/)

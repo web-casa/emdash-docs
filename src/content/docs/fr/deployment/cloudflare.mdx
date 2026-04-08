@@ -1,0 +1,272 @@
+---
+title: Déployer sur Cloudflare
+description: Déployez EmDash sur Cloudflare Workers avec D1 et R2.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Cloudflare Workers fournit un runtime rapide et mondialement distribué pour EmDash. Ce guide couvre le déploiement avec D1 pour la base de données et R2 pour le stockage des médias.
+
+## Prérequis
+
+- Un compte Cloudflare
+- L'interface en ligne de commande Wrangler installée (`npm install -g wrangler`)
+- Authentifié avec Cloudflare (`wrangler login`)
+
+## Créer les ressources
+
+### 1. Créer une base de données D1
+
+```bash
+wrangler d1 create emdash-db
+```
+
+Notez le `database_id` dans la sortie.
+
+### 2. Créer un compartiment R2
+
+```bash
+wrangler r2 bucket create emdash-media
+```
+
+### 3. Créer wrangler.jsonc
+
+Créez `wrangler.jsonc` à la racine de votre projet :
+
+```
+jsonc title="wrangler.jsonc"
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "my-emdash-site",
+	"compatibility_date": "2025-01-15",
+	"compatibility_flags": ["nodejs_compat"],
+
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "emdash-db",
+			"database_id": "your-database-id",
+		},
+	],
+
+	"r2_buckets": [
+		{
+			"binding": "MEDIA",
+			"bucket_name": "emdash-media",
+		},
+	],
+}
+```
+
+## Configurer EmDash
+
+Mettez à jour votre configuration Astro pour utiliser D1 et R2 :
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import cloudflare from "@astrojs/cloudflare";
+import emdash from "emdash/astro";
+import { d1, r2 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	output: "server",
+	adapter: cloudflare(),
+	integrations: [
+		emdash({
+			database: d1({ binding: "DB" }),
+			storage: r2({ binding: "MEDIA" }),
+		}),
+	],
+});
+```
+
+<Aside type="caution">
+	Les migrations D1 doivent être exécutées via l'interface en ligne de commande Wrangler avant le déploiement. Les instructions DDL ne sont pas autorisées au moment de l'exécution.
+</Aside>
+
+## Exécuter les migrations
+
+Générez et appliquez le schéma de la base de données.
+
+### 1. Exporter le schéma SQL
+
+```bash
+npx emdash init --database ./data.db
+```
+
+### 2. Appliquer les migrations à D1
+
+```bash
+wrangler d1 migrations apply emdash-db
+```
+
+Si vous n'avez pas de fichiers de migration, appliquez le schéma de base directement :
+
+```bash
+wrangler d1 execute emdash-db --file=./node_modules/emdash/migrations/0001_core.sql
+```
+
+## Déployer
+
+Déployez sur Cloudflare Workers :
+
+```bash
+wrangler deploy
+```
+
+Votre site est maintenant en ligne à l'adresse `https://my-emdash-site.<your-subdomain>.workers.dev`.
+
+## Réplicas de lecture
+
+Pour les sites mondialement distribués, activez la réplication en lecture de D1 pour acheminer les requêtes de lecture vers des réplicas à proximité au lieu de toujours interroger la base de données primaire. Cela réduit considérablement la latence pour les visiteurs éloignés de la région primaire.
+
+```
+js title="astro.config.mjs"
+emdash({
+	database: d1({
+		binding: "DB",
+		session: "auto",
+	}),
+	storage: r2({ binding: "MEDIA" }),
+}),
+```
+
+Vous devez également activer la réplication en lecture sur la base de données D1 elle-même dans le tableau de bord Cloudflare ou via l'API REST.
+
+Voir [Options de base de données — Réplicas de lecture](/fr/deployment/database/#read-replicas) pour les modes de session et le fonctionnement de la cohérence basée sur les signets.
+
+## Domaine personnalisé
+
+Ajoutez un domaine personnalisé dans le tableau de bord Cloudflare :
+
+1. Allez dans **Workers & Pages** > votre worker
+2. Cliquez sur **Custom Domains** > **Add Custom Domain**
+3. Entrez votre domaine et suivez les instructions de configuration DNS
+
+## Accès public à R2
+
+Pour servir les médias directement depuis R2 (recommandé pour les performances) :
+
+1. Dans le tableau de bord Cloudflare, allez dans **R2** > votre compartiment
+2. Cliquez sur **Settings** > **Public access**
+3. Activez l'accès public et notez l'URL publique
+4. Mettez à jour votre configuration de stockage :
+
+```
+js title="astro.config.mjs"
+storage: r2({
+  binding: "MEDIA",
+  publicUrl: "https://pub-xxx.r2.dev"
+}),
+```
+
+<Aside type="tip">
+	Pour la production, connectez un domaine personnalisé à votre compartiment R2 pour de meilleures URL et un contrôle de la mise en cache.
+</Aside>
+
+## Authentification Cloudflare Access
+
+Si votre organisation utilise Cloudflare Access, vous pouvez l'utiliser comme fournisseur d'authentification à la place des clés d'accès. Cela fournit une authentification unique avec votre fournisseur d'identité existant.
+
+```
+js title="astro.config.mjs"
+emdash({
+  database: d1({ binding: "DB" }),
+  storage: r2({ binding: "MEDIA" }),
+  auth: access({
+    teamDomain: "myteam.cloudflareaccess.com",
+    audience: "your-app-audience-tag",
+    roleMapping: {
+      "Admins": 50,
+      "Editors": 40,
+    },
+  }),
+}),
+```
+
+Consultez le [guide d'authentification](/fr/guides/authentication#cloudflare-access) pour toutes les options de configuration.
+
+## Variables d'environnement
+
+EmDash nécessite certains secrets pour l'authentification et la fonctionnalité de prévisualisation.
+
+### Secrets requis
+
+| Variable | Objectif |
+| -------- | ------- |
+| `EMDASH_AUTH_SECRET` | Signe les cookies de session et les jetons d'authentification. Requis pour la production. |
+| `EMDASH_PREVIEW_SECRET` | Signe les URL de prévisualisation pour le contenu en brouillon. Requis pour la fonctionnalité de prévisualisation. |
+
+Générez des secrets sécurisés :
+
+```bash
+npx emdash auth secret
+```
+
+Définissez les secrets via Wrangler :
+
+```bash
+wrangler secret put EMDASH_AUTH_SECRET
+wrangler secret put EMDASH_PREVIEW_SECRET
+```
+
+<Aside type="caution">
+Ne commettez jamais les secrets dans votre dépôt. Utilisez toujours `wrangler secret` pour les déploiements en production.
+</Aside>
+
+Accédez aux variables d'environnement dans votre configuration en utilisant `import.meta.env` ou la liaison Cloudflare `env`.
+
+## Déploiements de prévisualisation
+
+Déployez une branche de prévisualisation :
+
+```bash
+wrangler deploy --env preview
+```
+
+Ajoutez une section d'environnement à `wrangler.jsonc` :
+
+```
+jsonc
+{
+	"env": {
+		"preview": {
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "emdash-db-preview",
+					"database_id": "your-preview-db-id",
+				},
+			],
+		},
+	},
+}
+```
+
+## Dépannage
+
+### "Liaison D1 introuvable"
+
+Vérifiez que le nom de la liaison dans `wrangler.jsonc` correspond à votre configuration de base de données :
+
+```js
+// Must match: d1({ binding: "DB" })
+"binding": "DB"
+```
+
+### "Liaison R2 introuvable"
+
+Vérifiez que le compartiment R2 est correctement lié :
+
+```js
+// Must match: r2({ binding: "MEDIA" })
+"binding": "MEDIA"
+```
+
+### Erreurs de migration
+
+Les migrations D1 s'exécutent via Wrangler, pas au moment de l'exécution. Si vous voyez des erreurs de schéma :
+
+1. Vérifiez que les migrations ont été appliquées : `wrangler d1 migrations list emdash-db`
+2. Réappliquez si nécessaire : `wrangler d1 migrations apply emdash-db`

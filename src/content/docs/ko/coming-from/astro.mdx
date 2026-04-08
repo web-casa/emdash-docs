@@ -1,0 +1,400 @@
+---
+title: Astro 개발자를 위한 EmDash
+description: EmDash로 Astro 사이트에 WordPress 스타일 CMS 기능 추가하기
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash는 Astro를 위해 특별히 제작된 CMS입니다—일반적인 헤드리스 CMS에 Astro 어댑터를 붙인 것이 아닙니다. 데이터베이스 기반 콘텐츠, 세련된 관리자 UI, 그리고 WordPress 스타일의 기능(메뉴, 위젯, 분류 체계)을 제공하여 Astro 사이트를 확장하면서도, 개발자가 기대하는 개발자 경험을 그대로 유지합니다.
+
+여러분이 Astro에 대해 알고 있는 모든 것들은 여전히 적용됩니다. EmDash는 여러분의 사이트를 향상시키며, 기존 워크플로우를 대체하지 않습니다.
+
+## EmDash가 추가하는 것들
+
+EmDash는 파일 기반 Astro 사이트에서 부족한 콘텐츠 관리 기능을 제공합니다:
+
+| 기능              | 설명                                          |
+| -------------------- | ---------------------------------------------------- |
+| **관리자 UI**         | `/_emdash/admin`에서 접근 가능한 완전한 WYSIWYG 편집 인터페이스 |
+| **데이터베이스 저장소** | 콘텐츠가 SQLite, libSQL, 또는 Cloudflare D1에 저장됨   |
+| **미디어 라이브러리**    | 이미지와 파일 업로드, 정리, 제공         |
+| **네비게이션 메뉴** | 드래그 앤 드롭으로 관리 가능하며 중첩 지원           |
+| **위젯 영역**     | 동적 사이드바 및 푸터 영역                  |
+| **사이트 설정**    | 글로벌 구성(제목, 로고, 소셜 링크)     |
+| **분류 체계**       | 카테고리, 태그, 그리고 커스텀 분류 체계              |
+| **미리보기 시스템**   | 초안 콘텐츠를 위한 서명된 미리보기 URL                |
+| **리비전**        | 콘텐츠 버전 히스토리                              |
+
+<Aside type="tip">
+	콘텐츠 변경 사항은 사이트를 재빌드하지 않고도 즉시 반영됩니다. EmDash 사이트는 기본적으로 SSR 모드로
+	실행됩니다.
+</Aside>
+
+## Astro 콜렉션 vs EmDash
+
+Astro의 `astro:content` 콜렉션은 파일 기반이며 빌드 타임에 해결됩니다. EmDash 콜렉션은 데이터베이스 기반이며 런타임에 해결됩니다.
+
+|                    | Astro 콜렉션                    | EmDash 콜렉션                 |
+| ------------------ | ------------------------------------ | ------------------------------------ |
+| **저장소**        | `src/content/` 내의 Markdown/MDX 파일 | SQLite/D1 데이터베이스                   |
+| **편집**        | 코드 에디터                          | 관리자 UI                             |
+| **콘텐츠 형식** | 프론트매터가 포함된 Markdown            | Portable Text (구조화된 JSON)      |
+| **업데이트**        | 재빌드 필요                     | 즉시 (SSR)                        |
+| **스키마**         | `content.config.ts` 내의 Zod           | 관리자에서 정의, 데이터베이스에 저장 |
+| **적합한 용도**       | 개발자가 관리하는 콘텐츠            | 편집자가 관리하는 콘텐츠               |
+
+### 함께 사용하기
+
+Astro 콜렉션과 EmDash는 공존할 수 있습니다. 개발자 콘텐츠(문서, 변경 로그)에는 Astro 콜렉션을, 편집자 콘텐츠(블로그 포스트, 페이지)에는 EmDash를 사용하세요:
+
+```astro title="src/pages/index.astro"
+---
+import { getCollection } from "astro:content";
+import { getEmDashCollection } from "emdash";
+
+// 파일에서 가져온 개발자 관리 문서
+const docs = await getCollection("docs");
+
+// 데이터베이스에서 가져온 편집자 관리 포스트
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  limit: 5,
+});
+---
+```
+
+## 설정
+
+EmDash는 두 개의 설정 파일이 필요합니다.
+
+### Astro 통합
+
+```
+ts title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	output: "server", // Required for EmDash
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+### 라이브 콜렉션 로더
+
+```
+ts title="src/live.config.ts"
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({
+		loader: emdashLoader(),
+	}),
+};
+```
+
+이 설정은 EmDash를 라이브 콘텐츠 소스로 등록합니다. `_emdash` 콜렉션은 내부적으로 여러분의 콘텐츠 유형(포스트, 페이지, 제품)으로 라우팅됩니다.
+
+## 콘텐츠 쿼리
+
+EmDash는 Astro의 [라이브 콘텐츠 콜렉션](https://docs.astro.build/en/reference/experimental-flags/live-content-collections/) 패턴을 따르는 쿼리 함수를 제공하며, `{ entries, error }` 또는 `{ entry, error }`을 반환합니다:
+
+<Tabs>
+  <TabItem label="EmDash">
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+// 모든 발행된 포스트 가져오기 - { entries, error } 반환
+const { entries: posts } = await getEmDashCollection("posts", {
+status: "published",
+});
+
+// 슬러그로 단일 포스트 가져오기 - { entry, error, isPreview } 반환
+const { entry: post } = await getEmDashEntry("posts", "my-post");
+
+````
+  </TabItem>
+  <TabItem label="Astro">
+```ts
+import { getCollection, getEntry } from "astro:content";
+
+// 모든 블로그 항목 가져오기
+const posts = await getCollection("blog");
+
+// 슬러그로 단일 항목 가져오기
+const post = await getEntry("blog", "my-post");
+````
+
+  </TabItem>
+</Tabs>
+
+### 필터링 옵션
+
+`getEmDashCollection`은 Astro의 `getCollection`이 지원하지 않는 필터링을 지원합니다:
+
+```ts
+const { entries: posts } = await getEmDashCollection("posts", {
+	status: "published", // draft | published | archived
+	limit: 10, // max results
+	where: { category: "news" }, // taxonomy filter
+});
+```
+
+## 콘텐츠 렌더링
+
+EmDash는 리치 텍스트를 Portable Text(구조화된 JSON 형식)로 저장합니다. `PortableText` 컴포넌트로 렌더링하세요:
+
+<Tabs>
+  <TabItem label="EmDash">
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+
+if (!post) {
+return Astro.redirect("/404");
+}
+
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+  <PortableText value={post.data.content} />
+</article>
+```
+  </TabItem>
+  <TabItem label="Astro">
+```
+astro title="src/pages/blog/[slug].astro"
+---
+import { getEntry, render } from "astro:content";
+
+const { slug } = Astro.params;
+const post = await getEntry("blog", slug);
+const { Content } = await render(post);
+
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+  <Content />
+</article>
+```
+  </TabItem>
+</Tabs>
+
+<Aside>
+	Portable Text는 HTML을 임베드하지 않고 콘텐츠 구조를 보존합니다. 이는 콘텐츠를 렌더러 간에
+	이식 가능하게 만들고 XSS 취약점을 방지합니다.
+</Aside>
+
+## 동적 기능
+
+EmDash는 Astro의 콘텐츠 레이어에 존재하지 않는 WordPress 스타일의 기능을 위한 API를 제공합니다.
+
+### 네비게이션 메뉴
+
+```
+astro title="src/layouts/Base.astro"
+---
+import { getMenu } from "emdash";
+
+const primaryMenu = await getMenu("primary");
+---
+
+{primaryMenu && (
+  <nav>
+    <ul>
+      {primaryMenu.items.map(item => (
+        <li>
+          <a href={item.url}>{item.label}</a>
+          {item.children.length > 0 && (
+            <ul>
+              {item.children.map(child => (
+                <li><a href={child.url}>{child.label}</a>
+</li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+### 위젯 영역
+
+```
+astro title="src/layouts/BlogPost.astro"
+---
+import { getWidgetArea } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const sidebar = await getWidgetArea("sidebar");
+---
+
+{sidebar && sidebar.widgets.length > 0 && (
+  <aside>
+    {sidebar.widgets.map(widget => (
+      <div class="widget">
+        {widget.title && <h3>{widget.title}</h3>
+}
+        {widget.type === "content" && widget.content && (
+          <PortableText value={widget.content} />
+        )}
+      </div>
+    ))}
+  </aside>
+)}
+```
+
+### 사이트 설정
+
+```
+astro title="src/components/Header.astro"
+---
+import { getSiteSettings, getSiteSetting } from "emdash";
+
+const settings = await getSiteSettings();
+// 또는 개별 값 가져오기:
+const title = await getSiteSetting("title");
+---
+
+<header>
+  {settings.logo ? (
+    <img src={settings.logo.url} alt={settings.title} />
+  ) : (
+    <span>{settings.title}</span>
+  )}
+  {settings.tagline && <p>{settings.tagline}</p>
+}
+</header>
+```
+
+## 플러그인
+
+훅, 저장소, 설정, 그리고 관리자 UI를 추가하는 플러그인으로 EmDash를 확장하세요:
+
+```
+ts title="astro.config.mjs"
+import emdash from "emdash/astro";
+import seoPlugin from "@emdash-cms/plugin-seo";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			// ...
+			plugins: [seoPlugin({ generateSitemap: true })],
+		}),
+	],
+});
+```
+
+`definePlugin`으로 커스텀 플러그인을 생성하세요:
+
+```
+ts title="src/plugins/analytics.ts"
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+	capabilities: ["read:content"],
+
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			ctx.log.info("콘텐츠가 저장됨", { id: event.content.id });
+		},
+	},
+
+	admin: {
+		settingsSchema: {
+			trackingId: { type: "string", label: "Tracking ID" },
+		},
+	},
+});
+```
+
+## 서버 렌더링
+
+EmDash 사이트는 SSR 모드로 실행됩니다. 콘텐츠 변경 사항은 재빌드 없이 즉시 반영됩니다.
+
+`getStaticPaths`를 사용하는 정적 페이지의 경우, 콘텐츠는 빌드 시점에 가져옵니다:
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+export async function getStaticPaths() {
+  const { entries: posts } = await getEmDashCollection("posts", {
+    status: "published",
+  });
+
+  return posts.map((post) => ({
+    params: { slug: post.data.slug },
+  }));
+}
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+---
+```
+
+동적 페이지의 경우, 각 요청 시 콘텐츠를 가져오도록 `prerender = false`를 설정하세요:
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+export const prerender = false;
+
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("서버 오류", { status: 500 });
+}
+
+if (!post) {
+  return new Response(null, { status: 404 });
+}
+---
+```
+
+<Aside type="tip">
+	자주 업데이트되는 콘텐츠에는 서버 렌더링을 사용하세요. 드물게 변경되고 CDN 캐싱의 이점을 받는 콘텐츠에는 정적 생성을 사용하세요.
+</Aside>
+
+## 다음 단계
+
+<CardGrid>
+	<Card title="시작하기" icon="rocket">
+		[첫 번째 EmDash 사이트 만들기](/ko/getting-started/)를 5분 안에 완료하세요.
+	</Card>
+	<Card title="콘텐츠 쿼리" icon="document">
+		[쿼리 API](/ko/guides/querying-content/)를 자세히 알아보세요.
+	</Card>
+	<Card title="블로그 만들기" icon="pencil">
+		[카테고리와 태그가 포함된 완전한 블로그](/ko/guides/create-a-blog/)를 구축하세요.
+	</Card>
+	<Card title="Cloudflare에 배포" icon="external">
+		[Workers에서 사이트를 프로덕션으로](/ko/deployment/cloudflare/) 전환하세요.
+	</Card>
+</CardGrid>

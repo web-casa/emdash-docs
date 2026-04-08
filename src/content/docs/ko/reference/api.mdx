@@ -1,0 +1,493 @@
+---
+title: JavaScript API 참조
+description: EmDash 콘텐츠를 쿼리하고 관리하기 위한 프로그래밍 방식 API.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash는 콘텐츠 쿼리, 미디어 관리, 데이터베이스 작업을 위한 함수들을 내보냅니다.
+
+## 콘텐츠 쿼리
+
+EmDash의 쿼리 함수는 Astro의 [라이브 콘텐츠 컬렉션](https://docs.astro.build/en/reference/experimental-flags/live-content-collections/) 패턴을 따르며, 우아한 오류 처리를 위해 `{ entries, error }` 또는 `{ entry, error }`을 반환합니다.
+
+### `getEmDashCollection()`
+
+컬렉션의 모든 항목을 가져옵니다.
+
+```ts
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts, error } = await getEmDashCollection("posts");
+
+if (error) {
+	console.error("Failed to load posts:", error);
+}
+```
+
+#### 매개변수
+
+| 매개변수      | 유형                 | 설명                     |
+| ------------ | ------------------ | ----------------------- |
+| `collection` | `string`           | 컬렉션 슬러그             |
+| `options`    | `CollectionFilter` | 선택적 필터 옵션          |
+
+#### 옵션
+
+```ts
+interface CollectionFilter {
+	status?: "draft" | "published" | "archived";
+	limit?: number;
+	where?: Record<string, string | string[]>; // Filter by field or taxonomy
+}
+```
+
+#### 반환값
+
+```ts
+interface CollectionResult<T> {
+	entries: ContentEntry<T>[]; // Empty array if error or none found
+	error?: Error; // Set if query failed
+}
+```
+
+#### 예시
+
+```ts
+// Get all published posts
+const { entries: posts } = await getEmDashCollection("posts", {
+	status: "published",
+});
+
+// 최신 5개의 게시물 가져오기
+const { entries: latest } = await getEmDashCollection("posts", {
+	limit: 5,
+	status: "published",
+});
+
+// 분류로 필터링
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: "news" },
+});
+
+// 오류 처리
+const { entries, error } = await getEmDashCollection("posts");
+if (error) {
+	return new Response("Server error", { status: 500 });
+}
+```
+
+### `getEmDashEntry()`
+
+슬러그 또는 ID로 단일 항목을 가져옵니다.
+
+```ts
+import { getEmDashEntry } from "emdash";
+
+const { entry: post, error } = await getEmDashEntry("posts", "my-post-slug");
+
+if (!post) {
+	return Astro.redirect("/404");
+}
+```
+
+#### 매개변수
+
+| 매개변수      | 유형     | 설명               |
+| ------------ | -------- | ---------------- |
+| `collection` | `string` | 컬렉션 슬러그        |
+| `slugOrId`   | `string` | 항목 슬러그 또는 ID  |
+
+미리보기 모드는 자동으로 처리됩니다 — 미들웨어가 `_preview` 토큰을 감지하고 `AsyncLocalStorage`를 통해 초안 콘텐츠를 제공합니다. 옵션 매개변수가 필요하지 않습니다.
+
+#### 반환값
+
+```ts
+interface EntryResult<T> {
+	entry: ContentEntry<T> | null; // null if not found
+	error?: Error; // Set only for actual errors, not "not found"
+	isPreview: boolean; // true if draft content is being served
+}
+```
+
+#### 예시
+
+```ts
+// Get by slug
+const { entry: post } = await getEmDashEntry("posts", "hello-world");
+
+// ID로 가져오기
+const { entry: post } = await getEmDashEntry("posts", "01HXK5MZSN0FVXT2Q3KPRT9M7D");
+
+// 미리보기는 자동입니다 — 유효한 _preview 토큰이 있을 때 isPreview는 true입니다
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+// 오류 대비 찾을 수 없음 처리
+if (error) {
+	return new Response("Server error", { status: 500 });
+}
+if (!entry) {
+	return Astro.redirect("/404");
+}
+```
+
+## 콘텐츠 유형
+
+### `ContentEntry`
+
+쿼리 함수가 반환하는 항목:
+
+```ts
+interface ContentEntry<T = Record<string, unknown>> {
+	id: string;
+	data: T;
+	edit: EditProxy; // Visual editing annotations
+}
+```
+
+`edit` 프록시는 시각적 편집 주석을 제공합니다. 이를 요소에 전개하여 인라인 편집을 활성화하세요: `{...entry.edit.title}`. 프로덕션에서는 출력이 생성되지 않습니다.
+
+`data` 객체는 모든 콘텐츠 필드와 시스템 필드를 포함합니다:
+
+- `id` - 고유 식별자
+- `slug` - URL 친화적 식별자
+- `status` - "draft" | "published" | "archived"
+- `createdAt` - ISO 타임스탬프
+- `updatedAt` - ISO 타임스탬프
+- `publishedAt` - ISO 타임스탬프 또는 null
+- 컬렉션 스키마에 정의된 모든 사용자 정의 필드
+
+## 데이터베이스 함수
+
+### `createDatabase()`
+
+데이터베이스 연결을 생성합니다.
+
+```ts
+import { createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+```
+
+<Aside type="caution">
+	직접 데이터베이스 접근은 고급 사용 사례를 위한 것입니다. 콘텐츠 접근에는 쿼리 함수를 선호하세요.
+</Aside>
+
+### `runMigrations()`
+
+보류 중인 데이터베이스 마이그레이션을 실행합니다.
+
+```ts
+import { createDatabase, runMigrations } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const { applied } = await runMigrations(db);
+console.log(`Applied ${applied.length} migrations`);
+```
+
+### `getMigrationStatus()`
+
+마이그레이션 상태를 확인합니다.
+
+```ts
+import { createDatabase, getMigrationStatus } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const status = await getMigrationStatus(db);
+// { applied: ["0001_core", ...], pending: [] }
+```
+
+## 저장소
+
+저수준 데이터 접근을 위한 저장소.
+
+### `ContentRepository`
+
+```ts
+import { ContentRepository, createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const repo = new ContentRepository(db);
+
+// 여러 항목 찾기
+const { items, nextCursor } = await repo.findMany("posts", {
+	limit: 10,
+	where: { status: "published" },
+});
+
+// ID로 찾기
+const post = await repo.findById("posts", "01HXK5MZSN...");
+
+// 생성
+const newPost = await repo.create({
+	type: "posts",
+	slug: "new-post",
+	data: { title: "New Post", content: [] },
+	status: "draft",
+});
+
+// 업데이트
+const updated = await repo.update("posts", "01HXK5MZSN...", {
+	data: { title: "Updated Title" },
+});
+
+// 삭제
+await repo.delete("posts", "01HXK5MZSN...");
+```
+
+### `MediaRepository`
+
+```ts
+import { MediaRepository, createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const repo = new MediaRepository(db);
+
+// 미디어 목록
+const { items } = await repo.findMany({ limit: 20 });
+
+// ID로 가져오기
+const media = await repo.findById("01HXK5MZSN...");
+
+// 생성 (업로드 후)
+const newMedia = await repo.create({
+	filename: "photo.jpg",
+	mimeType: "image/jpeg",
+	size: 12345,
+	storageKey: "uploads/photo.jpg",
+});
+```
+
+## 스키마 레지스트리
+
+프로그래밍 방식의 스키마 관리.
+
+```ts
+import { SchemaRegistry, createDatabase } from "emdash";
+
+const db = createDatabase({ url: "file:./data.db" });
+const registry = new SchemaRegistry(db);
+
+// 컬렉션 목록
+const collections = await registry.listCollections();
+
+// 필드와 함께 컬렉션 가져오기
+const postsSchema = await registry.getCollectionWithFields("posts");
+
+// 컬렉션 생성
+await registry.createCollection({
+	slug: "products",
+	label: "Products",
+	labelSingular: "Product",
+	supports: ["drafts", "revisions"],
+});
+
+// 필드 추가
+await registry.createField("products", {
+	slug: "price",
+	label: "Price",
+	type: "number",
+	required: true,
+});
+```
+
+## 미리보기 시스템
+
+### `generatePreviewToken()`
+
+초안 콘텐츠를 위한 미리보기 토큰을 생성합니다.
+
+```ts
+import { generatePreviewToken } from "emdash";
+
+const token = await generatePreviewToken({
+	contentId: "posts:01HXK5MZSN...",
+	secret: process.env.EMDASH_ADMIN_SECRET,
+	expiresIn: 3600, // 1 hour
+});
+```
+
+### `verifyPreviewToken()`
+
+미리보기 토큰을 검증합니다.
+
+```ts
+import { verifyPreviewToken } from "emdash";
+
+const result = await verifyPreviewToken({
+	token,
+	secret: process.env.EMDASH_ADMIN_SECRET,
+});
+
+if (result.valid) {
+	const { cid, exp, iat } = result.payload;
+	// cid는 "collection:id" 형식입니다, 예: "posts:my-draft-post"
+}
+```
+
+### `isPreviewRequest()`
+
+요청에 미리보기 토큰이 포함되어 있는지 확인합니다.
+
+```ts
+import { isPreviewRequest, getPreviewToken } from "emdash";
+
+if (isPreviewRequest(Astro.request)) {
+	const token = getPreviewToken(Astro.request);
+	// Verify and show preview content
+}
+```
+
+## 콘텐츠 변환기
+
+Portable Text와 ProseMirror 형식 간 변환.
+
+```ts
+import { prosemirrorToPortableText, portableTextToProsemirror } from "emdash";
+
+// ProseMirror (편집기)에서 Portable Text (저장)로
+const portableText = prosemirrorToPortableText(prosemirrorDoc);
+
+// Portable Text에서 ProseMirror로
+const prosemirrorDoc = portableTextToProsemirror(portableText);
+```
+
+## 사이트 설정
+
+```ts
+import { getSiteSettings, getSiteSetting } from "emdash";
+
+// 모든 설정 가져오기
+const settings = await getSiteSettings();
+
+// 단일 설정 가져오기
+const title = await getSiteSetting("siteTitle");
+```
+
+설정은 런타임 API에서 읽기 전용입니다. 업데이트하려면 관리자 API를 사용하세요.
+
+## 메뉴
+
+```ts
+import { getMenu, getMenus } from "emdash";
+
+// 모든 메뉴 가져오기
+const menus = await getMenus();
+
+// 항목과 함께 특정 메뉴 가져오기
+const primaryMenu = await getMenu("primary");
+
+if (primaryMenu) {
+	primaryMenu.items.forEach(item => {
+		console.log(item.label, item.url);
+		// 드롭다운용 중첩 항목
+		item.children.forEach(child => console.log("  -", child.label));
+	});
+}
+```
+
+## 분류
+
+```ts
+import { getTaxonomyTerms, getTerm, getEntryTerms, getEntriesByTerm } from "emdash";
+
+// 분류에 대한 모든 용어 가져오기 (계층적 구조의 경우 트리 구조)
+const categories = await getTaxonomyTerms("category");
+
+// 단일 용어 가져오기
+const news = await getTerm("category", "news");
+
+// 콘텐츠 항목에 할당된 용어 가져오기
+const postCategories = await getEntryTerms("posts", "post-123", "category");
+
+// 특정 용어가 지정된 항목 가져오기
+const newsPosts = await getEntriesByTerm("posts", "category", "news");
+```
+
+## 위젯 영역
+
+```ts
+import { getWidgetArea, getWidgetAreas } from "emdash";
+
+// 모든 위젯 영역 가져오기
+const areas = await getWidgetAreas();
+
+// 위젯이 포함된 특정 위젯 영역 가져오기
+const sidebar = await getWidgetArea("sidebar");
+
+if (sidebar) {
+	sidebar.widgets.forEach(widget => {
+		console.log(widget.type, widget.title);
+	});
+}
+```
+
+## 섹션
+
+```ts
+import { getSection, getSections, getSectionCategories } from "emdash";
+
+// 모든 섹션 가져오기
+const sections = await getSections();
+
+// 섹션 필터링
+const heroes = await getSections({ category: "hero" });
+const themeSections = await getSections({ source: "theme" });
+const results = await getSections({ search: "newsletter" });
+
+// 단일 섹션 가져오기
+const cta = await getSection("newsletter-cta");
+
+// 카테고리 가져오기
+const categories = await getSectionCategories();
+```
+
+## 검색
+
+```ts
+import { search, searchCollection } from "emdash";
+
+// 컬렉션 전체 글로벌 검색
+const results = await search("hello world", {
+	collections: ["posts", "pages"],
+	status: "published",
+	limit: 20,
+});
+
+// 결과에는 하이라이트가 포함된 스니펫이 포함됨
+results.forEach(result => {
+	console.log(result.title);
+	console.log(result.snippet); // Contains <mark> tags
+	console.log(result.score);
+});
+
+// 컬렉션별 검색
+const posts = await searchCollection("posts", "typescript", {
+	limit: 10,
+});
+```
+
+## 오류 처리
+
+EmDash는 특정 실패 처리를 위한 오류 클래스를 내보냅니다:
+
+```ts
+import {
+  EmDashDatabaseError,
+  EmDashValidationError,
+  EmDashStorageError,
+  SchemaError,
+} from "emdash";
+
+try {
+  await repo.create({ ... });
+} catch (error) {
+  if (error instanceof EmDashValidationError) {
+    console.error("Validation failed:", error.message);
+  }
+  if (error instanceof SchemaError) {
+    console.error("Schema error:", error.code, error.details);
+  }
+}
+```

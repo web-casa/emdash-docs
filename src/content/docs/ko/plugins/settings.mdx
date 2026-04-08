@@ -1,0 +1,334 @@
+---
+title: 플러그인 설정
+description: 설정 스키마와 KV 저장소를 사용하여 플러그인을 구성합니다.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+플러그인은 구성이 필요합니다—API 키, 기능 플래그, 표시 설정 등. EmDash는 두 가지 메커니즘을 제공합니다: 관리자가 구성 가능한 옵션을 위한 **설정 스키마**와 프로그래밍 방식 접근을 위한 **KV 저장소**입니다.
+
+## 설정 스키마
+
+관리자 UI를 자동 생성하려면 `admin.settingsSchema`에 설정 스키마를 선언하세요:
+
+```typescript
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "seo",
+	version: "1.0.0",
+
+	admin: {
+		settingsSchema: {
+			siteTitle: {
+				type: "string",
+					label: "사이트 제목",
+					description: "title 태그와 메타 정보에 사용됩니다",
+				default: "",
+			},
+			maxTitleLength: {
+				type: "number",
+				label: "Max Title Length",
+				description: "Characters before truncation",
+				default: 60,
+				min: 30,
+				max: 100,
+			},
+			generateSitemap: {
+				type: "boolean",
+				label: "Generate Sitemap",
+				description: "Automatically generate sitemap.xml",
+				default: true,
+			},
+			defaultRobots: {
+				type: "select",
+				label: "Default Robots",
+				options: [
+					{ value: "index,follow", label: "Index & Follow" },
+					{ value: "noindex,follow", label: "No Index, Follow" },
+					{ value: "noindex,nofollow", label: "No Index, No Follow" },
+				],
+				default: "index,follow",
+			},
+			apiKey: {
+				type: "secret",
+				label: "API Key",
+				description: "Encrypted at rest",
+			},
+		},
+	},
+});
+```
+
+EmDash는 플러그인의 관리자 섹션에 설정 폼을 생성합니다. 사용자는 코드를 건드리지 않고 설정을 편집할 수 있습니다.
+
+<Aside type="caution">
+	2026년 4월 7일 기준, 이 문서화된 자동 생성 설정 UI는 아직 완전히 연결되지 않은 것으로 보입니다. `admin.settingsSchema`만 의존하기 전에 현재 구현 격차에 대해서는 [이슈 #341](https://github.com/emdash-cms/emdash/issues/341)을 참조하세요.
+</Aside>
+
+## 필드 유형
+
+### 문자열
+
+한 줄 또는 여러 줄 문자열을 위한 텍스트 입력.
+
+```typescript
+siteTitle: {
+  type: "string",
+  label: "사이트 제목",
+  description: "선택형 도움말 텍스트",
+  default: "내 사이트",
+  multiline: false  // textarea 로 쓰려면 true
+}
+```
+
+### 숫자
+
+선택적 최소/최대 제약 조건이 있는 숫자 입력.
+
+```typescript
+maxItems: {
+  type: "number",
+  label: "Maximum Items",
+  default: 100,
+  min: 1,
+  max: 1000
+}
+```
+
+### 불리언
+
+참/거짓 값을 위한 토글 스위치.
+
+```typescript
+enabled: {
+  type: "boolean",
+  label: "Enabled",
+  description: "Turn this feature on or off",
+  default: true
+}
+```
+
+### 선택
+
+미리 정의된 옵션을 위한 드롭다운.
+
+```typescript
+theme: {
+  type: "select",
+  label: "Theme",
+  options: [
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+    { value: "auto", label: "System" }
+  ],
+  default: "auto"
+}
+```
+
+### 비밀
+
+API 키와 같은 민감한 값을 위한 암호화된 필드. 저장 후 클라이언트로 전송되지 않습니다.
+
+```typescript
+apiKey: {
+  type: "secret",
+  label: "API Key",
+  description: "Stored encrypted"
+}
+```
+
+<Aside type="caution">
+	비밀 필드는 사이트의 암호화 키를 사용하여 저장 시 암호화됩니다. 초기 저장 후 관리자 UI에 노출되지 않으며—마스킹된 자리 표시자만 표시됩니다.
+</Aside>
+
+## 설정 접근
+
+훅과 라우트에서 `ctx.kv`를 통해 설정을 읽으세요:
+
+```typescript
+"content:beforeSave": async (event, ctx) => {
+  // Read a setting
+  const maxLength = await ctx.kv.get<number>("settings:maxTitleLength");
+  const apiKey = await ctx.kv.get<string>("settings:apiKey");
+
+  // 설정되지 않은 경우 기본값 사용
+  const limit = maxLength ?? 60;
+
+  ctx.log.info("Using max length", { limit });
+  return event.content;
+}
+```
+
+설정은 관례적으로 `settings:` 접두사와 함께 저장됩니다. 이는 사용자 구성 가능한 값과 내부 플러그인 상태를 구분합니다.
+
+## KV 저장소 API
+
+KV 저장소(`ctx.kv`)는 플러그인 데이터를 위한 범용 키-값 저장소입니다:
+
+```typescript
+interface KVAccess {
+	get<T>(key: string): Promise<T | null>;
+	set(key: string, value: unknown): Promise<void>;
+	delete(key: string): Promise<boolean>;
+	list(prefix?: string): Promise<Array<{ key: string; value: unknown }>>;
+}
+```
+
+### 값 읽기
+
+```typescript
+// Get a single value
+const enabled = await ctx.kv.get<boolean>("settings:enabled");
+
+// 타입과 함께 가져오기
+const config = await ctx.kv.get<{ url: string; timeout: number }>("state:config");
+```
+
+### 값 쓰기
+
+```typescript
+// Set a value
+await ctx.kv.set("settings:lastSync", new Date().toISOString());
+
+// 복잡한 값 설정
+await ctx.kv.set("state:cache", {
+	data: items,
+	expiry: Date.now() + 3600000,
+});
+```
+
+### 값 나열
+
+```typescript
+// List all settings
+const settings = await ctx.kv.list("settings:");
+// Returns: [{ key: "settings:enabled", value: true }, ...]
+
+// 모든 플러그인 키 나열
+const all = await ctx.kv.list();
+```
+
+### 값 삭제
+
+```typescript
+const deleted = await ctx.kv.delete("state:tempData");
+// Returns true if key existed
+```
+
+## 키 명명 규칙
+
+KV 데이터를 구성하려면 접두사를 사용하세요:
+
+| 접두사      | 목적                           | 예시               |
+| ----------- | ----------------------------- | ----------------- |
+| `settings:` | 사용자 구성 가능한 환경 설정 | `settings:apiKey` |
+| `state:`    | 내부 플러그인 상태             | `state:lastSync`  |
+| `cache:`    | 캐시된 데이터                   | `cache:results`   |
+
+```typescript
+// Good: clear prefixes
+await ctx.kv.set("settings:webhookUrl", url);
+await ctx.kv.set("state:lastRun", timestamp);
+await ctx.kv.set("cache:feed", feedData);
+
+// 피하세요: 접두사 없음, 목적 불명확
+await ctx.kv.set("url", url);
+```
+
+<Aside type="tip">
+	`settings:` 접두사는 자동 생성 설정 UI에 표시되는 값을 위한 관례입니다. 다른 접두사들은 플러그인 내부 사용을 위한 것입니다.
+</Aside>
+
+## 설정 vs 저장소 vs KV
+
+올바른 저장 메커니즘을 선택하세요:
+
+| 사용 사례                   | 메커니즘                                          |
+| -------------------------- | -------------------------------------------------- |
+| 관리자 편집 가능한 환경 설정 | `admin.settingsSchema` + `ctx.kv` with `settings:` |
+| 내부 플러그인 상태          | `ctx.kv` with `state:`                             |
+| 문서 컬렉션                | `ctx.storage`                                      |
+
+**설정**은 사용자 구성 가능한 값—관리자가 변경할 수 있는 것들—을 위한 것입니다. 자동 생성 UI를 갖습니다.
+
+**KV**는 타임스탬프, 동기화 커서, 캐시된 계산과 같은 내부 상태를 위한 것입니다. UI 없이 코드만 사용합니다.
+
+**저장소**는 인덱싱된 쿼리가 가능한 문서 컬렉션—폼 제출, 감사 로그 등—을 위한 것입니다.
+
+## 라우트에서 설정 로드
+
+API 라우트는 설정을 관리자 UI 컴포넌트에 노출할 수 있습니다:
+
+```typescript
+routes: {
+  settings: {
+    handler: async (ctx) => {
+      const settings = await ctx.kv.list("settings:");
+      const result: Record<string, unknown> = {};
+
+      for (const entry of settings) {
+        const key = entry.key.replace("settings:", "");
+        result[key] = entry.value;
+      }
+
+      return result;
+    }
+  },
+
+  "settings/save": {
+    handler: async (ctx) => {
+      const input = ctx.input as Record<string, unknown>;
+
+      for (const [key, value] of Object.entries(input)) {
+        if (value !== undefined) {
+          await ctx.kv.set(`settings:${key}`, value);
+        }
+      }
+
+      return { success: true };
+    }
+  }
+}
+```
+
+## 기본값
+
+`settingsSchema`의 설정은 자동으로 유지되지 않습니다. 이들은 관리자 UI의 기본값입니다. 코드는 누락된 값을 처리해야 합니다:
+
+```typescript
+"content:afterSave": async (event, ctx) => {
+  // Always provide a fallback
+  const enabled = await ctx.kv.get<boolean>("settings:enabled") ?? true;
+  const maxItems = await ctx.kv.get<number>("settings:maxItems") ?? 100;
+
+  if (!enabled) return;
+  // ...
+}
+```
+
+또는 `plugin:install`에서 기본값을 유지하세요:
+
+```typescript
+hooks: {
+  "plugin:install": async (_event, ctx) => {
+    // Persist schema defaults
+    await ctx.kv.set("settings:enabled", true);
+    await ctx.kv.set("settings:maxItems", 100);
+  }
+}
+```
+
+## 저장소 구현
+
+KV 값은 플러그인 네임스페이스 키와 함께 `_options` 테이블에 저장됩니다:
+
+```sql
+INSERT INTO _options (name, value) VALUES
+  ('plugin:seo:settings:siteTitle', '"내 사이트"'),
+  ('plugin:seo:settings:maxTitleLength', '60');
+```
+
+`plugin:seo:` 접두사가 자동으로 추가됩니다. 코드는 `settings:siteTitle`을 사용하고, EmDash는 이를 `plugin:seo:settings:siteTitle`로 저장합니다.
+
+이를 통해 플러그인이 서로의 데이터를 실수로 덮어쓰지 않도록 합니다.

@@ -1,0 +1,335 @@
+---
+title: Vorschaumodus
+description: Aktivieren Sie sichere Vorschauen für Entwurfsinhalte vor der Veröffentlichung.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Das Vorschausystem von EmDash ermöglicht es Redakteuren, unveröffentlichte Inhalte über sichere, zeitlich begrenzte URLs anzusehen. Vorschaulinks verwenden HMAC-SHA256-signierte Token, die Sie mit Prüfern teilen können, ohne den gesamten Entwurfsinhalt offenzulegen.
+
+## Funktionsweise
+
+1. Der Administrator generiert eine Vorschau-URL für einen Beitragsentwurf
+2. Die URL enthält einen signierten `_preview`-Query-Parameter mit einer Ablaufzeit
+3. Die Middleware von EmDash überprüft den Token automatisch und richtet den Request-Kontext ein
+4. Ihr Template-Code ruft `getEmDashEntry()` wie gewohnt auf – Entwurfsinhalte werden automatisch ausgeliefert
+
+Die Vorschau ist **implizit**. Ihr Template-Code muss keine Token verarbeiten oder Vorschauoptionen übergeben – die Middleware und die Abfragefunktionen erledigen alles über `AsyncLocalStorage`.
+
+## Vorschau einrichten
+
+Fügen Sie ein Vorschau-Geheimnis zu Ihrer Umgebung hinzu:
+
+```bash title=".env"
+EMDASH_PREVIEW_SECRET="your-random-secret-key-here"
+```
+
+Generieren Sie einen sicheren, zufälligen String. Dieses Geheimnis signiert und verifiziert Vorschau-Token.
+
+Damit ist die Einrichtung abgeschlossen. Ihre vorhandenen Templates funktionieren automatisch mit der Vorschau:
+
+```astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+
+// Keine spezielle Vorschau-Behandlung nötig – die Middleware
+// erkennt _preview-Token und liefert Entwurfsinhalte automatisch aus
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+{isPreview && (
+  <div class="preview-banner">
+    Sie sehen eine Vorschau. Dieser Inhalt ist noch nicht veröffentlicht.
+  </div>
+)}
+
+<article>
+  <h1>{entry.data.title}</h1>
+</article>
+```
+
+Das Flag `isPreview` ist `true`, wenn Entwurfsinhalte über einen gültigen Vorschau-Token ausgeliefert werden.
+
+## Vorschau-URLs generieren
+
+Verwenden Sie `getPreviewUrl()`, um Vorschaulinks zu erstellen:
+
+```ts
+import { getPreviewUrl } from "emdash";
+
+const previewUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	expiresIn: "1h",
+});
+// Gibt zurück: /posts/my-draft-post?_preview=eyJjaWQ...
+```
+
+Mit einer Basis-URL für absolute Links:
+
+```ts
+const fullUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	baseUrl: "https://example.com",
+});
+// Gibt zurück: https://example.com/posts/my-draft-post?_preview=eyJjaWQ...
+```
+
+Mit einem benutzerdefinierten Pfadmuster:
+
+```ts
+const blogUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	pathPattern: "/blog/{id}",
+});
+// Gibt zurück: /blog/my-draft-post?_preview=eyJjaWQ...
+```
+
+## Token-Ablauf
+
+Steuern Sie, wie lange Vorschaulinks gültig bleiben:
+
+```ts
+// 1 Stunde gültig (Standard)
+await getPreviewUrl({ ..., expiresIn: "1h" });
+
+// 30 Minuten gültig
+await getPreviewUrl({ ..., expiresIn: "30m" });
+
+// 1 Tag gültig
+await getPreviewUrl({ ..., expiresIn: "1d" });
+
+// 2 Wochen gültig
+await getPreviewUrl({ ..., expiresIn: "2w" });
+
+// 3600 Sekunden gültig
+await getPreviewUrl({ ..., expiresIn: 3600 });
+```
+
+Unterstützte Einheiten: `s` (Sekunden), `m` (Minuten), `h` (Stunden), `d` (Tage), `w` (Wochen).
+
+## Token verifizieren
+
+Verwenden Sie `verifyPreviewToken()`, um eingehende Vorschau-Requests zu validieren:
+
+```ts
+import { verifyPreviewToken } from "emdash";
+
+// Von einer URL (extrahiert den _preview-Query-Parameter)
+const result = await verifyPreviewToken({
+	url: Astro.url,
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+});
+
+// Oder direkt mit einem Token
+const result = await verifyPreviewToken({
+	token: someTokenString,
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+});
+```
+
+Das Ergebnis zeigt an, ob der Token gültig ist:
+
+```ts
+if (result.valid) {
+	// Token ist gültig
+	console.log(result.payload.cid); // "posts:my-draft-post"
+	console.log(result.payload.exp); // Expiry timestamp
+	console.log(result.payload.iat); // Issued-at timestamp
+} else {
+	// Token ist ungültig
+	console.log(result.error);
+	// "none" - kein Token vorhanden
+	// "malformed" - die Token-Struktur ist ungültig
+	// "invalid" - die Signaturprüfung ist fehlgeschlagen
+	// "expired" - der Token ist abgelaufen
+}
+```
+
+## Vorschau-Indikator
+
+Sie können einen visuellen Indikator anzeigen, wenn Inhalte in der Vorschau betrachtet werden. Das von `getEmDashEntry` zurückgegebene Flag `isPreview` zeigt Ihnen an, wann Entwurfsinhalte ausgeliefert werden:
+
+```astro
+{isPreview && (
+  <div class="preview-banner" role="alert">
+    <strong>Vorschau</strong>
+    {" "}Sie sehen unveröffentlichte Inhalte.
+    <a href={Astro.url.pathname}>Vorschau verlassen</a>
+  </div>
+)}
+```
+
+<Aside type="tip">
+	Für authentifizierte Redakteure, die visuelle Bearbeitung nutzen, injiziert EmDash automatisch eine schwebende Toolbar,
+	die den Bearbeitungs-/Vorschaumodus anzeigt. Sie benötigen nur ein benutzerdefiniertes Vorschaubanner für geteilte Vorschaulinks.
+</Aside>
+
+## Hilfsfunktionen
+
+### `isPreviewRequest(url)`
+
+Prüfen, ob eine URL einen Vorschau-Token enthält:
+
+```ts
+import { isPreviewRequest } from "emdash";
+
+if (isPreviewRequest(Astro.url)) {
+	// Vorschau-Anfrage verarbeiten
+}
+```
+
+### `getPreviewToken(url)`
+
+Den Token-String aus einer URL extrahieren:
+
+```ts
+import { getPreviewToken } from "emdash";
+
+const token = getPreviewToken(Astro.url);
+// Gibt den Token-String oder null zurück
+```
+
+### `parseContentId(contentId)`
+
+Eine Content-ID in Sammlung und ID parsen:
+
+```ts
+import { parseContentId } from "emdash";
+
+const { collection, id } = parseContentId("posts:my-draft-post");
+// { collection: "posts", id: "my-draft-post" }
+```
+
+## Token-Format
+
+Vorschau-Token verwenden ein kompaktes Format: `base64url(payload).base64url(signature)`
+
+Der Payload enthält:
+
+- `cid` — Content-ID im Format `collection:id`
+- `exp` — Ablaufzeitstempel (Sekunden seit der Epoche)
+- `iat` — Ausstellungszeitstempel (Sekunden seit der Epoche)
+
+Token werden mit HMAC-SHA256 unter Verwendung Ihres Vorschau-Geheimnisses signiert.
+
+<Aside type="caution">
+	Halten Sie Ihr `EMDASH_PREVIEW_SECRET` sicher. Jeder mit diesem Geheimnis kann gültige Vorschau-Token für
+	beliebige Inhalte generieren.
+</Aside>
+
+## Vollständiges Beispiel
+
+Eine vollständige Blogbeitragsseite mit Vorschau- und visueller Bearbeitungsunterstützung:
+
+```astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import BaseLayout from "../../../layouts/Base.astro";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+
+// Vorschau ist automatisch – Middleware übernimmt die Token-Verifizierung
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+<BaseLayout title={entry.data.title}>
+  {isPreview && (
+    <div class="preview-banner" role="alert">
+      <strong>Vorschau</strong>
+      {" "}Dieser Inhalt ist noch nicht veröffentlicht.
+    </div>
+  )}
+
+  <article {...entry.edit}>
+    <header>
+      <h1 {...entry.edit.title}>{entry.data.title}</h1>
+      {entry.data.publishedAt && (
+        <time datetime={entry.data.publishedAt.toISOString()}>
+          {entry.data.publishedAt.toLocaleDateString()}
+        </time>
+      )}
+      {isPreview && !entry.data.publishedAt && (
+        <span class="draft-indicator">Entwurf</span>
+      )}
+    </header>
+
+    <div class="content" {...entry.edit.content}>
+      <PortableText value={entry.data.content} />
+    </div>
+  </article>
+</BaseLayout>
+```
+
+Beachten Sie die Spreads `{...entry.edit}` und `{...entry.edit.title}`: Sie fügen `data-emdash-ref`-Attribute hinzu, die die visuelle Bearbeitung für authentifizierte Redakteure aktivieren. In der Produktion erzeugen sie keine sichtbare Ausgabe.
+
+## API-Referenz
+
+### `getPreviewUrl(options)`
+
+Generiert eine Vorschau-URL mit einem signierten Token.
+
+**Optionen:**
+
+- `collection` — Sammlungsslug (String)
+- `id` — Content-ID oder Slug (String)
+- `secret` — Signiergeheimnis (String)
+- `expiresIn` — Gültigkeitsdauer des Tokens (Standard: `"1h"`)
+- `baseUrl` — Optionale Basis-URL für absolute Links
+- `pathPattern` — URL-Muster mit `{collection}` und `{id}` Platzhaltern (Standard: `"/{collection}/{id}"`)
+
+**Gibt zurück:** `Promise<string>`
+
+### `verifyPreviewToken(options)`
+
+Verifiziert einen Vorschau-Token.
+
+**Optionen:**
+
+- `secret` — Verifizierungsgeheimnis (String)
+- `url` — URL, aus der der Token extrahiert werden soll, ODER
+- `token` — Token-String direkt
+
+**Gibt zurück:** `Promise<VerifyPreviewTokenResult>`
+
+```ts
+type VerifyPreviewTokenResult =
+	| { valid: true; payload: PreviewTokenPayload }
+	| { valid: false; error: "invalid" | "expired" | "malformed" | "none" };
+```
+
+### `generatePreviewToken(options)`
+
+Generiert einen Token, ohne eine URL zu erstellen.
+
+**Optionen:**
+
+- `contentId` — Content-ID im Format `collection:id`
+- `expiresIn` — Gültigkeitsdauer des Tokens (Standard: `"1h"`)
+- `secret` — Signiergeheimnis
+
+**Gibt zurück:** `Promise<string>`

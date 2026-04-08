@@ -1,0 +1,677 @@
+---
+title: シードファイル形式
+description: EmDashシードファイルの構造と構文に関するリファレンス。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+シードファイルは、EmDashサイトをブートストラップするJSONドキュメントです。コレクション、フィールド、タクソノミー、メニュー、リダイレクト、ウィジェットエリア、サイト設定、およびオプションのサンプルコンテンツを定義します。
+
+## ルート構造
+
+```json
+{
+	"$schema": "https://emdashcms.com/seed.schema.json",
+	"version": "1",
+	"meta": {},
+	"settings": {},
+	"collections": [],
+	"taxonomies": [],
+	"bylines": [],
+	"menus": [],
+	"redirects": [],
+	"widgetAreas": [],
+	"sections": [],
+	"content": {}
+}
+```
+
+| フィールド         | タイプ     | 必須 | 説明                           |
+| ------------- | -------- | -------- | ------------------------------------- |
+| `$schema`     | `string` | いいえ       | エディタ検証用のJSONスキーマURL |
+| `version`     | `"1"`    | はい      | シードフォーマットバージョン                   |
+| `meta`        | `object` | いいえ       | シードに関するメタデータ               |
+| `settings`    | `object` | いいえ       | サイト設定                         |
+| `collections` | `array`  | いいえ       | コレクション定義                |
+| `taxonomies`  | `array`  | いいえ       | タクソノミー定義                  |
+| `bylines`     | `array`  | いいえ       | バイラインプロフィール定義            |
+| `menus`       | `array`  | いいえ       | ナビゲーションメニュー                      |
+| `redirects`   | `array`  | いいえ       | リダイレクトルール                        |
+| `widgetAreas` | `array`  | いいえ       | ウィジェットエリア定義               |
+| `sections`    | `array`  | いいえ       | 再利用可能なコンテンツブロック               |
+| `content`     | `object` | いいえ       | サンプルコンテンツエントリー                |
+
+## メタ
+
+シードに関するオプションのメタデータ:
+
+```json
+{
+	"meta": {
+		"name": "Blog Starter",
+		"description": "A simple blog with posts, pages, and categories",
+		"author": "EmDash"
+	}
+}
+```
+
+## 設定
+
+サイト全体の設定値:
+
+```json
+{
+	"settings": {
+			"title": "私のサイト",
+			"tagline": "モダンなCMS",
+		"postsPerPage": 10,
+		"dateFormat": "MMMM d, yyyy"
+	}
+}
+```
+
+設定は `site:` プレフィックス付きで `options` テーブルに適用されます。セットアップウィザードでは、ユーザーが `title` と `tagline` を上書きできます。
+
+## コレクション
+
+コレクション定義は、データベース内にコンテンツタイプを作成します:
+
+```json
+{
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Posts",
+			"labelSingular": "Post",
+			"description": "Blog posts",
+			"icon": "file-text",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{
+					"slug": "title",
+					"label": "Title",
+					"type": "string",
+					"required": true
+				},
+				{
+					"slug": "content",
+					"label": "Content",
+					"type": "portableText"
+				},
+				{
+					"slug": "featured_image",
+					"label": "Featured Image",
+					"type": "image"
+				}
+			]
+		}
+	]
+}
+```
+
+### コレクションのプロパティ
+
+| プロパティ        | タイプ     | 必須 | 説明                                  |
+| --------------- | -------- | -------- | -------------------------------------------- |
+| `slug`          | `string` | はい      | URLセーフな識別子（小文字、アンダースコア） |
+| `label`         | `string` | はい      | 複数形の表示名                          |
+| `labelSingular` | `string` | いいえ       | 単数形の表示名                        |
+| `description`   | `string` | いいえ       | 管理UIでの説明                         |
+| `icon`          | `string` | いいえ       | Lucideアイコン名                             |
+| `supports`      | `array`  | いいえ       | 機能: `"drafts"`, `"revisions"`          |
+| `fields`        | `array`  | はい      | フィールド定義                            |
+
+### フィールドのプロパティ
+
+| プロパティ       | タイプ      | 必須 | 説明                          |
+| -------------- | --------- | -------- | ------------------------------------ |
+| `slug`         | `string`  | はい      | カラム名（小文字、アンダースコア） |
+| `label`        | `string`  | はい      | 表示名                         |
+| `type`         | `string`  | はい      | フィールドタイプ                           |
+| `required`     | `boolean` | いいえ       | バリデーション: フィールドは値を持たなければならない  |
+| `unique`       | `boolean` | いいえ       | バリデーション: 値は一意でなければならない     |
+| `defaultValue` | `any`     | いいえ       | 新規エントリーのデフォルト値        |
+| `validation`   | `object`  | いいえ       | 追加のバリデーションルール          |
+| `widget`       | `string`  | いいえ       | 管理UIウィジェットのオーバーライド             |
+| `options`      | `object`  | いいえ       | ウィジェット固有の設定        |
+
+### フィールドタイプ
+
+| タイプ           | 説明                | 保存形式         |
+| -------------- | -------------------------- | ----------------- |
+| `string`       | 短いテキスト                 | `TEXT`            |
+| `text`         | 長いテキスト（テキストエリア）       | `TEXT`            |
+| `number`       | 数値              | `REAL`            |
+| `integer`      | 整数               | `INTEGER`         |
+| `boolean`      | 真/偽                 | `INTEGER`         |
+| `date`         | 日付値                 | `TEXT` (ISO 8601) |
+| `datetime`     | 日付と時刻              | `TEXT` (ISO 8601) |
+| `email`        | メールアドレス              | `TEXT`            |
+| `url`          | URL                        | `TEXT`            |
+| `slug`         | URLセーフな文字列            | `TEXT`            |
+| `portableText` | リッチテキストコンテンツ          | `JSON`            |
+| `image`        | 画像参照            | `JSON`            |
+| `file`         | ファイル参照             | `JSON`            |
+| `json`         | 任意のJSON             | `JSON`            |
+| `reference`    | 他のエントリーへの参照 | `TEXT`            |
+
+## タクソノミー
+
+コンテンツの分類システム:
+
+```json
+{
+	"taxonomies": [
+		{
+			"name": "category",
+				"label": "カテゴリー",
+				"labelSingular": "カテゴリー",
+			"hierarchical": true,
+			"collections": ["posts"],
+			"terms": [
+					{ "slug": "news", "label": "ニュース" },
+					{ "slug": "tutorials", "label": "チュートリアル" },
+				{
+					"slug": "advanced",
+						"label": "上級チュートリアル",
+					"parent": "tutorials"
+				}
+			]
+		},
+		{
+			"name": "tag",
+			"label": "Tags",
+			"labelSingular": "Tag",
+			"hierarchical": false,
+			"collections": ["posts"]
+		}
+	]
+}
+```
+
+### タクソノミーのプロパティ
+
+| プロパティ        | タイプ      | 必須 | 説明                                    |
+| --------------- | --------- | -------- | ---------------------------------------------- |
+| `name`          | `string`  | はい      | 一意の識別子                              |
+| `label`         | `string`  | はい      | 複数形の表示名                            |
+| `labelSingular` | `string`  | いいえ       | 単数形の表示名                          |
+| `hierarchical`  | `boolean` | はい      | ネストされた用語を許可するか（カテゴリー）またはフラット（タグ） |
+| `collections`   | `array`   | はい      | このタクソノミーが適用されるコレクション           |
+| `terms`         | `array`   | いいえ       | 事前定義された用語                              |
+
+### 用語のプロパティ
+
+| プロパティ      | タイプ     | 必須 | 説明                          |
+| ------------- | -------- | -------- | ------------------------------------ |
+| `slug`        | `string` | はい      | URLセーフな識別子                  |
+| `label`       | `string` | はい      | 表示名                         |
+| `description` | `string` | いいえ       | 用語の説明                     |
+| `parent`      | `string` | いいえ       | 親用語のスラッグ（階層型のみ） |
+
+## メニュー
+
+管理パネルから編集可能なナビゲーションメニュー:
+
+```json
+{
+	"menus": [
+		{
+			"name": "primary",
+				"label": "メインナビゲーション",
+				"items": [
+					{ "type": "custom", "label": "ホーム", "url": "/" },
+					{ "type": "page", "ref": "about" },
+				{ "type": "custom", "label": "Blog", "url": "/posts" },
+				{
+					"type": "custom",
+					"label": "External",
+					"url": "https://example.com",
+					"target": "_blank"
+				}
+			]
+		}
+	]
+}
+```
+
+### メニュー項目タイプ
+
+| タイプ         | 説明                          | 必須フィールド         |
+| ------------ | ---------------------------- | ------------------- |
+| `custom`     | カスタムURL                   | `url`               |
+| `page`       | ページエントリへのリンク         | `ref`               |
+| `post`       | 投稿エントリへのリンク         | `ref`               |
+| `taxonomy`   | タクソノミーアーカイブへのリンク   | `ref`, `collection` |
+| `collection` | コレクションアーカイブへのリンク | `collection`        |
+
+### メニュー項目のプロパティ
+
+| プロパティ     | タイプ     | 説明                                      |
+| ------------ | -------- | ------------------------------------------------ |
+| `type`       | `string` | 項目タイプ (上記参照)                            |
+| `label`      | `string` | 表示テキスト (ページ/投稿参照の場合は自動生成) |
+| `url`        | `string` | カスタムURL (`custom` タイプ用)                   |
+| `ref`        | `string` | シード内のコンテンツID (`page`/`post` タイプ用)     |
+| `collection` | `string` | コレクションスラッグ                                  |
+| `target`     | `string` | `"_blank"` で新しいウィンドウを開く                        |
+| `titleAttr`  | `string` | HTML title属性                             |
+| `cssClasses` | `string` | カスタムCSSクラス                               |
+| `children`   | `array`  | ネストされたメニュー項目                                |
+
+## バイライン
+
+バイラインプロファイルは所有権 (`author_id`) とは別です。再利用可能なバイラインIDを一度定義し、コンテンツエントリから参照します。
+
+```json
+{
+	"bylines": [
+		{
+			"id": "editorial",
+			"slug": "emdash-editorial",
+			"displayName": "EmDash Editorial"
+		},
+		{
+			"id": "guest",
+			"slug": "guest-contributor",
+			"displayName": "Guest Contributor",
+			"isGuest": true
+		}
+	]
+}
+```
+
+| プロパティ     | タイプ      | 必須 | 説明                                |
+| ------------ | --------- | -------- | ------------------------------------------ |
+| `id`         | `string`  | はい      | `content[].bylines` で使用されるシードローカルID  |
+| `slug`       | `string`  | はい      | URLセーフなバイラインスラッグ                       |
+| `displayName`| `string`  | はい      | テンプレートやAPIで表示される名前           |
+| `bio`        | `string`  | いいえ       | オプションのプロフィール文                       |
+| `websiteUrl` | `string`  | いいえ       | オプションのウェブサイトURL                       |
+| `isGuest`    | `boolean` | いいえ       | バイラインをゲストプロファイルとしてマーク              |
+
+## リダイレクト
+
+移行後にレガシーURLを維持するためのリダイレクトルール:
+
+```json
+{
+	"redirects": [
+		{ "source": "/old-about", "destination": "/about" },
+		{ "source": "/legacy-feed", "destination": "/rss.xml", "type": 308 },
+		{
+			"source": "/category/news",
+			"destination": "/categories/news",
+			"groupName": "migration"
+		}
+	]
+}
+```
+
+### リダイレクトのプロパティ
+
+| プロパティ      | タイプ      | 必須 | 説明                                        |
+| ------------- | --------- | -------- | -------------------------------------------------- |
+| `source`      | `string`  | はい      | ソースパス (`/` で始まる必要あり)                  |
+| `destination` | `string`  | はい      | 宛先パス (`/` で始まる必要あり)             |
+| `type`        | `number`  | いいえ       | HTTPステータス: `301`, `302`, `307`, または `308`         |
+| `enabled`     | `boolean` | いいえ       | リダイレクトが有効かどうか (デフォルト: `true`)   |
+| `groupName`   | `string`  | いいえ       | 管理パネルでのフィルタリング/検索用のオプションのグループラベル |
+
+<Aside type="caution">
+	`source` と `destination` はローカルパスである必要があります。外部URL、プロトコル相対パス (`//...`)、
+	パストラバーサルセグメント (`..`)、および改行文字はシード検証で拒否されます。
+</Aside>
+
+## ウィジェットエリア
+
+設定可能なコンテンツ領域:
+
+```json
+{
+	"widgetAreas": [
+		{
+			"name": "sidebar",
+				"label": "メインサイドバー",
+				"description": "ブログ記事と固定ページに表示されます",
+			"widgets": [
+				{
+					"type": "component",
+						"title": "最近の投稿",
+					"componentId": "core:recent-posts",
+					"props": { "count": 5 }
+				},
+				{
+					"type": "menu",
+						"title": "クイックリンク",
+					"menuName": "footer"
+				},
+				{
+					"type": "content",
+						"title": "このサイトについて",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+								"children": [{ "_type": "span", "text": "私たちのサイトへようこそ！" }]
+						}
+					]
+				}
+			]
+		}
+	]
+}
+```
+
+### ウィジェットタイプ
+
+| タイプ        | 説明          | 必須フィールド           |
+| ----------- | -------------------- | ------------------------- |
+| `content`   | リッチテキストコンテンツ    | `content` (Portable Text) |
+| `menu`      | メニューをレンダリング       | `menuName`                |
+| `component` | 登録済みコンポーネント | `componentId`             |
+
+### 組み込みコンポーネント
+
+| コンポーネントID        | 説明          |
+| ------------------- | -------------------- |
+| `core:recent-posts` | 最近の投稿一覧 |
+| `core:categories`   | カテゴリー一覧        |
+| `core:tags`         | タグクラウド            |
+| `core:search`       | 検索フォーム          |
+| `core:archives`     | 月別アーカイブ     |
+
+## セクション
+
+編集者が `/section` スラッシュコマンドを介してPortable Textフィールドに挿入できる再利用可能なコンテンツブロック:
+
+```json
+{
+	"sections": [
+		{
+			"slug": "hero-centered",
+			"title": "Centered Hero",
+			"description": "Full-width hero with centered heading and CTA button",
+			"keywords": ["hero", "banner", "header", "landing"],
+			"content": [
+				{
+					"_type": "block",
+					"style": "h1",
+						"children": [{ "_type": "span", "text": "私たちのサイトへようこそ" }]
+				},
+				{
+					"_type": "block",
+					"children": [
+						{ "_type": "span", "text": "Your compelling tagline goes here." }
+					]
+				}
+			]
+		}
+	]
+}
+```
+
+### セクションのプロパティ
+
+| プロパティ      | タイプ     | 必須 | 説明                                     |
+| ------------- | -------- | -------- | ----------------------------------------------- |
+| `slug`        | `string` | はい      | URLセーフな識別子                             |
+| `title`       | `string` | はい      | セクションピッカーに表示される名前        |
+| `description` | `string` | いいえ       | このセクションを使用するタイミングの説明               |
+| `keywords`    | `array`  | いいえ       | セクションを検索するためのキーワード            |
+| `content`     | `array`  | はい      | Portable Textブロック                            |
+| `source`      | `string` | いいえ       | `"theme"` (シードのデフォルト) または `"import"`     |
+
+シードファイルからのセクションは `source: "theme"` とマークされ、管理UIから削除できません。編集者は独自のセクション (`source: "user"`) を作成でき、コンテンツ編集時に任意のセクションタイプを挿入できます。
+
+## コンテンツ
+
+コレクション別に整理されたサンプルコンテンツ:
+
+```json
+{
+	"content": {
+		"posts": [
+			{
+				"id": "hello-world",
+				"slug": "hello-world",
+				"status": "published",
+				"bylines": [
+					{ "byline": "editorial" },
+					{ "byline": "guest", "roleLabel": "Guest essay" }
+				],
+				"data": {
+						"title": "はじめまして",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+								"children": [{ "_type": "span", "text": "ようこそ！" }]
+						}
+					],
+						"excerpt": "最初の投稿です。"
+				},
+				"taxonomies": {
+					"category": ["news"],
+					"tag": ["welcome", "first-post"]
+				}
+			}
+		],
+		"pages": [
+			{
+				"id": "about",
+				"slug": "about",
+				"status": "published",
+				"data": {
+					"title": "About Us",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+							"children": [{ "_type": "span", "text": "About page content." }]
+						}
+					]
+				}
+			}
+		]
+	}
+}
+```
+
+### コンテンツエントリのプロパティ
+
+| プロパティ     | タイプ     | 必須 | 説明                                         |
+| ------------ | -------- | -------- | --------------------------------------------------- |
+| `id`         | `string` | はい      | 参照用のシードローカルID                        |
+| `slug`       | `string` | はい      | URLスラッグ                                            |
+| `status`     | `string` | いいえ       | `"published"` または `"draft"` (デフォルト: `"published"`) |
+| `data`       | `object` | はい      | フィールド値                                        |
+| `bylines`    | `array`  | いいえ       | 順序付きバイラインクレジット (`byline`, オプションの `roleLabel`) |
+| `taxonomies` | `object` | いいえ       | タクソノミー名別のターム割り当て                   |
+
+## コンテンツ参照
+
+`$ref:` プレフィックスを使用して他のコンテンツエントリを参照:
+
+```json
+{
+	"data": {
+		"related_posts": ["$ref:another-post", "$ref:third-post"]
+	}
+}
+```
+
+`$ref:` プレフィックスは、シード中にシードIDをデータベースIDに解決します。
+
+## メディア参照
+
+URLから画像を含める:
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"url": "https://images.unsplash.com/photo-xxx",
+				"alt": "Description of the image",
+				"filename": "hero.jpg",
+				"caption": "Photo by Someone"
+			}
+		}
+	}
+}
+```
+
+`.emdash/media/` からローカル画像を含める:
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"file": "hero.jpg",
+				"alt": "Description of the image"
+			}
+		}
+	}
+}
+```
+
+### メディアプロパティ
+
+| プロパティ   | 型       | 必須     | 説明                                   |
+| ---------- | -------- | -------- | ------------------------------------ |
+| `url`      | `string` | はい\*    | ダウンロードするリモートURL               |
+| `file`     | `string` | はい\*    | `.emdash/media/` 内のローカルファイル名 |
+| `alt`      | `string` | いいえ       | アクセシビリティのための代替テキスト           |
+| `filename` | `string` | いいえ       | ファイル名を上書きする                    |
+| `caption`  | `string` | いいえ       | メディアのキャプション                        |
+
+\*`url` または `file` のいずれかが必須です。両方は必要ありません。
+
+<Aside>
+	メディアはシーディング中にダウンロードされます。大きな画像はセットアップウィザードを遅くする可能性があります。サンプルコンテンツには圧縮画像やサムネイル版の使用を検討してください。
+</Aside>
+
+## プログラムによるシードの適用
+
+CLIツールやスクリプトでシードAPIを使用する:
+
+```typescript
+import { applySeed, validateSeed } from "emdash/seed";
+import seedData from "../../themes/.emdash/seed.json";
+
+// 最初に検証する
+const validation = validateSeed(seedData);
+if (!validation.valid) {
+	console.error(validation.errors);
+	process.exit(1);
+}
+
+// シードを適用する
+const result = await applySeed(db, seedData, {
+	includeContent: true,
+	onConflict: "skip",
+	storage: myStorage,
+	baseUrl: "http://localhost:4321",
+});
+
+console.log(result);
+// {
+//   collections: { created: 2, skipped: 0 },
+//   fields: { created: 8, skipped: 0 },
+//   taxonomies: { created: 2, terms: 5 },
+//   bylines: { created: 2, skipped: 0 },
+//   menus: { created: 1, items: 4 },
+//   redirects: { created: 3, skipped: 0 },
+//   widgetAreas: { created: 1, widgets: 3 },
+//   settings: { applied: 3 },
+//   content: { created: 3, skipped: 0 },
+//   media: { created: 2, skipped: 0 }
+// }
+```
+
+### 適用オプション
+
+| オプション           | 型        | デフォルト  | 説明                                 |
+| ---------------- | --------- | -------- | ---------------------------------- |
+| `includeContent` | `boolean` | `false`  | サンプルコンテンツエントリを作成する      |
+| `onConflict`     | `string`  | `"skip"` | `"skip"`, `"update"`, または `"error"` |
+| `mediaBasePath`  | `string`  | —        | ローカルメディアファイルのベースパス    |
+| `storage`        | `Storage` | —        | メディアアップロード用のストレージアダプター  |
+| `baseUrl`        | `string`  | —        | メディアURLのベースURL            |
+
+## べき等性
+
+シーディングは複数回実行しても安全です。エンティティタイプごとの競合時の動作:
+
+| エンティティ              | 動作                              |
+| ------------------- | ------------------------------------- |
+| コレクション          | スラッグが存在する場合はスキップ                   |
+| フィールド               | コレクション + スラッグが存在する場合はスキップ      |
+| タクソノミー定義 | 名前が存在する場合はスキップ                   |
+| タクソノミーターム       | 名前 + スラッグが存在する場合はスキップ            |
+| バイラインプロファイル      | スラッグが存在する場合はスキップ                   |
+| メニュー                | 名前が存在する場合はスキップ                   |
+| メニュー項目          | すべて置き換える (メニューは再作成される)       |
+| リダイレクト            | ソースが存在する場合はスキップ                 |
+| ウィジェットエリア         | 名前が存在する場合はスキップ                   |
+| ウィジェット             | すべて置き換える (エリアは再作成される)       |
+| セクション             | スラッグが存在する場合はスキップ                   |
+| 設定            | 更新する (設定は変更されることを意図している) |
+| コンテンツ             | コレクション内でスラッグが存在する場合はスキップ     |
+
+<Aside type="caution">
+	メニュー項目とウィジェットは**置き換え**られ、マージされません。シードファイルがメニューとウィジェットエリア構造の信頼できる情報源です。
+</Aside>
+
+## 検証
+
+シードファイルは適用前に検証されます:
+
+```typescript
+import { validateSeed } from "emdash/seed";
+
+const { valid, errors, warnings } = validateSeed(seedData);
+
+if (!valid) {
+	errors.forEach((e) => console.error(e));
+}
+
+warnings.forEach((w) => console.warn(w));
+```
+
+検証チェック:
+
+- 必須フィールドが存在する
+- スラッグが命名規則に従っている (小文字、アンダースコア)
+- フィールドタイプが有効である
+- 参照が既存のコンテンツを指している
+- 階層的なタームの親が存在する
+- リダイレクトパスが安全なローカルURLである
+- リダイレクトソースが一意である
+- コレクション内に重複するスラッグがない
+
+## CLIコマンド
+
+```bash
+# Apply seed file
+npx emdash seed .emdash/seed.json
+
+# サンプルコンテンツなしで適用
+npx emdash seed .emdash/seed.json --no-content
+
+# 検証のみ実行
+npx emdash seed .emdash/seed.json --validate
+
+# 現在のスキーマをシードとしてエクスポート
+npx emdash export-seed > seed.json
+
+# コンテンツを含めてエクスポート
+npx emdash export-seed --with-content > seed.json
+```
+
+## 次のステップ
+
+- **[テーマの作成](/ja/themes/creating-themes/)** — 完全なテーマを構築する
+- **[テーマの概要](/ja/themes/overview/)** — テーマの仕組み

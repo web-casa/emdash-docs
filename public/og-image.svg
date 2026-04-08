@@ -1,0 +1,30 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="92" y1="48" x2="1110" y2="582" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF6E5"/>
+      <stop offset="1" stop-color="#F8C56D"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="92" y1="76" x2="1108" y2="554" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#191611"/>
+      <stop offset="1" stop-color="#2B2219"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" rx="36" fill="url(#bg)"/>
+  <rect x="74" y="68" width="1052" height="494" rx="34" fill="url(#panel)"/>
+  <rect x="118" y="118" width="172" height="30" rx="15" fill="#F4AE45"/>
+  <text x="136" y="138" fill="#17130E" font-size="12" font-weight="700" letter-spacing="0.9" font-family="Helvetica, Arial, sans-serif">THIRD-PARTY DOCS</text>
+
+  <text x="118" y="296" fill="#FFF9EE" font-size="86" font-weight="700" font-family="Helvetica, Arial, sans-serif">HiEmdash Docs</text>
+
+  <text x="118" y="372" fill="#EED8B0" font-size="30" font-weight="500" font-family="Helvetica, Arial, sans-serif">
+    Guides, FAQs, and multilingual translations for EmDash
+  </text>
+
+  <text x="118" y="438" fill="#A98857" font-size="24" font-weight="500" font-family="Helvetica, Arial, sans-serif">
+    Community-built documentation for new and multilingual EmDash users
+  </text>
+
+  <rect x="118" y="478" width="244" height="10" rx="5" fill="#F4AE45"/>
+  <rect x="118" y="504" width="160" height="10" rx="5" fill="#6F583A"/>
+</svg>

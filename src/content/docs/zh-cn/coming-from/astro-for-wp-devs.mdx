@@ -1,0 +1,535 @@
+---
+title: Astro 面向 WordPress 开发者
+description: 通过您已掌握的 WordPress 概念来学习 Astro 基础知识
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Astro 是一个用于构建以内容为中心的网站的 Web 框架。当使用 EmDash 时，Astro 会取代您的 WordPress 主题——它负责处理模板、路由和渲染。
+
+本指南通过将 Astro 基础知识映射到您已经理解的 WordPress 概念来进行教学。
+
+## 关键范式转变
+
+<CardGrid>
+	<Card title="默认服务器端渲染" icon="laptop">
+		与 PHP 类似，Astro 代码在服务器上运行。与 PHP 不同的是，它默认输出静态 HTML，不包含任何 JavaScript。
+	</Card>
+	<Card title="除非添加，否则零 JS" icon="rocket">
+		WordPress 会自动加载 jQuery 和主题脚本。除非您明确添加，否则 Astro 不会向浏览器发送任何内容。
+	</Card>
+	<Card title="基于组件的架构" icon="puzzle">
+		不再使用分散的模板标签和包含文件，而是使用可组合、自包含的组件进行构建。
+	</Card>
+	<Card title="基于文件的路由" icon="document">
+		无需重写规则或 `query_vars`。`src/pages/` 中的文件结构直接定义您的 URL。
+	</Card>
+</CardGrid>
+
+## 项目结构
+
+WordPress 主题具有扁平结构，并使用特定的文件名。Astro 使用明确的目录：
+
+| WordPress                   | Astro              | 用途               |
+| --------------------------- | ------------------ | ------------------ |
+| `index.php`, `single.php`   | `src/pages/`       | 路由 (URL)         |
+| `template-parts/`           | `src/components/`  | 可复用的 UI 片段   |
+| `header.php` + `footer.php` | `src/layouts/`     | 页面包装器         |
+| `style.css`                 | `src/styles/`      | 全局 CSS           |
+| `functions.php`             | `astro.config.mjs` | 站点配置           |
+
+一个典型的 Astro 项目：
+
+```
+src/
+├── components/        # Reusable UI (Header, PostCard, etc.)
+├── layouts/           # Page shells (Base.astro)
+├── pages/             # Routes - files become URLs
+│   ├── index.astro    # → /
+│   ├── posts/
+│   │   ├── index.astro      # → /posts
+│   │   └── [slug].astro     # → /posts/hello-world
+│   └── [slug].astro   # → /about, /contact, etc.
+└── styles/
+    └── global.css
+```
+
+## Astro 组件
+
+`.astro` 文件相当于 Astro 中的 PHP 模板。每个文件包含两部分：
+
+1. **Frontmatter**（位于 `---` 分隔符之间）—— 服务器端代码，类似于模板顶部的 PHP
+2. **模板** —— 包含表达式的 HTML，类似于 PHP 模板的其余部分
+
+```astro title="src/components/PostCard.astro"
+---
+// Frontmatter: runs on server, never sent to browser
+interface Props {
+  title: string;
+  excerpt: string;
+  url: string;
+}
+
+const { title, excerpt, url } = Astro.props;
+---
+<!-- Template: outputs HTML -->
+<article class="post-card">
+  <h2><a href={url}>{title}</a></h2>
+  <p>{excerpt}</p>
+</article>
+```
+
+与 PHP 的主要区别：
+
+-   **Frontmatter 是隔离的。** 在其中声明的变量在模板中可用，但代码本身永远不会到达浏览器。
+-   **导入放在 frontmatter 中。** 组件、数据、工具函数——全部在顶部导入。
+-   **支持 TypeScript。** 使用 `interface Props` 定义属性类型，以获得编辑器自动补全和验证。
+
+## 模板表达式
+
+Astro 模板使用 `{curly braces}` 而不是 `<?php ?>` 标签。语法类似 JSX，但输出纯 HTML。
+
+<Tabs>
+<TabItem label="Astro">
+
+```astro title="src/components/PostList.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts");
+const showTitle = true;
+---
+{showTitle && <h1>Latest Posts</h1>}
+
+{posts.length > 0 ? (
+  <ul>
+    {posts.map(post => (
+      <li>
+        <a href={`/posts/${post.id}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+) : (
+  <p>No posts found.</p>
+)}
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php title="template-parts/post-list.php"
+<?php
+$posts = new WP_Query(['post_type' => 'post']);
+$show_title = true;
+?>
+
+<?php if ($show_title): ?>
+  <h1>Latest Posts</h1>
+<?php endif; ?>
+
+<?php if ($posts->have_posts()): ?>
+  <ul>
+    <?php while ($posts->have_posts()): $posts->the_post(); ?>
+      <li>
+        <a href="<?php the_permalink(); ?>"><?php the_title(); ?></a>
+      </li>
+    <?php endwhile; wp_reset_postdata(); ?>
+  </ul>
+<?php else: ?>
+  <p>No posts found.</p>
+<?php endif; ?>
+```
+
+</TabItem>
+</Tabs>
+
+### 表达式模式
+
+| 模式                                | 用途               |
+| -------------------------------------- | --------------------- |
+| `{variable}`                           | 输出一个值        |
+| `{condition && <Element />}`           | 条件渲染 |
+| `{condition ? <A /> : <B />}`          | 条件分支              |
+| `{items.map(item => <Li>{item}</Li>)}` | 循环                 |
+
+<Aside>
+	与 PHP 不同，您不需要转义输出。Astro 默认转义表达式，防止 XSS 漏洞。
+</Aside>
+
+## Props 和 Slots
+
+组件通过 **props**（类似于函数参数）和 **slots**（类似于 `do_action` 插入点）接收数据。
+
+<Tabs>
+<TabItem label="Astro">
+
+```astro title="src/components/Card.astro"
+---
+interface Props {
+  title: string;
+  featured?: boolean;
+}
+
+const { title, featured = false } = Astro.props;
+---
+<article class:list={["card", { featured }]}>
+  <h2>{title}</h2>
+  <slot />
+  <slot name="footer" />
+</article>
+```
+
+用法：
+
+```astro
+<Card title="Hello" featured>
+  <p>This goes in the default slot.</p>
+  <footer slot="footer">Footer content</footer>
+</Card>
+```
+
+</TabItem>
+<TabItem label="PHP">
+
+```php title="template-parts/card.php"
+<?php
+// Usage: get_template_part('template-parts/card', null, [
+//   'title' => 'Hello',
+//   'featured' => true
+// ]);
+
+$title = $args['title'] ?? '';
+$featured = $args['featured'] ?? false;
+$class = $featured ? 'card featured' : 'card';
+?>
+<article class="<?php echo esc_attr($class); ?>">
+  <h2><?php echo esc_html($title); ?></h2>
+  <?php
+  // No direct equivalent to slots.
+  // WordPress uses do_action() for similar patterns:
+  do_action('card_content');
+  do_action('card_footer');
+  ?>
+</article>
+```
+
+</TabItem>
+</Tabs>
+
+### Props 与 `$args`
+
+在 WordPress 中，`get_template_part()` 通过 `$args` 数组传递数据。Astro 的 props 是类型化的并且可以解构：
+
+```astro
+---
+// Type-safe with defaults
+interface Props {
+  title: string;
+  count?: number;
+}
+const { title, count = 10 } = Astro.props;
+---
+```
+
+### Slots 与 Hooks
+
+WordPress 使用 `do_action()` 创建插入点。Astro 使用 slots：
+
+| WordPress                     | Astro                    |
+| ----------------------------- | ------------------------ |
+| `do_action('before_content')` | `<slot name="before" />` |
+| 默认内容区域          | `<slot />`               |
+| `do_action('after_content')`  | `<slot name="after" />`  |
+
+区别在于：slots 在调用处接收子元素，而 WordPress 钩子需要在其他地方单独调用 `add_action()`。
+
+## 布局
+
+布局用通用的 HTML 结构包装页面——`<head>`、页眉、页脚以及跨页面共享的任何内容。这取代了 `header.php` + `footer.php`。
+
+```astro title="src/layouts/Base.astro"
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = "My EmDash Site" } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header>
+      <nav><!-- Navigation --></nav>
+    </header>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer>
+      <p>&copy; {new Date().getFullYear()}</p>
+    </footer>
+  </body>
+</html>
+```
+
+在页面中使用布局：
+
+```astro title="src/pages/index.astro"
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="Home">
+  <h1>Welcome</h1>
+  <p>Page content goes in the slot.</p>
+</Base>
+```
+
+<Aside type="tip">
+	与 `get_header()` 和 `get_footer()` 不同，布局将整个 HTML 结构保存在一个文件中。这使得查看完整的页面结构以及在各个部分之间传递数据变得更加容易。
+</Aside>
+
+## 样式
+
+Astro 提供了几种样式方法。最独特的是 **作用域样式**。
+
+### 作用域样式
+
+`<style>` 标签中的样式会自动限定在该组件的作用域内：
+
+```astro title="src/components/Card.astro"
+<article class="card">
+  <h2>Title</h2>
+</article>
+
+<style>
+  /* Only affects .card in THIS component */
+  .card {
+    padding: 1rem;
+    border: 1px solid #ddd;
+  }
+
+  h2 {
+    color: navy;
+  }
+</style>
+```
+
+生成的 HTML 包含唯一的类名，以防止样式泄漏。不再有特异性之争。
+
+### 全局样式
+
+对于全站范围的样式，创建一个 CSS 文件并在布局中导入：
+
+```astro title="src/layouts/Base.astro"
+---
+import "../styles/global.css";
+---
+```
+
+### 条件类
+
+`class:list` 指令取代了手动构建类字符串：
+
+<Tabs>
+<TabItem label="Astro">
+
+```astro
+---
+const { featured, size = "medium" } = Astro.props;
+---
+<article class:list={[
+  "card",
+  size,
+  { featured, "has-border": true }
+]}>
+```
+
+输出：`<article class="card medium featured has-border">`
+
+</TabItem>
+<TabItem label="PHP">
+
+```php
+<?php
+$classes = ['card', $size];
+if ($featured) $classes[] = 'featured';
+if (true) $classes[] = 'has-border';
+?>
+<article class="<?php echo esc_attr(implode(' ', $classes)); ?>">
+```
+
+</TabItem>
+</Tabs>
+
+## 客户端 JavaScript
+
+Astro 默认不发送任何 JavaScript。这是与 WordPress 最大的思维转变。
+
+### 添加交互性
+
+对于简单的交互，添加一个 `<script>` 标签：
+
+```astro title="src/components/MobileMenu.astro"
+<button id="menu-toggle">Menu</button>
+<nav id="mobile-menu" hidden>
+  <slot />
+</nav>
+
+<script>
+  const toggle = document.getElementById("menu-toggle");
+  const menu = document.getElementById("mobile-menu");
+
+  toggle?.addEventListener("click", () => {
+    menu?.toggleAttribute("hidden");
+  });
+</script>
+```
+
+脚本会自动捆绑和去重。如果此组件在页面上出现两次，脚本只运行一次。
+
+### 高级：交互式组件
+
+对于更复杂的交互性，Astro 可以按需加载 JavaScript 组件（React、Vue、Svelte）。这是可选的——大多数站点仅使用 `<script>` 标签就能正常工作。
+
+```astro title="src/pages/index.astro"
+---
+import SearchWidget from "../components/SearchWidget.jsx";
+---
+<!-- Only load JavaScript when the search box scrolls into view -->
+<SearchWidget client:visible />
+```
+
+| 指令        | JavaScript 加载时机          |
+| ---------------- | ------------------------------ |
+| `client:load`    | 页面加载时立即加载       |
+| `client:visible` | 当组件进入视口时 |
+| `client:idle`    | 当浏览器空闲时           |
+
+<Aside type="tip">
+这完全是可选的。您可以在不接触 React、Vue 或任何 JavaScript 框架的情况下构建完整的 EmDash 站点。`<script>` 标签方法可以满足大多数交互需求。
+</Aside>
+
+## 路由
+
+Astro 使用 **基于文件的路由**。`src/pages/` 中的文件成为 URL：
+
+| 文件                           | URL                  |
+| ------------------------------ | -------------------- |
+| `src/pages/index.astro`        | `/`                  |
+| `src/pages/about.astro`        | `/about`             |
+| `src/pages/posts/index.astro`  | `/posts`             |
+| `src/pages/posts/[slug].astro` | `/posts/hello-world` |
+| `src/pages/[...slug].astro`    | 任意路径 (catch-all) |
+
+### 动态路由
+
+对于 CMS 内容，使用括号语法表示动态段：
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+import Base from "../../layouts/Base.astro";
+import { PortableText } from "emdash/ui";
+
+// For static builds, define which pages to generate
+export async function getStaticPaths() {
+  const { entries: posts } = await getEmDashCollection("posts");
+  return posts.map(post => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+---
+<Base title={post.data.title}>
+  <article>
+    <h1>{post.data.title}</h1>
+    <PortableText value={post.data.content} />
+  </article>
+</Base>
+```
+
+### 与 WordPress 对比
+
+| WordPress                              | Astro                               |
+| -------------------------------------- | ----------------------------------- |
+| 模板层次结构 (`single-post.php`) | 显式文件：`posts/[slug].astro` |
+| 重写规则 + `query_vars`           | 文件结构                      |
+| `$wp_query` 决定模板        | URL 直接映射到文件           |
+| `add_rewrite_rule()`                   | 创建文件或文件夹             |
+
+<Aside type="tip">
+	不再需要猜测 WordPress 将使用哪个模板。URL `/posts/hello` 总是加载 `src/pages/posts/[slug].astro`。
+</Aside>
+
+## WordPress 概念在何处
+
+寻找 WordPress 功能在 Astro/EmDash 中的对应参考：
+
+### 模板
+
+| WordPress                | Astro/EmDash                     |
+| ------------------------ | ---------------------------------- |
+| 模板层次结构       | `src/pages/` 中的基于文件的路由 |
+| `get_template_part()`    | 导入并使用组件          |
+| `the_content()`          | `<PortableText value={content} />` |
+| `the_title()`, `the_*()` | 通过 `post.data.title` 访问       |
+| 模板标签            | 模板表达式 `{value}`     |
+| `body_class()`           | `class:list` 指令             |
+
+### 数据和查询
+
+| WordPress         | Astro/EmDash                         |
+| ----------------- | -------------------------------------- |
+| `WP_Query`        | `getEmDashCollection(type, filters)` |
+| `get_post()`      | `getEmDashEntry(type, id)`           |
+| `get_posts()`     | `getEmDashCollection(type)`          |
+| `get_the_terms()` | 通过 `entry.data.categories` 访问     |
+| `get_post_meta()` | 通过 `entry.data.fieldName` 访问      |
+| `get_option()`    | `getSiteSettings()`                    |
+| `wp_nav_menu()`   | `getMenu(location)`                    |
+
+### 可扩展性
+
+| WordPress               | Astro/EmDash                        |
+| ----------------------- | ------------------------------------- |
+| `add_action()`          | EmDash 钩子, Astro 中间件      |
+| `add_filter()`          | EmDash 钩子                        |
+| `add_shortcode()`       | Portable Text 自定义区块           |
+| `register_block_type()` | Portable Text 自定义区块           |
+| `register_sidebar()`    | EmDash 小部件区域                 |
+| 插件                 | Astro 集成 + EmDash 插件 |
+
+### 内容类型
+
+| WordPress              | Astro/EmDash                        |
+| ---------------------- | ------------------------------------- |
+| `register_post_type()` | 在管理界面中创建集合         |
+| `register_taxonomy()`  | 在管理界面中创建分类法           |
+| `register_meta()`      | 向集合模式添加字段        |
+| 文章状态            | 条目状态（草稿、已发布等） |
+| 特色图片         | 媒体引用字段                 |
+| Gutenberg 区块       | Portable Text 区块                  |
+
+## 总结
+
+从 WordPress 转向 Astro 是一个重大但合乎逻辑的跨越：
+
+1. **PHP 模板 → Astro 组件** —— 相同的理念（服务器代码 + HTML），更好的组织方式
+2. **模板标签 → Props 和导入** —— 明确的数据流，而非全局变量
+3. **主题文件 → 页面目录** —— URL 与文件结构匹配
+4. **钩子 → Slots 和中间件** —— 更可预测的插入点
+5. **默认 jQuery → 默认零 JS** —— 有意识地添加交互性
+
+从 [入门指南](/zh-cn/getting-started/) 开始构建您的第一个 EmDash 站点，或者探索 [处理内容](/zh-cn/guides/working-with-content/) 以了解如何查询和渲染 CMS 数据。

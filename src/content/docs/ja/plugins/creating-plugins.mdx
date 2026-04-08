@@ -1,0 +1,477 @@
+---
+title: プラグインの作成
+description: フック、ストレージ、設定、管理UIを使用してEmDashプラグインを構築します。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+このガイドでは、完全なEmDashプラグインの構築手順を説明します。コードの構造化、フックとストレージの定義、管理UIコンポーネントのエクスポート方法を学びます。
+
+## プラグイン構造
+
+すべてのプラグインは、**異なるコンテキストで実行される**2つの部分で構成されます：
+
+1. **プラグイン記述子** (`PluginDescriptor`) — ファクトリ関数によって返され、EmDashにプラグインの読み込み方法を指示します。**ビルド時にVite内で実行されます** (`astro.config.mjs` でインポートされます)。副作用がなく、ランタイムAPIを使用できません。
+2. **プラグイン定義** (`definePlugin()`) — ランタイムロジック（フック、ルート、ストレージ）を含みます。**デプロイされたサーバー上でリクエスト時に実行されます。** 完全なプラグインコンテキスト (`ctx`) にアクセスできます。
+
+これらは、完全に異なる環境で実行されるため、**別々のエントリーポイント**に配置する必要があります：
+
+```
+my-plugin/
+├── src/
+│   ├── descriptor.ts     # Plugin descriptor (runs in Vite at build time)
+│   ├── index.ts           # Plugin definition with definePlugin() (runs at deploy time)
+│   ├── admin.tsx          # Admin UI exports (React components) — optional
+│   └── astro/             # Optional: Astro components for site-side rendering
+│       └── index.ts       # Must export `blockComponents`
+├── package.json
+└── tsconfig.json
+```
+
+## プラグインの作成
+
+### 記述子 (ビルド時)
+
+記述子は、EmDashにプラグインの場所と提供する管理UIを伝えます。このファイルは `astro.config.mjs` でインポートされ、Vite内で実行されます。
+
+```
+typescript title="src/descriptor.ts"
+import type { PluginDescriptor } from "emdash";
+
+// Options your plugin accepts at registration time
+export interface MyPluginOptions {
+	enabled?: boolean;
+	maxItems?: number;
+}
+
+export function myPlugin(options: MyPluginOptions = {}): PluginDescriptor {
+	return {
+		id: "my-plugin",
+		version: "1.0.0",
+		entrypoint: "@my-org/plugin-example",
+		options,
+		adminEntry: "@my-org/plugin-example/admin",
+		componentsEntry: "@my-org/plugin-example/astro",
+		adminPages: [{ path: "/settings", label: "Settings", icon: "settings" }],
+		adminWidgets: [{ id: "status", title: "Status", size: "half" }],
+	};
+}
+```
+
+### 定義 (ランタイム)
+
+定義には、ランタイムロジック — フック、ルート、ストレージ、管理設定 — が含まれます。このファイルは、デプロイされたサーバー上でリクエスト時に読み込まれます。
+
+```
+typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+import type { MyPluginOptions } from "../../plugins/descriptor.js";
+
+export function createPlugin(options: MyPluginOptions = {}) {
+	const maxItems = options.maxItems ?? 100;
+
+	return definePlugin({
+		id: "my-plugin",
+		version: "1.0.0",
+
+		// 必要な機能を宣言
+		capabilities: ["read:content"],
+
+		// プラグインストレージ (ドキュメントコレクション)
+		storage: {
+			items: {
+				indexes: ["status", "createdAt", ["status", "createdAt"]],
+			},
+		},
+
+		// 管理UI設定
+		admin: {
+			entry: "@my-org/plugin-example/admin",
+			settingsSchema: {
+				maxItems: {
+					type: "number",
+					label: "Maximum Items",
+					description: "Limit stored items",
+					default: maxItems,
+					min: 1,
+					max: 1000,
+				},
+				enabled: {
+					type: "boolean",
+					label: "Enabled",
+					default: options.enabled ?? true,
+				},
+			},
+			pages: [{ path: "/settings", label: "Settings", icon: "settings" }],
+			widgets: [{ id: "status", title: "Status", size: "half" }],
+		},
+
+		// フックハンドラー
+		hooks: {
+			"plugin:install": async (_event, ctx) => {
+				ctx.log.info("Plugin installed");
+			},
+
+			"content:afterSave": async (event, ctx) => {
+				const enabled = await ctx.kv.get<boolean>("settings:enabled");
+				if (enabled === false) return;
+
+				ctx.log.info("Content saved", {
+					collection: event.collection,
+					id: event.content.id,
+				});
+			},
+		},
+
+		// APIルート (信頼済みのみ — サンドボックス化されたプラグインでは利用不可)
+		routes: {
+			status: {
+				handler: async (ctx) => {
+					const count = await ctx.storage.items!.count();
+					return { count, maxItems };
+				},
+			},
+		},
+	});
+}
+
+export default createPlugin;
+```
+
+## プラグインIDの規則
+
+`id` フィールドは以下の規則に従う必要があります：
+
+- 小文字の英数字とハイフンのみ使用可能
+- シンプル (`my-plugin`) またはスコープ付き (`@my-org/my-plugin`) のいずれか
+- インストール済みのすべてのプラグイン間で一意
+
+```typescript
+// Valid IDs
+"seo";
+"audit-log";
+"@emdash-cms/plugin-forms";
+
+// 無効なID
+"MyPlugin"; // 大文字不可
+"my_plugin"; // アンダースコア不可
+"my.plugin"; // ドット不可
+```
+
+## バージョン形式
+
+セマンティックバージョニングを使用します：
+
+```typescript
+version: "1.0.0"; // Valid
+version: "1.2.3-beta"; // Valid (prerelease)
+version: "1.0"; // Invalid (missing patch)
+```
+
+## パッケージエクスポート
+
+EmDashが各エントリーポイントを読み込めるように、`package.json` のエクスポートを設定します。記述子と定義は異なる環境で実行されるため、別々のエクスポートとなります：
+
+```
+json title="package.json"
+{
+	"name": "@my-org/plugin-example",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./descriptor": {
+			"types": "./dist/descriptor.d.ts",
+			"import": "./dist/descriptor.js"
+		},
+		"./admin": {
+			"types": "./dist/admin.d.ts",
+			"import": "./dist/admin.js"
+		},
+		"./astro": {
+			"types": "./dist/astro/index.d.ts",
+			"import": "./dist/astro/index.js"
+		}
+	},
+	"files": ["dist"],
+	"peerDependencies": {
+		"emdash": "^0.1.0",
+		"react": "^18.0.0"
+	}
+}
+```
+
+| エクスポート | コンテキスト | 目的 |
+|--------|---------|---------|
+| `"."` | サーバー (ランタイム) | `createPlugin()` / `definePlugin()` — `entrypoint` によってリクエスト時に読み込まれる |
+| `"./descriptor"` | Vite (ビルド時) | `PluginDescriptor` ファクトリ — `astro.config.mjs` でインポートされる |
+| `"./admin"` | ブラウザ | 管理ページ/ウィジェット用のReactコンポーネント |
+| `"./astro"` | サーバー (SSR) | サイト側ブロックレンダリング用のAstroコンポーネント |
+
+プラグインが使用する場合のみ、`./admin` と `./astro` エクスポートを含めてください。
+
+<Aside type="tip">
+	`emdash` と `react` はピア依存関係として維持してください。これにより、プラグインがサイトにインストールされた際のバージョン競合を防ぎます。
+</Aside>
+
+## 完全な例: 監査ログプラグイン
+
+この例では、ストレージ、ライフサイクルフック、コンテンツフック、APIルートを実演します：
+
+```
+typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+
+interface AuditEntry {
+	timestamp: string;
+	action: "create" | "update" | "delete";
+	collection: string;
+	resourceId: string;
+	userId?: string;
+}
+
+export function createPlugin() {
+	return definePlugin({
+		id: "audit-log",
+		version: "0.1.0",
+
+		storage: {
+			entries: {
+				indexes: [
+					"timestamp",
+					"action",
+					"collection",
+					["collection", "timestamp"],
+					["action", "timestamp"],
+				],
+			},
+		},
+
+		admin: {
+			settingsSchema: {
+				retentionDays: {
+					type: "number",
+					label: "Retention (days)",
+					description: "Days to keep entries. 0 = forever.",
+					default: 90,
+					min: 0,
+					max: 365,
+				},
+			},
+				pages: [{ path: "/history", label: "監査履歴", icon: "history" }],
+				widgets: [{ id: "recent-activity", title: "最近のアクティビティ", size: "half" }],
+		},
+
+		hooks: {
+			"plugin:install": async (_event, ctx) => {
+				ctx.log.info("Audit log plugin installed");
+			},
+
+			"content:afterSave": {
+				priority: 200, // 他のプラグインの後に実行
+				timeout: 2000,
+				handler: async (event, ctx) => {
+					const { content, collection, isNew } = event;
+
+					const entry: AuditEntry = {
+						timestamp: new Date().toISOString(),
+						action: isNew ? "create" : "update",
+						collection,
+						resourceId: content.id as string,
+					};
+
+					const entryId = `${Date.now()}-${content.id}`;
+					await ctx.storage.entries!.put(entryId, entry);
+
+					ctx.log.info(`Logged ${entry.action} on ${collection}/${content.id}`);
+				},
+			},
+
+			"content:afterDelete": {
+				priority: 200,
+				timeout: 1000,
+				handler: async (event, ctx) => {
+					const { id, collection } = event;
+
+					const entry: AuditEntry = {
+						timestamp: new Date().toISOString(),
+						action: "delete",
+						collection,
+						resourceId: id,
+					};
+
+					const entryId = `${Date.now()}-${id}`;
+					await ctx.storage.entries!.put(entryId, entry);
+
+					ctx.log.info(`Logged delete on ${collection}/${id}`);
+				},
+			},
+		},
+
+		routes: {
+			recent: {
+				handler: async (ctx) => {
+					const result = await ctx.storage.entries!.query({
+						orderBy: { timestamp: "desc" },
+						limit: 10,
+					});
+
+					return {
+						entries: result.items.map((item) => ({
+							id: item.id,
+							...(item.data as AuditEntry),
+						})),
+					};
+				},
+			},
+
+			history: {
+				handler: async (ctx) => {
+					const url = new URL(ctx.request.url);
+					const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+					const cursor = url.searchParams.get("cursor") || undefined;
+
+					const result = await ctx.storage.entries!.query({
+						orderBy: { timestamp: "desc" },
+						limit,
+						cursor,
+					});
+
+					return {
+						entries: result.items.map((item) => ({
+							id: item.id,
+							...(item.data as AuditEntry),
+						})),
+						cursor: result.cursor,
+						hasMore: result.hasMore,
+					};
+				},
+			},
+		},
+	});
+}
+
+export default createPlugin;
+```
+
+## プラグインのテスト
+
+プラグインを登録した最小限のAstroサイトを作成してテストします：
+
+1. EmDashがインストールされたテストサイトを作成します。
+
+2. `astro.config.mjs` にプラグインを登録します：
+
+   ```typescript
+   import myPlugin from "../path/to/my-plugin/src";
+
+   export default defineConfig({
+   	integrations: [
+   		emdash({
+   			plugins: [myPlugin()],
+   		}),
+   	],
+   });
+   ```
+
+3. 開発サーバーを起動し、コンテンツの作成/更新によってフックをトリガーします。
+
+4. コンソールで `ctx.log` の出力を確認し、APIルート経由でストレージを検証します。
+
+単体テストでは、`PluginContext` インターフェースをモックし、フックハンドラーを直接呼び出します。
+
+## Portable Textブロックタイプ
+
+プラグインは、Portable Textエディターにカスタムブロックタイプを追加できます。これらはエディターのスラッシュコマンドメニューに表示され、任意の `portableText` フィールドに挿入できます。
+
+### ブロックタイプの宣言
+
+`createPlugin()` 内で、`admin.portableTextBlocks` の下にブロックを宣言します：
+
+```
+typescript title="src/index.ts"
+admin: {
+	portableTextBlocks: [
+		{
+			type: "youtube",
+			label: "YouTube Video",
+			icon: "video",           // Named icon: video, code, link, link-external
+			placeholder: "Paste YouTube URL...",
+			fields: [                // Block Kit fields for the editing UI
+				{ type: "text_input", action_id: "id", label: "YouTube URL" },
+				{ type: "text_input", action_id: "title", label: "Title" },
+				{ type: "text_input", action_id: "poster", label: "Poster Image URL" },
+			],
+		},
+	],
+}
+```
+
+各ブロックタイプは以下を定義します：
+
+- **`type`** — ブロックタイプ名（Portable Textの`_type`で使用）
+- **`label`** — スラッシュコマンドメニューでの表示名
+- **`icon`** — アイコンキー（`video`、`code`、`link`、`link-external`）。デフォルトは汎用キューブアイコン。
+- **`placeholder`** — 入力プレースホルダーテキスト
+- **`fields`** — 編集用のBlock Kitフォームフィールド。省略された場合は、シンプルなURL入力が表示されます。
+
+### サイト側レンダリング
+
+ブロックタイプをサイト上でレンダリングするには、`componentsEntry`からAstroコンポーネントをエクスポートします：
+
+```
+typescript title="src/astro/index.ts"
+import YouTube from "../../plugins/YouTube.astro";
+import CodePen from "../../plugins/CodePen.astro";
+
+// This export name is required — the virtual module imports it
+export const blockComponents = {
+	youtube: YouTube,
+	codepen: CodePen,
+};
+```
+
+プラグイン記述子で`componentsEntry`を設定します：
+
+```typescript
+export function myPlugin(options = {}): PluginDescriptor {
+	return {
+		id: "my-plugin",
+		entrypoint: "@my-org/my-plugin",
+		componentsEntry: "@my-org/my-plugin/astro",
+		// ...
+	};
+}
+```
+
+プラグインのブロックコンポーネントは自動的に`<PortableText>`にマージされます — サイト作成者は何もインポートする必要はありません。ユーザー提供のコンポーネントはプラグインのデフォルトより優先されます。
+
+<Aside type="tip">
+	埋め込みプラグイン（`@emdash-cms/plugin-embeds`）はこのパターンの完全な例です。YouTube、Vimeo、Tweet、Bluesky、Mastodon、Gist、およびリンクプレビューのブロックタイプを提供し、管理パネルの編集フィールドとサイト側のAstroレンダリングコンポーネントの両方を備えています。
+</Aside>
+
+### パッケージエクスポート
+
+`package.json`に`./astro`エクスポートを追加します：
+
+```
+json title="package.json"
+{
+	"exports": {
+		".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+		"./admin": { "types": "./dist/admin.d.ts", "import": "./dist/admin.js" },
+		"./astro": { "types": "./dist/astro/index.d.ts", "import": "./dist/astro/index.js" }
+	}
+}
+```
+
+## 次のステップ
+
+- [フックリファレンス](/ja/plugins/hooks/) — 利用可能なすべてのフックとシグネチャ
+- [ストレージAPI](/ja/plugins/storage/) — ドキュメントコレクションとクエリ
+- [設定](/ja/plugins/settings/) — 設定スキーマとKVストア
+- [管理パネルUI](/ja/plugins/admin-ui/) — ページとウィジェット
+- [APIルート](/ja/plugins/api-routes/) — RESTエンドポイント

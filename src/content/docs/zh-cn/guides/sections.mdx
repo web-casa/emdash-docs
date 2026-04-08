@@ -1,0 +1,264 @@
+---
+title: 区块
+description: 在您的网站中创建和使用可重复使用的内容块。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+区块是可重复使用的内容块，编辑者可以通过斜杠命令将其插入到任何内容中。可用于常见模式，如行动号召、推荐语、功能网格，或任何出现在多个页面上的内容。
+
+## 查询区块
+
+### getSection
+
+通过 slug 获取单个区块：
+
+```typescript
+import { getSection } from "emdash";
+
+const cta = await getSection("newsletter-cta");
+
+if (cta) {
+  console.log(cta.title);    // "Newsletter CTA"
+  console.log(cta.content);  // PortableTextBlock[]
+}
+```
+
+### getSections
+
+使用可选过滤器获取多个区块：
+
+```typescript
+import { getSections } from "emdash";
+
+// Get all sections
+const { items: all } = await getSections();
+
+// Filter by source
+const { items: themeSections } = await getSections({ source: "theme" });
+
+// Search by title/keywords
+const { items: results } = await getSections({ search: "newsletter" });
+```
+
+`getSections` 返回 `{ items: Section[], nextCursor?: string }`，遵循标准的分页模式。
+
+## 区块结构
+
+```typescript
+interface Section {
+  id: string;
+  slug: string;
+  title: string;
+  description?: string;
+  keywords: string[];
+  content: PortableTextBlock[];
+  previewUrl?: string;
+  source: "theme" | "user" | "import";
+  themeId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+### 来源类型
+
+| 来源      | 描述                                      |
+| --------- | ---------------------------------------- |
+| `theme`   | 在种子文件中定义，由主题管理               |
+| `user`    | 由编辑者在管理面板创建                     |
+| `import`  | 从 WordPress 导入（可重用区块）            |
+
+## 在内容中使用区块
+
+编辑者使用富文本编辑器中的 `/section` 斜杠命令插入区块：
+
+<Steps>
+
+1. 输入 `/section`（或 `/pattern`、`/block`、`/template`）
+
+2. 搜索或浏览可用的区块
+
+3. 点击将区块内容插入到光标位置
+
+</Steps>
+
+区块的可移植文本内容会被复制到文档中。这意味着：
+
+- 对区块的更改不会影响已插入的内容
+- 编辑者可以自定义插入的内容
+- 内容保持自包含
+
+<Aside type="tip">
+  对于需要保持同步的内容，请考虑使用[小部件区域](/zh-cn/guides/widgets/)配合组件小部件。
+</Aside>
+
+## 创建区块
+
+### 在管理面板界面
+
+1. 在管理侧边栏中导航到 **区块**
+
+2. 点击 **新建区块**
+
+3. 填写：
+   - **标题** - 区块的显示名称
+   - **Slug** - URL 标识符（根据标题自动生成）
+   - **描述** - 给编辑者的帮助文本
+
+4. 使用富文本编辑器添加内容
+
+5. 可选地设置关键词以便于发现
+
+### 通过种子文件
+
+在主题的种子文件中包含区块：
+
+```json
+{
+  "sections": [
+    {
+      "slug": "hero-centered",
+      "title": "Centered Hero",
+      "description": "Full-width hero with centered heading and CTA",
+      "keywords": ["hero", "banner", "header"],
+      "content": [
+        {
+          "_type": "block",
+          "style": "h1",
+          "children": [{ "_type": "span", "text": "Welcome to Our Site" }]
+        },
+        {
+          "_type": "block",
+          "children": [{ "_type": "span", "text": "Your tagline goes here." }]
+        }
+      ]
+    },
+    {
+      "slug": "newsletter-cta",
+      "title": "Newsletter CTA",
+      "keywords": ["newsletter", "subscribe", "email"],
+      "content": [
+        {
+          "_type": "block",
+          "style": "h3",
+          "children": [{ "_type": "span", "text": "Subscribe to our newsletter" }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### 通过 WordPress 导入
+
+WordPress 可重用区块（`wp_block` 文章类型）会自动作为区块导入：
+
+- 来源设置为 `"import"`
+- Gutenberg 内容转换为可移植文本
+
+## 以编程方式渲染区块
+
+对于编辑器之外需要服务器渲染的区块内容：
+
+```astro
+---
+import { getSection } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const newsletter = await getSection("newsletter-cta");
+---
+
+{newsletter && (
+  <aside class="cta-box">
+    <PortableText value={newsletter.content} />
+  </aside>
+)}
+```
+
+## 管理面板界面功能
+
+区块库 (`/_emdash/admin/sections`) 提供：
+
+- **网格视图**，带区块预览
+- **搜索**标题和关键词
+- **按来源筛选**
+- **快速复制** slug 到剪贴板
+- **编辑**区块内容和元数据
+- **删除**（带确认，对主题区块会发出警告）
+
+## API 参考
+
+### `getSection(slug)`
+
+通过 slug 获取区块。
+
+**参数：**
+- `slug` — 区块的唯一标识符（字符串）
+
+**返回：** `Promise<Section | null>`
+
+### `getSections(options?)`
+
+列出区块，支持可选过滤器。
+
+**参数：**
+- `options.source` — 按来源筛选：`"theme"`、`"user"` 或 `"import"`
+- `options.search` — 搜索标题和关键词
+
+**返回：** `Promise<Section[]>`
+
+## REST API
+
+### 列出区块
+
+```http
+GET /_emdash/api/sections
+GET /_emdash/api/sections?source=theme
+GET /_emdash/api/sections?search=newsletter
+```
+
+### 获取区块
+
+```http
+GET /_emdash/api/sections/newsletter-cta
+```
+
+### 创建区块
+
+```http
+POST /_emdash/api/sections
+Content-Type: application/json
+
+{
+  "slug": "my-section",
+  "title": "My Section",
+  "description": "Optional description",
+  "keywords": ["keyword1", "keyword2"],
+  "content": [...]
+}
+```
+
+### 更新区块
+
+```http
+PUT /_emdash/api/sections/my-section
+Content-Type: application/json
+
+{
+  "title": "Updated Title",
+  "content": [...]
+}
+```
+
+### 删除区块
+
+```http
+DELETE /_emdash/api/sections/my-section
+```
+
+## 后续步骤
+
+- [处理内容](/zh-cn/guides/working-with-content/) - 了解富文本编辑器
+- [小部件区域](/zh-cn/guides/widgets/) - 用于同步的动态内容
+- [内容导入](/zh-cn/migration/content-import/) - 导入 WordPress 可重用区块

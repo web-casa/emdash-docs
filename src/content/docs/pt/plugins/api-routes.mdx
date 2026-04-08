@@ -1,0 +1,470 @@
+---
+title: Rotas da API de Plugins
+description: Exponha endpoints REST do seu plugin para a interface administrativa e integrações externas.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Os plugins podem expor rotas de API para seus componentes de interface administrativa ou integrações externas. As rotas recebem o contexto completo do plugin e podem acessar armazenamento, KV, conteúdo e mídia.
+
+<Aside type="note">
+	As rotas de API são um recurso **exclusivo para plugins confiáveis**. Plugins em sandbox não podem definir endpoints REST personalizados. Use páginas administrativas do Block Kit e hooks em seu lugar.
+</Aside>
+
+## Definindo Rotas
+
+Defina rotas no objeto `routes`:
+
+```typescript
+import { definePlugin } from "emdash";
+import { z } from "astro/zod";
+
+export default definePlugin({
+	id: "forms",
+	version: "1.0.0",
+
+	storage: {
+		submissions: {
+			indexes: ["formId", "status", "createdAt"],
+		},
+	},
+
+	routes: {
+		// Rota simples
+		status: {
+			handler: async (ctx) => {
+				return { ok: true, plugin: ctx.plugin.id };
+			},
+		},
+
+		// Rota com validação de entrada
+		submissions: {
+			input: z.object({
+				formId: z.string().optional(),
+				limit: z.number().default(50),
+				cursor: z.string().optional(),
+			}),
+			handler: async (ctx) => {
+				const { formId, limit, cursor } = ctx.input;
+
+				const result = await ctx.storage.submissions!.query({
+					where: formId ? { formId } : undefined,
+					orderBy: { createdAt: "desc" },
+					limit,
+					cursor,
+				});
+
+				return {
+					items: result.items,
+					cursor: result.cursor,
+					hasMore: result.hasMore,
+				};
+			},
+		},
+	},
+});
+```
+
+## URLs das Rotas
+
+As rotas são montadas em `/_emdash/api/plugins/<plugin-id>/<route-name>`:
+
+| ID do Plugin | Nome da Rota     | URL                                        |
+| ------------ | ---------------- | ------------------------------------------ |
+| `forms`      | `status`         | `/_emdash/api/plugins/forms/status`      |
+| `forms`      | `submissions`    | `/_emdash/api/plugins/forms/submissions` |
+| `seo`        | `settings/save`  | `/_emdash/api/plugins/seo/settings/save` |
+
+Os nomes das rotas podem incluir barras para caminhos aninhados.
+
+## Manipulador de Rota
+
+O manipulador recebe um `RouteContext` com o contexto do plugin mais dados específicos da requisição:
+
+```typescript
+interface RouteContext extends PluginContext {
+	input: TInput; // Validated input (from body or query params)
+	request: Request; // Original Request object
+}
+```
+
+### Valores de Retorno
+
+Retorne qualquer valor serializável em JSON:
+
+```typescript
+// Object
+return { success: true, data: items };
+
+// Array
+return items;
+
+// Primitivo
+return 42;
+```
+
+<Aside type="note">
+	As rotas sempre retornam JSON. A resposta tem `Content-Type: application/json`.
+</Aside>
+
+### Erros
+
+Lance um erro para retornar uma resposta de erro:
+
+```typescript
+handler: async (ctx) => {
+	const item = await ctx.storage.items!.get(ctx.input.id);
+
+	if (!item) {
+		throw new Error("Item not found");
+		// Retorna: { "error": "Item not found" } com status 500
+	}
+
+	return item;
+};
+```
+
+Para códigos de status personalizados, lance uma `Response`:
+
+```typescript
+handler: async (ctx) => {
+	const item = await ctx.storage.items!.get(ctx.input.id);
+
+	if (!item) {
+		throw new Response(JSON.stringify({ error: "Not found" }), {
+			status: 404,
+			headers: { "Content-Type": "application/json" },
+		});
+	}
+
+	return item;
+};
+```
+
+## Validação de Entrada
+
+Use esquemas Zod para validar e analisar a entrada:
+
+```typescript
+import { z } from "astro/zod";
+
+routes: {
+  create: {
+    input: z.object({
+      title: z.string().min(1).max(200),
+      email: z.string().email(),
+      priority: z.enum(["low", "medium", "high"]).default("medium"),
+      tags: z.array(z.string()).optional()
+    }),
+    handler: async (ctx) => {
+      // ctx.input é tipado e validado
+      const { title, email, priority, tags } = ctx.input;
+
+      await ctx.storage.items!.put(`item_${Date.now()}`, {
+        title,
+        email,
+        priority,
+        tags: tags ?? [],
+        createdAt: new Date().toISOString()
+      });
+
+      return { success: true };
+    }
+  }
+}
+```
+
+Entrada inválida retorna um erro 400 com detalhes da validação.
+
+### Fontes de Entrada
+
+A entrada é analisada a partir de:
+
+1. **POST/PUT/PATCH** — Corpo da requisição (JSON)
+2. **GET/DELETE** — Parâmetros de consulta da URL
+
+```typescript
+// POST /plugins/forms/create
+// Body: { "title": "Hello", "email": "user@example.com" }
+
+// GET /plugins/forms/list?limit=20&status=pending
+```
+
+## Métodos HTTP
+
+As rotas respondem a todos os métodos HTTP. Verifique `ctx.request.method` para tratá-los de forma diferente:
+
+```typescript
+routes: {
+  item: {
+    input: z.object({
+      id: z.string()
+    }),
+    handler: async (ctx) => {
+      const { id } = ctx.input;
+
+      switch (ctx.request.method) {
+        case "GET":
+          return await ctx.storage.items!.get(id);
+
+        case "DELETE":
+          await ctx.storage.items!.delete(id);
+          return { deleted: true };
+
+        default:
+          throw new Response("Method not allowed", { status: 405 });
+      }
+    }
+  }
+}
+```
+
+## Acessando a Requisição
+
+O objeto `Request` completo está disponível para casos de uso avançados:
+
+```typescript
+handler: async (ctx) => {
+	const { request } = ctx;
+
+	// Cabeçalhos
+	const auth = request.headers.get("Authorization");
+
+	// Parâmetros da URL
+	const url = new URL(request.url);
+	const page = url.searchParams.get("page");
+
+	// Método
+	if (request.method !== "POST") {
+		throw new Response("POST required", { status: 405 });
+	}
+
+	// Corpo (se não estiver usando esquema de entrada)
+	const body = await request.json();
+};
+```
+
+## Padrões Comuns
+
+### Rotas de Configurações
+
+Exponha e atualize as configurações do plugin:
+
+```typescript
+routes: {
+  settings: {
+    handler: async (ctx) => {
+      const settings = await ctx.kv.list("settings:");
+      const result: Record<string, unknown> = {};
+
+      for (const entry of settings) {
+        result[entry.key.replace("settings:", "")] = entry.value;
+      }
+
+      return result;
+    }
+  },
+
+  "settings/save": {
+    input: z.object({
+      enabled: z.boolean().optional(),
+      apiKey: z.string().optional(),
+      maxItems: z.number().optional()
+    }),
+    handler: async (ctx) => {
+      const input = ctx.input;
+
+      for (const [key, value] of Object.entries(input)) {
+        if (value !== undefined) {
+          await ctx.kv.set(`settings:${key}`, value);
+        }
+      }
+
+      return { success: true };
+    }
+  }
+}
+```
+
+### Lista Paginada
+
+Retorne resultados paginados com navegação baseada em cursor:
+
+```typescript
+routes: {
+  list: {
+    input: z.object({
+      limit: z.number().min(1).max(100).default(50),
+      cursor: z.string().optional(),
+      status: z.string().optional()
+    }),
+    handler: async (ctx) => {
+      const { limit, cursor, status } = ctx.input;
+
+      const result = await ctx.storage.items!.query({
+        where: status ? { status } : undefined,
+        orderBy: { createdAt: "desc" },
+        limit,
+        cursor
+      });
+
+      return {
+        items: result.items.map(item => ({
+          id: item.id,
+          ...item.data
+        })),
+        cursor: result.cursor,
+        hasMore: result.hasMore
+      };
+    }
+  }
+}
+```
+
+### Proxy de API Externa
+
+Proxie requisições para serviços externos (requer capacidade `network:fetch`):
+
+```typescript
+definePlugin({
+	id: "weather",
+	version: "1.0.0",
+
+	capabilities: ["network:fetch"],
+	allowedHosts: ["api.weather.example.com"],
+
+	routes: {
+		forecast: {
+			input: z.object({
+				city: z.string(),
+			}),
+			handler: async (ctx) => {
+				const apiKey = await ctx.kv.get<string>("settings:apiKey");
+
+				if (!apiKey) {
+					throw new Error("API key not configured");
+				}
+
+const response = await ctx.http!.fetch(
+					`https://api.weather.example.com/forecast?city=${ctx.input.city}`,
+					{
+						headers: { "X-API-Key": apiKey },
+					},
+				);
+
+				if (!response.ok) {
+					throw new Error(`Weather API error: ${response.status}`);
+				}
+
+				return response.json();
+			},
+		},
+	},
+});
+```
+
+### Endpoint de Ação
+
+Dispare uma ação única:
+
+```typescript
+routes: {
+	sync: {
+		handler: async (ctx) => {
+			ctx.log.info("Starting sync...");
+
+			const startTime = Date.now();
+			let synced = 0;
+
+			// Faça o trabalho...
+			const items = await fetchExternalItems(ctx);
+			for (const item of items) {
+				await ctx.storage.items!.put(item.id, item);
+				synced++;
+			}
+
+			const duration = Date.now() - startTime;
+			ctx.log.info("Sync complete", { synced, duration });
+
+			return {
+				success: true,
+				synced,
+				duration,
+			};
+		};
+	}
+}
+```
+
+## Chamando Rotas da Interface Administrativa
+
+Use o hook `usePluginAPI()` em componentes administrativos:
+
+```typescript
+import { usePluginAPI } from "@emdash-cms/admin";
+
+function SettingsPage() {
+	const api = usePluginAPI();
+
+	const handleSave = async (settings) => {
+		await api.post("settings/save", settings);
+	};
+
+	const loadSettings = async () => {
+		return api.get("settings");
+	};
+}
+```
+
+O hook automaticamente prefixa o ID do plugin nas URLs das rotas.
+
+## Chamando Rotas Externamente
+
+As rotas são acessíveis em sua URL completa:
+
+```bash
+# GET request
+curl https://your-site.com/_emdash/api/plugins/forms/submissions?limit=10
+
+# Requisição POST
+curl -X POST https://your-site.com/_emdash/api/plugins/forms/create \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Hello", "email": "user@example.com"}'
+```
+
+<Aside type="caution">
+	As rotas de plugin não possuem autenticação integrada. Para endpoints públicos, implemente suas próprias verificações de autenticação. Para rotas exclusivas de administrador, o middleware de sessão de administrador fornece proteção.
+</Aside>
+
+## Referência de Contexto de Rota
+
+```typescript
+interface RouteContext<TInput = unknown> extends PluginContext {
+	/** Validated input from request body or query params */
+	input: TInput;
+
+	/** Objeto de requisição original */
+	request: Request;
+
+	/** Metadados do plugin */
+	plugin: { id: string; version: string };
+
+	/** Coleções de armazenamento do plugin */
+	storage: Record<string, StorageCollection>;
+
+	/** Armazenamento chave-valor */
+	kv: KVAccess;
+
+	/** Acesso a conteúdo (se a capacidade for declarada) */
+	content?: ContentAccess;
+
+	/** Acesso a mídia (se a capacidade for declarada) */
+	media?: MediaAccess;
+
+	/** Cliente HTTP (se a capacidade for declarada) */
+	http?: HttpAccess;
+
+	/** Logger estruturado */
+	log: LogAccess;
+}
+```

@@ -1,0 +1,714 @@
+---
+title: 훅 레퍼런스
+description: EmDash 기능을 확장하기 위한 플러그인 훅입니다.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+훅(Hooks)은 플러그인이 콘텐츠, 미디어, 이메일, 댓글 및 페이지 라이프사이클의 특정 지점에서 EmDash의 동작을 가로채고 수정할 수 있게 합니다.
+
+## 훅 개요
+
+| 훅                      | 트리거 시점                               | 수정 가능 항목        | 독점적 |
+| ----------------------- | ------------------------------------- | ----------------- | --------- |
+| `content:beforeSave`    | 콘텐츠 저장 전               | 콘텐츠 데이터      | 아니오        |
+| `content:afterSave`     | 콘텐츠 저장 후                | 없음           | 아니오        |
+| `content:beforeDelete`  | 콘텐츠 삭제 전             | 취소 가능        | 아니오        |
+| `content:afterDelete`   | 콘텐츠 삭제 후              | 없음           | 아니오        |
+| `media:beforeUpload`    | 파일 업로드 전               | 파일 메타데이터     | 아니오        |
+| `media:afterUpload`     | 파일 업로드 후                | 없음           | 아니오        |
+| `cron`                  | 예약된 작업 실행 시                  | 없음           | 아니오        |
+| `email:beforeSend`      | 이메일 전송 전                 | 메시지, 취소 가능 | 아니오      |
+| `email:deliver`         | 전송 수단을 통한 이메일 발송           | 없음           | 예       |
+| `email:afterSend`       | 이메일 전송 성공 후       | 없음           | 아니오        |
+| `comment:beforeCreate`  | 댓글 저장 전              | 댓글, 취소 가능 | 아니오      |
+| `comment:moderate`      | 댓글 승인 상태 결정        | 상태            | 예       |
+| `comment:afterCreate`   | 댓글 저장 후               | 없음           | 아니오        |
+| `comment:afterModerate` | 관리자가 댓글 상태 변경 후    | 없음           | 아니오        |
+| `page:metadata`         | 공개 페이지 헤드 렌더링 시            | 태그 추가   | 아니오        |
+| `page:fragments`        | 공개 페이지 본문 렌더링 시            | 스크립트 주입    | 아니오        |
+| `plugin:install`        | 플러그인 최초 설치 시        | 없음           | 아니오        |
+| `plugin:activate`       | 플러그인 활성화 시                | 없음           | 아니오        |
+| `plugin:deactivate`     | 플러그인 비활성화 시               | 없음           | 아니오        |
+| `plugin:uninstall`      | 플러그인 제거 시                | 없음           | 아니오        |
+
+## 콘텐츠 훅
+
+### `content:beforeSave`
+
+콘텐츠가 데이터베이스에 저장되기 전에 실행됩니다. 콘텐츠를 검증, 변환 또는 보강하는 데 사용합니다.
+
+```ts
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "my-plugin",
+	version: "1.0.0",
+	hooks: {
+		"content:beforeSave": async (event, ctx) => {
+			const { content, collection, isNew } = event;
+
+			// 타임스탬프 추가
+			if (isNew) {
+				content.createdBy = "system";
+			}
+			content.modifiedAt = new Date().toISOString();
+
+			// 수정된 콘텐츠 반환
+			return content;
+		},
+	},
+});
+```
+
+#### 이벤트
+
+```ts
+interface ContentHookEvent {
+	content: Record<string, unknown>; // Content data
+	collection: string; // Collection slug
+	isNew: boolean; // True for creates, false for updates
+}
+```
+
+#### 반환 값
+
+- 수정된 콘텐츠 객체를 반환하여 변경사항 적용
+- `void`를 반환하여 변경 없이 통과
+
+### `content:afterSave`
+
+콘텐츠가 저장된 후 실행됩니다. 알림, 캐시 무효화 또는 외부 동기화와 같은 사이드 이펙트에 사용합니다.
+
+```ts
+hooks: {
+  "content:afterSave": async (event, ctx) => {
+    const { content, collection, isNew } = event;
+
+    if (collection === "posts" && content.status === "published") {
+      // 외부 서비스에 알림
+      await ctx.http?.fetch("https://api.example.com/notify", {
+        method: "POST",
+        body: JSON.stringify({ postId: content.id }),
+      });
+    }
+  },
+}
+```
+
+#### 반환 값
+
+반환 값이 필요하지 않습니다.
+
+### `content:beforeDelete`
+
+콘텐츠가 삭제되기 전에 실행됩니다. 삭제를 검증하거나 방지하는 데 사용합니다.
+
+```ts
+hooks: {
+  "content:beforeDelete": async (event, ctx) => {
+    const { id, collection } = event;
+
+    // 보호된 콘텐츠 삭제 방지
+    const item = await ctx.content?.get(collection, id);
+    if (item?.data.protected) {
+      return false; // Cancel deletion
+    }
+
+    // 삭제 허용
+    return true;
+  },
+}
+```
+
+#### 이벤트
+
+```ts
+interface ContentDeleteEvent {
+	id: string; // Entry ID
+	collection: string; // Collection slug
+}
+```
+
+#### 반환 값
+
+- `false`를 반환하여 삭제 취소
+- `true` 또는 `void`를 반환하여 허용
+
+### `content:afterDelete`
+
+콘텐츠가 삭제된 후 실행됩니다. 정리 작업에 사용합니다.
+
+```ts
+hooks: {
+  "content:afterDelete": async (event, ctx) => {
+    const { id, collection } = event;
+
+    // 관련 데이터 정리
+    await ctx.storage.relatedItems.delete(`${collection}:${id}`);
+  },
+}
+```
+
+## 미디어 훅
+
+### `media:beforeUpload`
+
+파일이 업로드되기 전에 실행됩니다. 파일을 검증, 이름 변경 또는 거부하는 데 사용합니다.
+
+```ts
+hooks: {
+  "media:beforeUpload": async (event, ctx) => {
+    const { file } = event;
+
+    // 10MB 초과 파일 거부
+    if (file.size > 10 * 1024 * 1024) {
+      throw new Error("File too large");
+    }
+
+    // 파일 이름 변경
+    return {
+      name: `${Date.now()}-${file.name}`,
+      type: file.type,
+      size: file.size,
+    };
+  },
+}
+```
+
+#### 이벤트
+
+```ts
+interface MediaUploadEvent {
+	file: {
+		name: string; // Original filename
+		type: string; // MIME type
+		size: number; // Size in bytes
+	};
+}
+```
+
+#### 반환 값
+
+- 수정된 파일 메타데이터를 반환하여 변경사항 적용
+- `void`를 반환하여 변경 없이 통과
+- 예외를 발생시켜 업로드 거부
+
+### `media:afterUpload`
+
+파일이 업로드된 후 실행됩니다. 처리, 썸네일 생성 또는 메타데이터 추출에 사용합니다.
+
+```ts
+hooks: {
+  "media:afterUpload": async (event, ctx) => {
+    const { media } = event;
+
+    if (media.mimeType.startsWith("image/")) {
+      // 이미지 메타데이터 저장
+      await ctx.kv.set(`media:${media.id}:analyzed`, {
+        processedAt: new Date().toISOString(),
+      });
+    }
+  },
+}
+```
+
+#### 이벤트
+
+```ts
+interface MediaAfterUploadEvent {
+	media: {
+		id: string;
+		filename: string;
+		mimeType: string;
+		size: number | null;
+		url: string;
+		createdAt: string;
+	};
+}
+```
+
+## 라이프사이클 훅
+
+### `plugin:install`
+
+플러그인이 최초로 설치될 때 실행됩니다. 초기 설정, 스토리지 컬렉션 생성 또는 데이터 시딩에 사용합니다.
+
+```ts
+hooks: {
+  "plugin:install": async (event, ctx) => {
+    // Initialize default settings
+    await ctx.kv.set("settings:enabled", true);
+    await ctx.kv.set("settings:threshold", 100);
+
+    ctx.log.info("플러그인이 성공적으로 설치되었습니다");
+  },
+}
+```
+
+### `plugin:activate`
+
+플러그인이 활성화될 때 실행됩니다 (설치 후 또는 재활성화 시).
+
+```ts
+hooks: {
+  "plugin:activate": async (event, ctx) => {
+    ctx.log.info("Plugin activated");
+  },
+}
+```
+
+### `plugin:deactivate`
+
+플러그인이 비활성화될 때 실행됩니다.
+
+```ts
+hooks: {
+  "plugin:deactivate": async (event, ctx) => {
+    ctx.log.info("Plugin deactivated");
+  },
+}
+```
+
+### `plugin:uninstall`
+
+플러그인이 제거될 때 실행됩니다. 정리에 사용합니다.
+
+```ts
+hooks: {
+  "plugin:uninstall": async (event, ctx) => {
+    const { deleteData } = event;
+
+    if (deleteData) {
+      // 모든 플러그인 데이터 정리
+      const items = await ctx.kv.list("settings:");
+      for (const { key } of items) {
+        await ctx.kv.delete(key);
+      }
+    }
+
+    ctx.log.info("플러그인이 제거되었습니다");
+  },
+}
+```
+
+#### 이벤트
+
+```ts
+interface UninstallEvent {
+	deleteData: boolean; // User chose to delete data
+}
+```
+
+## Cron 훅
+
+### `cron`
+
+예약된 작업이 실행될 때 발생합니다. `ctx.cron.schedule()`로 작업을 예약합니다.
+
+```ts
+hooks: {
+  "cron": async (event, ctx) => {
+    if (event.name === "daily-sync") {
+      const data = await ctx.http?.fetch("https://api.example.com/data");
+      ctx.log.info("Sync complete");
+    }
+  },
+}
+```
+
+#### 이벤트
+
+```ts
+interface CronEvent {
+	name: string;
+	data?: Record<string, unknown>;
+	scheduledAt: string;
+}
+```
+
+## 이메일 훅
+
+이메일 훅은 파이프라인을 형성합니다: `email:beforeSend` → `email:deliver` → `email:afterSend`.
+
+### `email:beforeSend`
+
+**권한:** `email:intercept`
+
+전송 전에 실행되는 미들웨어 훅입니다. 메시지를 변환하거나 전송을 취소합니다.
+
+```ts
+hooks: {
+  "email:beforeSend": async (event, ctx) => {
+	    // 모든 이메일에 푸터 추가
+    return {
+      ...event.message,
+	      text: event.message.text + "\n\n—내 사이트에서 전송",
+    };
+
+    // 또는 false를 반환하여 전송 취소
+  },
+}
+```
+
+#### 이벤트
+
+```ts
+interface EmailBeforeSendEvent {
+	message: { to: string; subject: string; text: string; html?: string };
+	source: string;
+}
+```
+
+#### 반환 값
+
+- 수정된 메시지를 반환하여 변환
+- `false`를 반환하여 전송 취소
+- `void`를 반환하여 변경 없이 통과
+
+### `email:deliver`
+
+**권한:** `email:provide` | **독점적:** 예
+
+전송 수단 제공자입니다. 하나의 플러그인만 이메일을 전송할 수 있습니다. 이메일 서비스를 통해 실제로 메시지를 보내는 역할을 합니다.
+
+```ts
+hooks: {
+  "email:deliver": {
+    exclusive: true,
+    handler: async (event, ctx) => {
+      await sendViaSES(event.message);
+    },
+  },
+}
+```
+
+### `email:afterSend`
+
+**권한:** `email:intercept`
+
+성공적인 전달 후 실행되는 Fire-and-forget 훅입니다. 오류는 기록되지만 전파되지 않습니다.
+
+```ts
+hooks: {
+  "email:afterSend": async (event, ctx) => {
+    await ctx.kv.set(`email:log:${Date.now()}`, {
+      to: event.message.to,
+      subject: event.message.subject,
+    });
+  },
+}
+```
+
+## 댓글 훅
+
+댓글 훅은 파이프라인을 형성합니다: `comment:beforeCreate` → `comment:moderate` → `comment:afterCreate`. `comment:afterModerate` 훅은 관리자가 댓글 상태를 변경할 때 별도로 실행됩니다.
+
+### `comment:beforeCreate`
+
+**권한:** `read:users`
+
+댓글이 저장되기 전에 실행되는 미들웨어 훅입니다. 댓글을 보강, 검증 또는 거부할 수 있습니다.
+
+```ts
+hooks: {
+  "comment:beforeCreate": async (event, ctx) => {
+    // Reject comments with links
+    if (event.comment.body.includes("http")) {
+      return false;
+    }
+  },
+}
+```
+
+#### 이벤트
+
+```ts
+interface CommentBeforeCreateEvent {
+	comment: {
+		collection: string;
+		contentId: string;
+		parentId: string | null;
+		authorName: string;
+		authorEmail: string;
+		authorUserId: string | null;
+		body: string;
+		ipHash: string | null;
+		userAgent: string | null;
+	};
+	metadata: Record<string, unknown>;
+}
+```
+
+#### 반환 값
+
+- 수정된 이벤트를 반환하여 변환
+- `false`를 반환하여 거부
+- `void`를 반환하여 통과
+
+### `comment:moderate`
+
+**권한:** `read:users` | **단독 실행:** 예
+
+댓글이 승인, 대기 중 또는 스팸인지 결정합니다. 하나의 중재 제공자만 활성화됩니다.
+
+```ts
+hooks: {
+  "comment:moderate": {
+    exclusive: true,
+    handler: async (event, ctx) => {
+      const score = await checkSpam(event.comment);
+      return {
+        status: score > 0.8 ? "spam" : score > 0.5 ? "pending" : "approved",
+        reason: `Spam score: ${score}`,
+      };
+    },
+  },
+}
+```
+
+#### 이벤트
+
+```ts
+interface CommentModerateEvent {
+	comment: { /* same as beforeCreate */ };
+	metadata: Record<string, unknown>;
+	collectionSettings: {
+		commentsEnabled: boolean;
+		commentsModeration: "all" | "first_time" | "none";
+		commentsClosedAfterDays: number;
+		commentsAutoApproveUsers: boolean;
+	};
+	priorApprovedCount: number;
+}
+```
+
+#### 반환 값
+
+```ts
+{ status: "approved" | "pending" | "spam"; reason?: string }
+```
+
+### `comment:afterCreate`
+
+**권한:** `read:users`
+
+댓글이 저장된 후 실행되는 Fire-and-forget 훅입니다. 알림에 사용합니다.
+
+```ts
+hooks: {
+  "comment:afterCreate": async (event, ctx) => {
+    if (event.comment.status === "approved") {
+      await ctx.email?.send({
+        to: event.contentAuthor?.email,
+        subject: `New comment on "${event.content.title}"`,
+        text: `${event.comment.authorName} commented: ${event.comment.body}`,
+      });
+    }
+  },
+}
+```
+
+### `comment:afterModerate`
+
+**권한:** `read:users`
+
+관리자가 수동으로 댓글 상태를 변경할 때 실행되는 Fire-and-forget 훅입니다.
+
+#### 이벤트
+
+```ts
+interface CommentAfterModerateEvent {
+	comment: { id: string; /* ... */ };
+	previousStatus: string;
+	newStatus: string;
+	moderator: { id: string; name: string | null };
+}
+```
+
+## 페이지 훅
+
+페이지 훅은 공개 페이지를 렌더링할 때 실행됩니다. 플러그인이 메타데이터와 스크립트를 주입할 수 있도록 합니다.
+
+### `page:metadata`
+
+**권한:** `page:inject`
+
+페이지 헤드에 메타 태그, Open Graph 속성, JSON-LD 구조화 데이터 또는 링크 태그를 추가합니다.
+
+```ts
+hooks: {
+  "page:metadata": async (event, ctx) => {
+    return [
+      { kind: "meta", name: "generator", content: "EmDash" },
+      { kind: "property", property: "og:site_name", content: event.page.siteName },
+      { kind: "jsonld", graph: { "@type": "WebSite", name: event.page.siteName } },
+    ];
+  },
+}
+```
+
+#### 기여 유형
+
+```ts
+type PageMetadataContribution =
+	| { kind: "meta"; name: string; content: string; key?: string }
+	| { kind: "property"; property: string; content: string; key?: string }
+	| { kind: "link"; rel: string; href: string; hreflang?: string; key?: string }
+	| { kind: "jsonld"; id?: string; graph: Record<string, unknown> };
+```
+
+`key` 필드는 기여를 중복 제거합니다 — 주어진 키를 가진 마지막 기여만 사용됩니다.
+
+### `page:fragments`
+
+**권한:** `page:inject`
+
+페이지에 스크립트나 HTML을 주입합니다. 신뢰할 수 있는(네이티브) 플러그인만 사용 가능합니다.
+
+```ts
+hooks: {
+  "page:fragments": async (event, ctx) => {
+    return [
+      {
+        kind: "external-script",
+        placement: "body:end",
+        src: "https://analytics.example.com/script.js",
+        async: true,
+      },
+      {
+        kind: "inline-script",
+        placement: "head",
+        code: `window.siteId = "abc123";`,
+      },
+    ];
+  },
+}
+```
+
+#### 기여 유형
+
+```ts
+type PageFragmentContribution =
+	| {
+			kind: "external-script";
+			placement: "head" | "body:start" | "body:end";
+			src: string;
+			async?: boolean;
+			defer?: boolean;
+			attributes?: Record<string, string>;
+			key?: string;
+		}
+	| {
+			kind: "inline-script";
+			placement: "head" | "body:start" | "body:end";
+			code: string;
+			attributes?: Record<string, string>;
+			key?: string;
+		}
+	| {
+			kind: "html";
+			placement: "head" | "body:start" | "body:end";
+			html: string;
+			key?: string;
+		};
+```
+
+## 훅 구성
+
+훅은 핸들러 함수 또는 구성 객체를 허용합니다:
+
+```ts
+hooks: {
+  // Simple handler
+  "content:afterSave": async (event, ctx) => { ... },
+
+  // 구성 사용
+  "content:beforeSave": {
+    priority: 50,        // 낮을수록 먼저 실행 (기본값: 100)
+    timeout: 10000,      // 최대 실행 시간 (밀리초) (기본값: 5000)
+    dependencies: [],    // 이 플러그인 이후에 실행
+    errorPolicy: "abort", // "continue" 또는 "abort" (기본값)
+    handler: async (event, ctx) => { ... },
+  },
+}
+```
+
+### 구성 옵션
+
+| 옵션         | 유형       | 기본값   | 설명                                          |
+| -------------- | ---------- | --------- | ---------------------------------------------------- |
+| `priority`     | `number`   | `100`     | 실행 순서 (낮을수록 먼저)                    |
+| `timeout`      | `number`   | `5000`    | 최대 실행 시간 (밀리초)                   |
+| `dependencies` | `string[]` | `[]`      | 먼저 실행되어야 하는 플러그인 ID                       |
+| `errorPolicy`  | `string`   | `"abort"` | 오류를 무시하려면 `"continue"`                        |
+| `exclusive`    | `boolean`  | `false`   | 하나의 플러그인만 활성 제공자가 될 수 있음 (예: `email:deliver`, `comment:moderate`와 같은 제공자 패턴 훅용) |
+
+## 플러그인 컨텍스트
+
+모든 훅은 플러그인 API에 접근할 수 있는 컨텍스트 객체를 받습니다:
+
+```ts
+interface PluginContext {
+	plugin: { id: string; version: string };
+	storage: PluginStorage;
+	kv: KVAccess;
+	content?: ContentAccess;
+	media?: MediaAccess;
+	http?: HttpAccess;
+	log: LogAccess;
+	site: { name: string; url: string; locale: string };
+	url(path: string): string;
+	users?: UserAccess;
+	cron?: CronAccess;
+	email?: EmailAccess;
+}
+```
+
+자세한 권한 요구사항과 메서드 정보는 [플러그인 개요 — 플러그인 컨텍스트](/ko/plugins/overview/#plugin-context)를 참조하세요.
+
+<Aside>
+	컨텍스트 API는 플러그인 권한에 의해 제어됩니다. 필요한 권한을 플러그인
+	정의에서 선언하세요.
+</Aside>
+
+## 오류 처리
+
+훅의 오류는 기록되며 `errorPolicy`에 따라 처리됩니다:
+
+- `"abort"` (기본값) — 실행 중지, 적용 가능한 경우 트랜잭션 롤백
+- `"continue"` — 오류 기록 후 다음 훅 계속 실행
+
+```ts
+hooks: {
+  "content:beforeSave": {
+    errorPolicy: "continue", // Don't block save if this fails
+    handler: async (event, ctx) => {
+      try {
+        await ctx.http?.fetch("https://api.example.com/validate");
+      } catch (error) {
+        ctx.log.warn("Validation service unavailable", error);
+      }
+    },
+  },
+}
+```
+
+## 실행 순서
+
+훅은 다음 순서로 실행됩니다:
+
+1. `priority` 기준 정렬 (오름차순)
+2. `dependencies`가 있는 플러그인은 종속성 이후 실행
+3. 동일한 우선순위 내에서는 순서가 결정적이지만 명시되지 않음
+
+```ts
+// This runs first (priority 10)
+{ priority: 10, handler: ... }
+
+// 이 훅은 두 번째로 실행됨 (우선순위 50)
+{ priority: 50, handler: ... }
+
+// 이 훅은 마지막으로 실행됨 (기본 우선순위 100)
+{ handler: ... }
+```

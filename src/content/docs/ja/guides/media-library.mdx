@@ -1,0 +1,495 @@
+---
+title: メディアライブラリ
+description: EmDashで画像やファイルをアップロード・管理します。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+import mediaLibraryImg from "../../../../assets/screenshots/admin-media-library.png";
+
+EmDashには、画像、ドキュメント、その他のファイルを管理するためのメディアライブラリが含まれています。このガイドでは、コンテンツへのメディアのアップロード、整理、使用方法について説明します。
+
+## メディアライブラリへのアクセス
+
+管理サイドバーの **メディア** をクリックしてメディアライブラリを開きます。ライブラリには、アップロードされたすべてのファイルがプレビュー、ファイル名、アップロード日付とともに表示されます。
+
+<img src={mediaLibraryImg.src} alt="EmDash media library showing image grid with upload button" />
+
+## ファイルのアップロード
+
+### メディアライブラリから
+
+1. 管理サイドバーの **メディア** をクリックします
+
+2. **アップロード** をクリックするか、ファイルをアップロード領域にドラッグします
+
+3. コンピューターから1つ以上のファイルを選択します
+
+4. アップロードが完了するのを待ちます
+
+### コンテンツエディターから
+
+1. リッチテキストエディターで画像ボタンをクリックします
+
+2. メディアピッカーで **アップロード** をクリックします
+
+3. コンピューターからファイルを選択します
+
+4. 代替テキストを追加し、**挿入** をクリックします
+
+## サポートされているファイルタイプ
+
+EmDashは一般的なWebファイルタイプをサポートしています：
+
+| カテゴリ  | 拡張子                                                |
+| --------- | --------------------------------------------------------- |
+| 画像    | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.avif`, `.svg` |
+| ドキュメント | `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx` |
+| 動画     | `.mp4`, `.webm`, `.mov`                                   |
+| 音声     | `.mp3`, `.wav`, `.ogg`                                    |
+
+<Aside type="caution">
+	最大ファイルサイズはストレージ構成に依存します。デフォルトの制限はファイルあたり10MBです。
+</Aside>
+
+## ストレージバックエンド
+
+EmDashは複数のストレージバックエンドをサポートしています。Astro設定でストレージを構成します：
+
+<Tabs>
+  <TabItem label="Local Storage">
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: local({
+        directory: "./uploads",
+        baseUrl: "/_emdash/api/media/file",
+      }),
+    }),
+  ],
+});
+```
+
+ファイルは `./uploads` ディレクトリに保存されます。開発およびシングルサーバー展開に適しています。
+
+  </TabItem>
+  <TabItem label="Cloudflare R2">
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { r2 } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: r2({
+        binding: "MEDIA_BUCKET",
+        publicUrl: "https://media.example.com",
+      }),
+    }),
+  ],
+});
+```
+
+`wrangler.jsonc` で設定されたR2バケットが必要です：
+
+```
+jsonc title="wrangler.jsonc"
+{
+	"r2_buckets": [
+		{
+			"binding": "MEDIA_BUCKET",
+			"bucket_name": "my-media-bucket",
+		},
+	],
+}
+```
+
+  </TabItem>
+  <TabItem label="S3-Compatible">
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { s3 } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: s3({
+        endpoint: "https://s3.amazonaws.com",
+        bucket: "my-media-bucket",
+        accessKeyId: process.env.S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+        region: "us-east-1",
+        publicUrl: "https://media.example.com",
+      }),
+    }),
+  ],
+});
+```
+
+Cloudflare R2（S3 API経由）、MinIO、およびその他のS3互換サービスで動作します。
+
+  </TabItem>
+</Tabs>
+
+## アップロードの仕組み
+
+EmDashは安全なアップロードのために署名付きURLを使用します：
+
+1. クライアントがAPIにアップロードURLをリクエストします
+
+2. サーバーが有効期限付きの署名付きURLを生成します
+
+3. クライアントが署名付きURLを使用してストレージに直接アップロードします
+
+4. サーバーがファイルメタデータをデータベースに記録します
+
+このアプローチにより、大きなファイルがアプリケーションサーバーから離れ、クラウドストレージへの直接アップロードが可能になります。
+
+<Aside>
+	R2バインディングは事前署名付きURLをサポートしていません。R2バインディングアダプターを使用する場合、アップロードは
+	あなたのWorkerを経由します。
+</Aside>
+
+## メディアの整理
+
+### フォルダ
+
+メディアを整理するためにフォルダを作成します：
+
+1. メディアライブラリで **新規フォルダ** をクリックします
+
+2. フォルダ名を入力します
+
+3. **作成** をクリックします
+
+4. ファイルをフォルダにドラッグして整理します
+
+### 検索
+
+検索ボックスを使用してファイル名でファイルを検索します。検索はファイル名の一部に一致します。
+
+### フィルター
+
+メディアを以下でフィルタリングします：
+
+- **タイプ** - 画像、ドキュメント、動画、音声
+- **日付** - アップロード日付の範囲
+- **フォルダ** - 特定のフォルダ
+
+## コンテンツでのメディアの使用
+
+### リッチテキストエディター内で
+
+1. 画像を挿入したい位置にカーソルを置きます
+
+2. ツールバーの画像ボタンをクリックします
+
+3. メディアライブラリから画像を選択するか、新しい画像をアップロードします
+
+4. 代替テキストを入力します
+
+5. **挿入** をクリックします
+
+### アイキャッチ画像として
+
+1. エディターでコンテンツエントリーを開きます
+
+2. サイドバーの **アイキャッチ画像** フィールドを見つけます
+
+3. **画像を選択** をクリックします
+
+4. メディアライブラリから選択するか、アップロードします
+
+5. **保存** をクリックします
+
+### カスタムフィールド内で
+
+画像またはファイルタイプとして設定されたフィールドでは、フィールドをクリックしてメディアピッカーを開きます。
+
+## テンプレートでのメディアの表示
+
+コンテンツデータからメディアURLにアクセスします：
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <img
+    src={post.data.featured_image}
+    alt={post.data.featured_image_alt ?? ""}
+  />
+)}
+```
+
+### レスポンシブ画像
+
+レスポンシブ画像の場合、外部URLとともにAstroのImageコンポーネントを使用します：
+
+### レスポンシブ画像
+
+レスポンシブ画像の場合、外部URLとともにAstroのImageコンポーネントを使用します：
+
+```astro
+---
+import { Image } from "astro:assets";
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <Image
+    src={post.data.featured_image}
+    alt={post.data.featured_image_alt ?? ""}
+    width={800}
+    height={450}
+  />
+)}
+```
+
+<Aside type="tip">
+外部URLでImageコンポーネントを使用するには、`astro.config.mjs` で許可された画像ドメインを設定します：
+
+```js
+export default defineConfig({
+	image: {
+		domains: ["media.example.com"],
+	},
+});
+```
+
+</Aside>
+
+## メディアの削除
+
+1. 削除したいファイルを選択します
+
+2. **削除** をクリックします
+
+3. 削除を確認します
+
+<Aside type="caution">
+	メディアを削除しても、コンテンツ内の参照は削除されません。削除されたファイルを使用しているコンテンツを
+	更新または削除するようにしてください。
+</Aside>
+
+## メディアAPI
+
+管理APIを使用してプログラムでメディアにアクセスします。
+
+### ファイルのアップロード
+
+マルチパートフォームデータとしてメディアをアップロードします：
+
+```bash
+POST /_emdash/api/media
+Content-Type: multipart/form-data
+Authorization: Bearer YOUR_API_TOKEN
+
+file=<binary file data>
+```
+
+レスポンス：
+
+```json
+{
+	"success": true,
+	"data": {
+		"item": {
+			"id": "01ABC123",
+			"filename": "hero-image.jpg",
+			"mime_type": "image/jpeg",
+			"storage_key": "media/abc123/hero-image.jpg",
+			"width": 1200,
+			"height": 800
+		}
+	}
+}
+```
+
+### メディアの一覧表示
+
+```bash
+GET /_emdash/api/media?prefix=images/&limit=20
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+### メディアの削除
+
+```bash
+DELETE /_emdash/api/media/images/hero.jpg
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+## メディアプロバイダー
+
+ローカルストレージに加えて、EmDashは専門的な画像および動画ホスティングのための外部メディアプロバイダーをサポートしています。メディアプロバイダーはメディアピッカーにタブとして表示され、編集者が複数のソースから選択できるようにします。
+
+### 利用可能なプロバイダー
+
+<Tabs>
+  <TabItem label="Cloudflare Images">
+[Cloudflare Images](https://developers.cloudflare.com/images/) は、自動最適化、リサイズ、フォーマット変換を備えた画像ホスティングを提供します。
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareImages } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      // ... database, storage config
+      mediaProviders: [
+        cloudflareImages({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_IMAGES_TOKEN,
+          // Optional: custom delivery domain
+          deliveryDomain: "images.example.com",
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+**機能：**
+- 管理パネルから直接画像を閲覧およびアップロード
+- 自動画像最適化とフォーマット変換
+- URLベースの変換（リサイズ、クロップ、フォーマット）
+- レスポンシブ画像のための柔軟なバリアント
+
+</TabItem>
+<TabItem label="Cloudflare Stream">
+[Cloudflare Stream](https://developers.cloudflare.com/stream/) は、HLS/DASH適応ストリーミングを備えた動画ホスティングを提供します。
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareStream } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      // ... database, storage config
+      mediaProviders: [
+        cloudflareStream({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_STREAM_TOKEN,
+          // Optional: player settings
+          controls: true,
+          autoplay: false,
+          loop: false,
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+**機能：**
+- 管理パネルから動画を閲覧、検索、アップロード
+- HLSおよびDASH適応ストリーミング
+- 自動サムネイル生成
+- 大きなファイルの直接アップロード
+
+</TabItem>
+</Tabs>
+
+### 複数のプロバイダーの使用
+
+複数のプロバイダーを設定できます。それぞれがメディアピッカーにタブとして表示されます：
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareImages, cloudflareStream } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      database: d1({ binding: "DB" }),
+      storage: r2({ binding: "MEDIA" }),
+      mediaProviders: [
+        cloudflareImages({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_IMAGES_TOKEN,
+        }),
+        cloudflareStream({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_STREAM_TOKEN,
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+ローカルメディアライブラリ（"ライブラリ"タブ）は、設定されたプロバイダーとともに常に利用可能です。
+
+### プロバイダーメディアのレンダリング
+
+`Image` コンポーネントを使用してメディアをレンダリングします：
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { Image } from "emdash/ui";
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <Image
+    image={post.data.featured_image}
+    width={800}
+    height={450}
+  />
+)}
+```
+
+コンポーネントは自動的に以下を行います：
+- 保存された値からプロバイダーを検出
+- 最適化された `<img>` 要素をレンダリング
+- プロバイダー固有の最適化を適用（例：Cloudflare Imagesの変換）
+
+### MediaValue 型
+
+メディアフィールドは、プロバイダー情報を含む `MediaValue` オブジェクトを保存します：
+
+```ts
+interface MediaValue {
+  provider?: string;    // Provider ID, defaults to "local"
+  id: string;           // Provider-specific ID
+  src?: string;         // Direct URL (for local media or legacy data)
+  previewUrl?: string;  // Preview URL for admin display (external providers)
+  filename?: string;    // Original filename
+  mimeType?: string;    // MIME type
+  width?: number;       // Image/video width
+  height?: number;      // Image/video height
+  alt?: string;         // Alt text
+  meta?: Record<string, unknown>; // Provider-specific metadata
+}
+```
+
+これにより、EmDashはメディアがどこでホストされていても正しくレンダリングできます。
+
+## 次のステップ
+
+- [コンテンツの操作](/ja/guides/working-with-content/) - コンテンツ内でメディアを使用
+- [ブログの作成](/ja/guides/create-a-blog/) - ブログ投稿に画像を追加
+- [コンテンツのクエリ](/ja/guides/querying-content/) - テンプレートでメディアを表示

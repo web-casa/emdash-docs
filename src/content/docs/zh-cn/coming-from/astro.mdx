@@ -1,0 +1,384 @@
+---
+title: EmDash 面向 Astro 开发者
+description: 使用 EmDash 为你的 Astro 站点添加 WordPress 风格的 CMS 功能
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 是一个专为 Astro 构建的 CMS——它不是一个带有 Astro 适配器的通用无头 CMS。它通过数据库支持的内容、精美的管理界面以及 WordPress 风格的功能（菜单、小部件、分类法）来扩展你的 Astro 站点，同时保留你所期望的开发者体验。
+
+你所了解的关于 Astro 的一切仍然适用。EmDash 增强你的站点；它不会取代你的工作流程。
+
+## EmDash 添加了什么
+
+EmDash 提供了基于文件的 Astro 站点所缺乏的内容管理功能：
+
+| 功能               | 描述                                          |
+| ------------------ | --------------------------------------------- |
+| **管理界面**       | 位于 `/_emdash/admin` 的完整所见即所得编辑界面 |
+| **数据库存储**     | 内容存储在 SQLite、libSQL 或 Cloudflare D1 中 |
+| **媒体库**         | 上传、组织并提供图片和文件                    |
+| **导航菜单**       | 支持嵌套的拖放菜单管理                        |
+| **小部件区域**     | 动态侧边栏和页脚区域                          |
+| **站点设置**       | 全局配置（标题、徽标、社交链接）              |
+| **分类法**         | 分类、标签和自定义分类法                      |
+| **预览系统**       | 用于草稿内容的签名预览 URL                    |
+| **修订版本**       | 内容版本历史                                  |
+
+<Aside type="tip">
+	内容更改会立即生效，无需重新构建站点。EmDash 站点默认在 SSR 模式下运行。
+</Aside>
+
+## Astro 集合 vs EmDash
+
+Astro 的 `astro:content` 集合是基于文件的，并在构建时解析。EmDash 集合是基于数据库的，并在运行时解析。
+
+|                    | Astro 集合                     | EmDash 集合                  |
+| ------------------ | ------------------------------ | ---------------------------- |
+| **存储**           | `src/content/` 中的 Markdown/MDX 文件 | SQLite/D1 数据库             |
+| **编辑**           | 代码编辑器                     | 管理界面                     |
+| **内容格式**       | 带有 frontmatter 的 Markdown   | Portable Text（结构化 JSON） |
+| **更新**           | 需要重新构建                   | 即时（SSR）                  |
+| **模式**           | `content.config.ts` 中的 Zod   | 在管理界面定义，存储在数据库中 |
+| **最适合**         | 开发者管理的内容               | 编辑者管理的内容             |
+
+### 两者结合使用
+
+Astro 集合和 EmDash 可以共存。使用 Astro 集合处理开发者内容（文档、更新日志），使用 EmDash 处理编辑者内容（博客文章、页面）：
+
+```astro title="src/pages/index.astro"
+---
+import { getCollection } from "astro:content";
+import { getEmDashCollection } from "emdash";
+
+// Developer-managed docs from files
+const docs = await getCollection("docs");
+
+// Editor-managed posts from database
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  limit: 5,
+});
+---
+```
+
+## 配置
+
+EmDash 需要两个配置文件。
+
+### Astro 集成
+
+```ts title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	output: "server", // Required for EmDash
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+### 实时集合加载器
+
+```ts title="src/live.config.ts"
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({
+		loader: emdashLoader(),
+	}),
+};
+```
+
+这将 EmDash 注册为实时内容源。`_emdash` 集合在内部路由到你的内容类型（文章、页面、产品）。
+
+## 查询内容
+
+EmDash 提供了遵循 Astro [实时内容集合](https://docs.astro.build/en/reference/experimental-flags/live-content-collections/) 模式的查询函数，返回 `{ entries, error }` 或 `{ entry, error }`：
+
+<Tabs>
+  <TabItem label="EmDash">
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+// Get all published posts - returns { entries, error }
+const { entries: posts } = await getEmDashCollection("posts", {
+status: "published",
+});
+
+// Get a single post by slug - returns { entry, error, isPreview }
+const { entry: post } = await getEmDashEntry("posts", "my-post");
+
+````
+  </TabItem>
+  <TabItem label="Astro">
+```ts
+import { getCollection, getEntry } from "astro:content";
+
+// Get all blog entries
+const posts = await getCollection("blog");
+
+// Get a single entry by slug
+const post = await getEntry("blog", "my-post");
+````
+
+  </TabItem>
+</Tabs>
+
+### 过滤选项
+
+`getEmDashCollection` 支持 Astro 的 `getCollection` 所不具备的过滤功能：
+
+```ts
+const { entries: posts } = await getEmDashCollection("posts", {
+	status: "published", // draft | published | archived
+	limit: 10, // max results
+	where: { category: "news" }, // taxonomy filter
+});
+```
+
+## 渲染内容
+
+EmDash 将富文本存储为 Portable Text，这是一种结构化的 JSON 格式。使用 `PortableText` 组件来渲染它：
+
+<Tabs>
+  <TabItem label="EmDash">
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+
+if (!post) {
+return Astro.redirect("/404");
+}
+
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+  <PortableText value={post.data.content} />
+</article>
+```
+  </TabItem>
+  <TabItem label="Astro">
+```astro title="src/pages/blog/[slug].astro"
+---
+import { getEntry, render } from "astro:content";
+
+const { slug } = Astro.params;
+const post = await getEntry("blog", slug);
+const { Content } = await render(post);
+
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+  <Content />
+</article>
+```
+  </TabItem>
+</Tabs>
+
+<Aside>
+	Portable Text 保留了内容结构，而无需嵌入 HTML。这使得内容可以在不同渲染器之间移植，并防止 XSS 漏洞。
+</Aside>
+
+## 动态功能
+
+EmDash 提供了 Astro 内容层中不存在的 WordPress 风格功能的 API。
+
+### 导航菜单
+
+```astro title="src/layouts/Base.astro"
+---
+import { getMenu } from "emdash";
+
+const primaryMenu = await getMenu("primary");
+---
+
+{primaryMenu && (
+  <nav>
+    <ul>
+      {primaryMenu.items.map(item => (
+        <li>
+          <a href={item.url}>{item.label}</a>
+          {item.children.length > 0 && (
+            <ul>
+              {item.children.map(child => (
+                <li><a href={child.url}>{child.label}</a></li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+### 小部件区域
+
+```astro title="src/layouts/BlogPost.astro"
+---
+import { getWidgetArea } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const sidebar = await getWidgetArea("sidebar");
+---
+
+{sidebar && sidebar.widgets.length > 0 && (
+  <aside>
+    {sidebar.widgets.map(widget => (
+      <div class="widget">
+        {widget.title && <h3>{widget.title}</h3>}
+        {widget.type === "content" && widget.content && (
+          <PortableText value={widget.content} />
+        )}
+      </div>
+    ))}
+  </aside>
+)}
+```
+
+### 站点设置
+
+```astro title="src/components/Header.astro"
+---
+import { getSiteSettings, getSiteSetting } from "emdash";
+
+const settings = await getSiteSettings();
+// Or fetch individual values:
+const title = await getSiteSetting("title");
+---
+
+<header>
+  {settings.logo ? (
+    <img src={settings.logo.url} alt={settings.title} />
+  ) : (
+    <span>{settings.title}</span>
+  )}
+  {settings.tagline && <p>{settings.tagline}</p>}
+</header>
+```
+
+## 插件
+
+通过添加钩子、存储、设置和管理界面的插件来扩展 EmDash：
+
+```ts title="astro.config.mjs"
+import emdash from "emdash/astro";
+import seoPlugin from "@emdash-cms/plugin-seo";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			// ...
+			plugins: [seoPlugin({ generateSitemap: true })],
+		}),
+	],
+});
+```
+
+使用 `definePlugin` 创建自定义插件：
+
+```ts title="src/plugins/analytics.ts"
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+	capabilities: ["read:content"],
+
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			ctx.log.info("Content saved", { id: event.content.id });
+		},
+	},
+
+	admin: {
+		settingsSchema: {
+			trackingId: { type: "string", label: "Tracking ID" },
+		},
+	},
+});
+```
+
+## 服务器渲染
+
+EmDash 站点在 SSR 模式下运行。内容更改会立即生效，无需重新构建。
+
+对于使用 `getStaticPaths` 的静态页面，内容在构建时获取：
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+export async function getStaticPaths() {
+  const { entries: posts } = await getEmDashCollection("posts", {
+    status: "published",
+  });
+
+  return posts.map((post) => ({
+    params: { slug: post.data.slug },
+  }));
+}
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+---
+```
+
+对于动态页面，设置 `prerender = false` 以在每个请求时获取内容：
+
+```astro title="src/pages/posts/[slug].astro"
+---
+export const prerender = false;
+
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!post) {
+  return new Response(null, { status: 404 });
+}
+---
+```
+
+<Aside type="tip">
+	对于频繁更新的内容，使用服务器渲染。对于很少更改且受益于 CDN 缓存的内容，使用静态生成。
+</Aside>
+
+## 后续步骤
+
+<CardGrid>
+	<Card title="入门指南" icon="rocket">
+		[在 5 分钟内创建你的第一个 EmDash 站点](/zh-cn/getting-started/)。
+	</Card>
+	<Card title="查询内容" icon="document">
+		[详细了解查询 API](/zh-cn/guides/querying-content/)。
+	</Card>
+	<Card title="创建博客" icon="pencil">
+		[构建一个包含分类和标签的完整博客](/zh-cn/guides/create-a-blog/)。
+	</Card>
+	<Card title="部署到 Cloudflare" icon="external">
+		[在 Workers 上将你的站点投入生产环境](/zh-cn/deployment/cloudflare/)。
+	</Card>
+</CardGrid>

@@ -1,0 +1,1023 @@
+---
+title: Référence de l'API REST
+description: Points de terminaison HTTP pour la gestion du contenu, des médias et des schémas.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash expose une API REST à l'adresse `/_emdash/api/` pour la gestion de contenu, les téléchargements de médias et les opérations sur les schémas.
+
+## Authentification
+
+Les requêtes API nécessitent une authentification via un jeton Bearer :
+
+```http
+Authorization: Bearer <token>
+```
+
+Générez les jetons via l'interface d'administration ou de manière programmatique.
+
+## Format de Réponse
+
+Toutes les réponses suivent un format cohérent :
+
+```json
+// Success
+{
+  "success": true,
+  "data": { ... }
+}
+
+// Erreur
+{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Message lisible par un humain",
+    "details": { ... }
+  }
+}
+```
+
+## Points de Terminaison de Contenu
+
+### Lister le Contenu
+
+```http
+GET /_emdash/api/content/:collection
+```
+
+#### Paramètres
+
+| Paramètre    | Type     | Description                             |
+| ------------ | -------- | --------------------------------------- |
+| `collection` | `string` | Slug de la collection (chemin)          |
+| `cursor`     | `string` | Curseur de pagination (requête)         |
+| `limit`      | `number` | Éléments par page (requête, défaut : 50) |
+| `status`     | `string` | Filtrer par statut (requête)            |
+| `orderBy`    | `string` | Champ de tri (requête)                  |
+| `order`      | `string` | Direction du tri : `asc` ou `desc` (requête) |
+
+#### Réponse
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "01HXK5MZSN...",
+        "type": "posts",
+        "slug": "hello-world",
+        "data": { "title": "Bonjour le monde", ... },
+        "status": "published",
+        "createdAt": "2025-01-24T12:00:00Z",
+        "updatedAt": "2025-01-24T12:00:00Z"
+      }
+    ],
+    "nextCursor": "eyJpZCI6..."
+  }
+}
+```
+
+### Obtenir le Contenu
+
+```http
+GET /_emdash/api/content/:collection/:id
+```
+
+#### Réponse
+
+```json
+{
+  "success": true,
+  "data": {
+    "item": {
+      "id": "01HXK5MZSN...",
+      "type": "posts",
+      "slug": "hello-world",
+      "data": { "title": "Bonjour le monde", ... },
+      "status": "published",
+      "createdAt": "2025-01-24T12:00:00Z",
+      "updatedAt": "2025-01-24T12:00:00Z"
+    }
+  }
+}
+```
+
+### Créer du Contenu
+
+```http
+POST /_emdash/api/content/:collection
+Content-Type: application/json
+```
+
+#### Corps de la Requête
+
+```json
+{
+  "data": {
+    "title": "New Post",
+    "content": [...]
+  },
+  "slug": "new-post",
+  "status": "draft"
+}
+```
+
+#### Réponse
+
+```json
+{
+  "success": true,
+  "data": {
+    "item": { ... }
+  }
+}
+```
+
+### Mettre à Jour le Contenu
+
+```http
+PUT /_emdash/api/content/:collection/:id
+Content-Type: application/json
+```
+
+#### Corps de la Requête
+
+```json
+{
+	"data": {
+		"title": "Updated Title"
+	},
+	"status": "published"
+}
+```
+
+### Supprimer le Contenu
+
+```http
+DELETE /_emdash/api/content/:collection/:id
+```
+
+#### Réponse
+
+```json
+{
+	"success": true,
+	"data": {
+		"success": true
+	}
+}
+```
+
+## Points de Terminaison des Médias
+
+### Lister les Médias
+
+```http
+GET /_emdash/api/media
+```
+
+#### Paramètres
+
+| Paramètre  | Type     | Description                  |
+| ---------- | -------- | ---------------------------- |
+| `cursor`   | `string` | Curseur de pagination        |
+| `limit`    | `number` | Éléments par page (défaut : 20) |
+| `mimeType` | `string` | Filtrer par préfixe de type MIME |
+
+#### Réponse
+
+```json
+{
+	"success": true,
+	"data": {
+		"items": [
+			{
+				"id": "01HXK5MZSN...",
+				"filename": "photo.jpg",
+				"mimeType": "image/jpeg",
+				"size": 102400,
+				"width": 1920,
+				"height": 1080,
+				"url": "https://cdn.example.com/photo.jpg",
+				"createdAt": "2025-01-24T12:00:00Z"
+			}
+		],
+		"nextCursor": "eyJpZCI6..."
+	}
+}
+```
+
+### Obtenir un Média
+
+```http
+GET /_emdash/api/media/:id
+```
+
+### Créer un Média
+
+```http
+POST /_emdash/api/media
+Content-Type: application/json
+```
+
+#### Corps de la Requête
+
+```json
+{
+	"filename": "photo.jpg",
+	"mimeType": "image/jpeg",
+	"size": 102400,
+	"width": 1920,
+	"height": 1080,
+	"storageKey": "uploads/photo.jpg"
+}
+```
+
+<Aside>
+	Ce point de terminaison enregistre les métadonnées du média après le téléchargement. Utilisez le point de terminaison de téléchargement ou des URL signées pour télécharger le fichier réel.
+</Aside>
+
+### Mettre à Jour un Média
+
+```http
+PUT /_emdash/api/media/:id
+Content-Type: application/json
+```
+
+#### Corps de la Requête
+
+```json
+{
+	"alt": "Photo description",
+	"caption": "Photo caption"
+}
+```
+
+### Supprimer un Média
+
+```http
+DELETE /_emdash/api/media/:id
+```
+
+### Obtenir le Fichier Média
+
+```http
+GET /_emdash/api/media/file/:key
+```
+
+Sert le contenu réel du fichier. Uniquement pour le stockage local.
+
+## Points de Terminaison des Révisions
+
+### Lister les Révisions
+
+```http
+GET /_emdash/api/content/:collection/:entryId/revisions
+```
+
+#### Paramètres
+
+| Paramètre | Type     | Description                           |
+| --------- | -------- | ------------------------------------- |
+| `limit`   | `number` | Nombre maximum de révisions à retourner (défaut : 50) |
+
+#### Réponse
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "01HXK5MZSN...",
+        "collection": "posts",
+        "entryId": "01HXK5MZSN...",
+        "data": { ... },
+        "createdAt": "2025-01-24T12:00:00Z"
+      }
+    ],
+    "total": 5
+  }
+}
+```
+
+### Obtenir une Révision
+
+```http
+GET /_emdash/api/revisions/:revisionId
+```
+
+### Restaurer une Révision
+
+```http
+POST /_emdash/api/revisions/:revisionId/restore
+```
+
+Restaure le contenu à l'état de cette révision et crée une nouvelle révision.
+
+## Points de Terminaison des Schémas
+
+### Lister les Collections
+
+```http
+GET /_emdash/api/schema/collections
+```
+
+#### Réponse
+
+```json
+{
+	"success": true,
+	"data": {
+		"items": [
+			{
+				"id": "01HXK5MZSN...",
+				"slug": "posts",
+				"label": "Posts",
+				"labelSingular": "Post",
+				"supports": ["drafts", "revisions", "preview"]
+			}
+		]
+	}
+}
+```
+
+### Obtenir une Collection
+
+```http
+GET /_emdash/api/schema/collections/:slug
+```
+
+#### Paramètres
+
+| Paramètre       | Type      | Description                       |
+| --------------- | --------- | --------------------------------- |
+| `includeFields` | `boolean` | Inclure les définitions de champs (requête) |
+
+### Créer une Collection
+
+```http
+POST /_emdash/api/schema/collections
+Content-Type: application/json
+```
+
+#### Corps de la Requête
+
+```json
+{
+	"slug": "products",
+	"label": "Products",
+	"labelSingular": "Product",
+	"description": "Product catalog",
+	"supports": ["drafts", "revisions"]
+}
+```
+
+### Mettre à Jour une Collection
+
+```http
+PATCH /_emdash/api/schema/collections/:slug
+Content-Type: application/json
+```
+
+### Supprimer une Collection
+
+```http
+DELETE /_emdash/api/schema/collections/:slug
+```
+
+#### Paramètres
+
+| Paramètre | Type      | Description                                   |
+| --------- | --------- | --------------------------------------------- |
+| `force`   | `boolean` | Supprimer même si la collection a du contenu (requête) |
+
+### Lister les Champs
+
+```http
+GET /_emdash/api/schema/collections/:slug/fields
+```
+
+### Créer un Champ
+
+```http
+POST /_emdash/api/schema/collections/:slug/fields
+Content-Type: application/json
+```
+
+#### Corps de la Requête
+
+```json
+{
+	"slug": "price",
+	"label": "Price",
+	"type": "number",
+	"required": true,
+	"validation": {
+		"min": 0
+	}
+}
+```
+
+### Mettre à Jour un Champ
+
+```http
+PATCH /_emdash/api/schema/collections/:collectionSlug/fields/:fieldSlug
+Content-Type: application/json
+```
+
+### Supprimer un Champ
+
+```http
+DELETE /_emdash/api/schema/collections/:collectionSlug/fields/:fieldSlug
+```
+
+### Réorganiser les Champs
+
+```http
+POST /_emdash/api/schema/collections/:slug/fields/reorder
+Content-Type: application/json
+```
+
+#### Corps de la Requête
+
+```json
+{
+	"fieldSlugs": ["title", "content", "author", "publishedAt"]
+}
+```
+
+## Exportation du Schéma
+
+### Exporter le Schéma (JSON)
+
+```http
+GET /_emdash/api/schema
+Accept: application/json
+```
+
+### Exporter le Schéma (TypeScript)
+
+```http
+GET /_emdash/api/schema?format=typescript
+Accept: text/typescript
+```
+
+Retourne les interfaces TypeScript pour toutes les collections.
+
+## Points de Terminaison des Plugins
+
+### Lister les Plugins
+
+```http
+GET /_emdash/api/plugins
+```
+
+### Obtenir un Plugin
+
+```http
+GET /_emdash/api/plugins/:pluginId
+```
+
+### Activer un Plugin
+
+```http
+POST /_emdash/api/plugins/:pluginId/enable
+```
+
+### Désactiver un Plugin
+
+```http
+POST /_emdash/api/plugins/:pluginId/disable
+```
+
+## Codes d'Erreur
+
+| Code                   | Statut HTTP | Description              |
+| ---------------------- | ----------- | ------------------------ |
+| `NOT_FOUND`            | 404         | Ressource non trouvée    |
+| `VALIDATION_ERROR`     | 400         | Données d'entrée invalides |
+| `UNAUTHORIZED`         | 401         | Jeton manquant ou invalide |
+| `FORBIDDEN`            | 403         | Permissions insuffisantes |
+| `CONTENT_LIST_ERROR`   | 500         | Échec de la liste de contenu |
+| `CONTENT_CREATE_ERROR` | 500         | Échec de la création de contenu |
+| `CONTENT_UPDATE_ERROR` | 500         | Échec de la mise à jour du contenu |
+| `CONTENT_DELETE_ERROR` | 500         | Échec de la suppression du contenu |
+| `MEDIA_LIST_ERROR`     | 500         | Échec de la liste des médias |
+| `MEDIA_CREATE_ERROR`   | 500         | Échec de la création de média |
+| `SCHEMA_ERROR`         | 400         | Échec de l'opération sur le schéma |
+| `DUPLICATE_SLUG`       | 409         | Le slug existe déjà      |
+| `RESERVED_SLUG`        | 400         | Le slug est réservé      |
+
+## Points de Terminaison de Recherche
+
+### Recherche Globale
+
+```http
+GET /_emdash/api/search?q=hello+world
+```
+
+#### Paramètres
+
+| Paramètre     | Type     | Description                      |
+| ------------- | -------- | -------------------------------- |
+| `q`           | `string` | Requête de recherche (requise)   |
+| `collections` | `string` | Slugs de collections séparés par des virgules |
+| `status`      | `string` | Filtrer par statut (défaut : publié) |
+| `limit`       | `number` | Résultats maximum (défaut : 20)  |
+| `cursor`      | `string` | Curseur de pagination            |
+
+#### Réponse
+
+```json
+{
+  "results": [
+    {
+      "collection": "posts",
+      "id": "01HXK5MZSN...",
+      "slug": "hello-world",
+      "title": "Bonjour le monde",
+      "snippet": "...this is a <mark>hello</mark>
+ <mark>world</mark>
+ example...",
+      "score": 0.95
+    }
+  ],
+  "nextCursor": "eyJvZmZzZXQiOjIwfQ"
+}
+```
+
+### Suggestions de Recherche
+
+```http
+GET /_emdash/api/search/suggest?q=hel&limit=5
+```
+
+Retourne les titres correspondant par préfixe pour l'auto-complétion.
+
+### Reconstruire l'Index de Recherche
+
+```http
+POST /_emdash/api/search/rebuild
+```
+
+Reconstruit l'index FTS pour toutes les collections ou des collections spécifiques.
+
+### Statistiques de Recherche
+
+```http
+GET /_emdash/api/search/stats
+```
+
+Retourne le nombre de documents indexés par collection.
+
+## Points de Terminaison des Sections
+
+### Lister les Sections
+
+```http
+GET /_emdash/api/sections
+GET /_emdash/api/sections?source=theme
+GET /_emdash/api/sections?search=newsletter
+```
+
+### Obtenir une Section
+
+```http
+GET /_emdash/api/sections/:slug
+```
+
+### Créer une Section
+
+```http
+POST /_emdash/api/sections
+Content-Type: application/json
+
+{
+  "slug": "my-section",
+  "title": "My Section",
+  "keywords": ["keyword1"],
+  "content": [...]
+}
+```
+
+### Mettre à Jour une Section
+
+```http
+PUT /_emdash/api/sections/:slug
+```
+
+### Supprimer une Section
+
+```http
+DELETE /_emdash/api/sections/:slug
+```
+
+## Points de Terminaison des Paramètres
+
+### Obtenir Tous les Paramètres
+
+```http
+GET /_emdash/api/settings
+```
+
+### Mettre à Jour les Paramètres
+
+```http
+POST /_emdash/api/settings
+Content-Type: application/json
+
+{
+  "siteTitle": "Mon site",
+  "tagline": "Un excellent site",
+  "postsPerPage": 10
+}
+```
+
+## Points de Terminaison des Menus
+
+### Lister les Menus
+
+```http
+GET /_emdash/api/menus
+```
+
+### Obtenir un Menu
+
+```http
+GET /_emdash/api/menus/:name
+```
+
+### Créer un Menu
+
+```http
+POST /_emdash/api/menus
+Content-Type: application/json
+
+{
+  "name": "footer",
+  "label": "Footer Navigation"
+}
+```
+
+### Mettre à Jour un Menu
+
+```http
+PUT /_emdash/api/menus/:name
+```
+
+### Supprimer un Menu
+
+```http
+DELETE /_emdash/api/menus/:name
+```
+
+### Ajouter un Élément de Menu
+
+```http
+POST /_emdash/api/menus/:name/items
+Content-Type: application/json
+
+{
+  "type": "page",
+  "referenceCollection": "pages",
+  "referenceId": "page_about",
+  "label": "About Us"
+}
+```
+
+### Réorganiser les Éléments de Menu
+
+```http
+POST /_emdash/api/menus/:name/reorder
+Content-Type: application/json
+
+{
+  "items": [
+    { "id": "item_1", "parentId": null, "sortOrder": 0 },
+    { "id": "item_2", "parentId": null, "sortOrder": 1 },
+    { "id": "item_3", "parentId": "item_2", "sortOrder": 0 }
+  ]
+}
+```
+
+## Points de Terminaison de Taxonomie
+
+### Lister les Définitions de Taxonomie
+
+```http
+GET /_emdash/api/taxonomies
+```
+
+### Créer une Taxonomie
+
+```http
+POST /_emdash/api/taxonomies
+Content-Type: application/json
+
+{
+  "name": "genre",
+  "label": "Genres",
+  "labelSingular": "Genre",
+  "hierarchical": true,
+  "collections": ["books", "movies"]
+}
+```
+
+### Lister les Termes
+
+```http
+GET /_emdash/api/taxonomies/:name/terms
+```
+
+### Créer un Terme
+
+```http
+POST /_emdash/api/taxonomies/:name/terms
+Content-Type: application/json
+
+{
+  "slug": "tutorials",
+  "label": "Tutoriels",
+  "parentId": "term_abc",
+  "description": "Guides pratiques"
+}
+```
+
+### Mettre à Jour un Terme
+
+```http
+PUT /_emdash/api/taxonomies/:name/terms/:slug
+```
+
+### Supprimer un Terme
+
+```http
+DELETE /_emdash/api/taxonomies/:name/terms/:slug
+```
+
+### Définir les Termes d'une Entrée
+
+```http
+POST /_emdash/api/content/:collection/:id/terms/:taxonomy
+Content-Type: application/json
+
+{
+  "termIds": ["term_news", "term_featured"]
+}
+```
+
+## Points de Terminaison des Zones de Widgets
+
+### Lister les Zones de Widgets
+
+```http
+GET /_emdash/api/widget-areas
+```
+
+### Obtenir une Zone de Widgets
+
+```http
+GET /_emdash/api/widget-areas/:name
+```
+
+### Créer une Zone de Widgets
+
+```http
+POST /_emdash/api/widget-areas
+Content-Type: application/json
+
+{
+  "name": "sidebar",
+  "label": "Barre latérale principale",
+  "description": "Apparaît sur les articles"
+}
+```
+
+### Supprimer une Zone de Widgets
+
+```http
+DELETE /_emdash/api/widget-areas/:name
+```
+
+### Ajouter un Widget
+
+```http
+POST /_emdash/api/widget-areas/:name/widgets
+Content-Type: application/json
+
+{
+  "type": "content",
+  "title": "A propos",
+  "content": [...]
+}
+```
+
+### Mettre à Jour un Widget
+
+```http
+PUT /_emdash/api/widget-areas/:name/widgets/:id
+```
+
+### Supprimer un Widget
+
+```http
+DELETE /_emdash/api/widget-areas/:name/widgets/:id
+```
+
+### Réorganiser les Widgets
+
+```http
+POST /_emdash/api/widget-areas/:name/reorder
+Content-Type: application/json
+
+{
+  "widgetIds": ["widget_1", "widget_2", "widget_3"]
+}
+```
+
+## Points de Terminaison de Gestion des Utilisateurs
+
+### Lister les Utilisateurs
+
+```http
+GET /_emdash/api/admin/users
+GET /_emdash/api/admin/users?role=40
+GET /_emdash/api/admin/users?search=john
+```
+
+### Obtenir un Utilisateur
+
+```http
+GET /_emdash/api/admin/users/:id
+```
+
+### Mettre à Jour un Utilisateur
+
+```http
+PATCH /_emdash/api/admin/users/:id
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "role": 40
+}
+```
+
+### Activer un Utilisateur
+
+```http
+POST /_emdash/api/admin/users/:id/enable
+```
+
+### Désactiver un Utilisateur
+
+```http
+POST /_emdash/api/admin/users/:id/disable
+```
+
+## Points de Terminaison d'Authentification
+
+### Statut de Configuration
+
+```http
+GET /_emdash/api/setup/status
+```
+
+Indique si la configuration est terminée et si des utilisateurs existent.
+
+### Connexion par clé d'accès
+
+```http
+POST /_emdash/api/auth/passkey/options
+```
+
+Obtenir les options d'authentification WebAuthn.
+
+```http
+POST /_emdash/api/auth/passkey/verify
+Content-Type: application/json
+
+{
+  "id": "credential-id",
+  "rawId": "...",
+  "response": {...},
+  "type": "public-key"
+}
+```
+
+Vérifier la clé d'accès et créer une session.
+
+### Lien magique
+
+```http
+POST /_emdash/api/auth/magic-link/send
+Content-Type: application/json
+
+{
+  "email": "user@example.com"
+}
+```
+
+```http
+GET /_emdash/api/auth/magic-link/verify?token=xxx
+```
+
+### Déconnexion
+
+```http
+POST /_emdash/api/auth/logout
+```
+
+### Utilisateur actuel
+
+```http
+GET /_emdash/api/auth/me
+```
+
+### Inviter un utilisateur
+
+```http
+POST /_emdash/api/auth/invite
+Content-Type: application/json
+
+{
+  "email": "newuser@example.com",
+  "role": 30
+}
+```
+
+### Gestion des clés d'accès
+
+```http
+GET /_emdash/api/auth/passkey
+```
+
+Lister les clés d'accès de l'utilisateur.
+
+```http
+POST /_emdash/api/auth/passkey/register/options
+POST /_emdash/api/auth/passkey/register/verify
+```
+
+Enregistrer une nouvelle clé d'accès.
+
+```http
+PATCH /_emdash/api/auth/passkey/:id
+Content-Type: application/json
+
+{
+  "name": "MacBook Pro"
+}
+```
+
+Renommer une clé d'accès.
+
+```http
+DELETE /_emdash/api/auth/passkey/:id
+```
+
+Supprimer une clé d'accès.
+
+## Points de terminaison d'importation
+
+### Analyser l'export WordPress
+
+```http
+POST /_emdash/api/import/wordpress/analyze
+Content-Type: multipart/form-data
+
+fichier : <fichier WXR>
+```
+
+### Exécuter l'importation WordPress
+
+```http
+POST /_emdash/api/import/wordpress/execute
+Content-Type: application/json
+
+{
+  "analysisId": "...",
+  "options": {
+    "includeMedia": true,
+    "includeTaxonomies": true,
+    "includeMenus": true
+  }
+}
+```
+
+## Limitation du débit
+
+Les points de terminaison de l'API peuvent être limités en débit selon la configuration du déploiement. Lorsqu'ils sont limités, les réponses incluent :
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 60
+```
+
+### CORS
+
+L'API prend en charge CORS pour les requêtes du navigateur. Configurez les origines autorisées dans votre déploiement.

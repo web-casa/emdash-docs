@@ -1,0 +1,331 @@
+---
+title: 预览模式
+description: 在发布前启用草稿内容的安全预览。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 的预览系统允许编辑者通过安全、有时限的 URL 查看未发布的内容。预览链接使用 HMAC-SHA256 签名的令牌，您可以与审阅者共享这些链接，而无需暴露整个草稿内容。
+
+## 工作原理
+
+1. 管理员为草稿文章生成一个预览 URL
+2. URL 包含一个带有过期时间的已签名 `_preview` 查询参数
+3. EmDash 的中间件自动验证令牌并设置请求上下文
+4. 您的模板代码照常调用 `getEmDashEntry()` —— 草稿内容会自动提供
+
+预览是**隐式**的。您的模板代码无需处理令牌或传递预览选项 —— 中间件和查询函数通过 `AsyncLocalStorage` 处理所有事情。
+
+## 设置预览
+
+在您的环境中添加一个预览密钥：
+
+```bash title=".env"
+EMDASH_PREVIEW_SECRET="your-random-secret-key-here"
+```
+
+生成一个安全的随机字符串。此密钥用于签名和验证预览令牌。
+
+就这样。您现有的模板会自动支持预览：
+
+```astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+
+// No special preview handling needed — the middleware
+// detects _preview tokens and serves draft content automatically
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+{isPreview && (
+  <div class="preview-banner">
+    You are viewing a preview. This content is not published.
+  </div>
+)}
+
+<article>
+  <h1>{entry.data.title}</h1>
+</article>
+```
+
+当通过有效的预览令牌提供草稿内容时，`isPreview` 标志为 `true`。
+
+## 生成预览 URL
+
+使用 `getPreviewUrl()` 创建预览链接：
+
+```ts
+import { getPreviewUrl } from "emdash";
+
+const previewUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	expiresIn: "1h",
+});
+// Returns: /posts/my-draft-post?_preview=eyJjaWQ...
+```
+
+使用基础 URL 生成绝对链接：
+
+```ts
+const fullUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	baseUrl: "https://example.com",
+});
+// Returns: https://example.com/posts/my-draft-post?_preview=eyJjaWQ...
+```
+
+使用自定义路径模式：
+
+```ts
+const blogUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	pathPattern: "/blog/{id}",
+});
+// Returns: /blog/my-draft-post?_preview=eyJjaWQ...
+```
+
+## 令牌过期
+
+控制预览链接保持有效的时间：
+
+```ts
+// Valid for 1 hour (default)
+await getPreviewUrl({ ..., expiresIn: "1h" });
+
+// Valid for 30 minutes
+await getPreviewUrl({ ..., expiresIn: "30m" });
+
+// Valid for 1 day
+await getPreviewUrl({ ..., expiresIn: "1d" });
+
+// Valid for 2 weeks
+await getPreviewUrl({ ..., expiresIn: "2w" });
+
+// Valid for 3600 seconds
+await getPreviewUrl({ ..., expiresIn: 3600 });
+```
+
+支持的单位：`s` (秒), `m` (分钟), `h` (小时), `d` (天), `w` (周)。
+
+## 验证令牌
+
+使用 `verifyPreviewToken()` 验证传入的预览请求：
+
+```ts
+import { verifyPreviewToken } from "emdash";
+
+// From a URL (extracts _preview query parameter)
+const result = await verifyPreviewToken({
+	url: Astro.url,
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+});
+
+// Or with a token directly
+const result = await verifyPreviewToken({
+	token: someTokenString,
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+});
+```
+
+结果指示令牌是否有效：
+
+```ts
+if (result.valid) {
+	// Token is valid
+	console.log(result.payload.cid); // "posts:my-draft-post"
+	console.log(result.payload.exp); // Expiry timestamp
+	console.log(result.payload.iat); // Issued-at timestamp
+} else {
+	// Token is invalid
+	console.log(result.error);
+	// "none" - no token present
+	// "malformed" - token structure is invalid
+	// "invalid" - signature verification failed
+	// "expired" - token has expired
+}
+```
+
+## 预览指示器
+
+当内容正在预览时，您可以显示一个视觉指示器。`getEmDashEntry` 返回的 `isPreview` 标志会告诉您何时正在提供草稿内容：
+
+```astro
+{isPreview && (
+  <div class="preview-banner" role="alert">
+    <strong>Preview</strong> — You are viewing unpublished content.
+    <a href={Astro.url.pathname}>Exit preview</a>
+  </div>
+)}
+```
+
+<Aside type="tip">
+	对于使用可视化编辑的已认证编辑者，EmDash 会自动注入一个浮动工具栏来指示编辑/预览模式。您只需要为共享的预览链接使用自定义的预览横幅。
+</Aside>
+
+## 辅助函数
+
+### `isPreviewRequest(url)`
+
+检查 URL 是否包含预览令牌：
+
+```ts
+import { isPreviewRequest } from "emdash";
+
+if (isPreviewRequest(Astro.url)) {
+	// Handle preview request
+}
+```
+
+### `getPreviewToken(url)`
+
+从 URL 中提取令牌字符串：
+
+```ts
+import { getPreviewToken } from "emdash";
+
+const token = getPreviewToken(Astro.url);
+// Returns the token string or null
+```
+
+### `parseContentId(contentId)`
+
+将内容 ID 解析为集合和 ID：
+
+```ts
+import { parseContentId } from "emdash";
+
+const { collection, id } = parseContentId("posts:my-draft-post");
+// { collection: "posts", id: "my-draft-post" }
+```
+
+## 令牌格式
+
+预览令牌使用紧凑格式：`base64url(payload).base64url(signature)`
+
+有效负载包含：
+
+- `cid` — 内容 ID，格式为 `collection:id`
+- `exp` — 过期时间戳（自纪元以来的秒数）
+- `iat` — 签发时间戳（自纪元以来的秒数）
+
+令牌使用您的预览密钥通过 HMAC-SHA256 进行签名。
+
+<Aside type="caution">
+	请妥善保管您的 `EMDASH_PREVIEW_SECRET`。任何拥有此密钥的人都可以为任何内容生成有效的预览令牌。
+</Aside>
+
+## 完整示例
+
+一个支持预览和可视化编辑的完整博客文章页面：
+
+```astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import BaseLayout from "../../layouts/Base.astro";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+
+// Preview is automatic — middleware handles token verification
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+<BaseLayout title={entry.data.title}>
+  {isPreview && (
+    <div class="preview-banner" role="alert">
+      <strong>Preview</strong> — This content is not published.
+    </div>
+  )}
+
+  <article {...entry.edit}>
+    <header>
+      <h1 {...entry.edit.title}>{entry.data.title}</h1>
+      {entry.data.publishedAt && (
+        <time datetime={entry.data.publishedAt.toISOString()}>
+          {entry.data.publishedAt.toLocaleDateString()}
+        </time>
+      )}
+      {isPreview && !entry.data.publishedAt && (
+        <span class="draft-indicator">Draft</span>
+      )}
+    </header>
+
+    <div class="content" {...entry.edit.content}>
+      <PortableText value={entry.data.content} />
+    </div>
+  </article>
+</BaseLayout>
+```
+
+注意 `{...entry.edit}` 和 `{...entry.edit.title}` 的展开 —— 它们添加了 `data-emdash-ref` 属性，为已认证的编辑者启用可视化编辑。在生产环境中，它们不会产生任何输出。
+
+## API 参考
+
+### `getPreviewUrl(options)`
+
+生成带有签名令牌的预览 URL。
+
+**选项：**
+
+- `collection` — 集合 slug (字符串)
+- `id` — 内容 ID 或 slug (字符串)
+- `secret` — 签名密钥 (字符串)
+- `expiresIn` — 令牌有效期 (默认: `"1h"`)
+- `baseUrl` — 可选的基础 URL，用于生成绝对链接
+- `pathPattern` — URL 模式，包含 `{collection}` 和 `{id}` 占位符 (默认: `"/{collection}/{id}"`)
+
+**返回：** `Promise<string>`
+
+### `verifyPreviewToken(options)`
+
+验证预览令牌。
+
+**选项：**
+
+- `secret` — 验证密钥 (字符串)
+- `url` — 从中提取令牌的 URL，或
+- `token` — 直接提供的令牌字符串
+
+**返回：** `Promise<VerifyPreviewTokenResult>`
+
+```ts
+type VerifyPreviewTokenResult =
+	| { valid: true; payload: PreviewTokenPayload }
+	| { valid: false; error: "invalid" | "expired" | "malformed" | "none" };
+```
+
+### `generatePreviewToken(options)`
+
+生成令牌而不构建 URL。
+
+**选项：**
+
+- `contentId` — 内容 ID，格式为 `collection:id`
+- `expiresIn` — 令牌有效期 (默认: `"1h"`)
+- `secret` — 签名密钥
+
+**返回：** `Promise<string>`

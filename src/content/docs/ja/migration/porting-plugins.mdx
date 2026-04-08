@@ -1,0 +1,435 @@
+---
+title: WordPressプラグインの移植
+description: Plugin APIを使用してWordPressプラグインをEmDashプラグインに変換する
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+多くのWordPressプラグインはEmDashに移植できます。プラグインモデルは異なります（PHPの代わりにTypeScript、アクション/フィルターの代わりにフック、wp_optionsの代わりに構造化ストレージ）が、ほとんどの機能はきれいにマッピングできます。
+
+## 移植可能性の評価
+
+すべてのプラグインが移植に適しているわけではありません。開始前に候補を評価してください。
+
+<CardGrid>
+	<Card title="適した候補" icon="approve-check">
+		カスタムフィールド、SEOプラグイン、コンテンツプロセッサー、管理パネルUI拡張、アナリティクス、ソーシャル共有、フォーム
+	</Card>
+	<Card title="不適な候補" icon="close">
+		マルチサイト機能、WooCommerce/Gutenberg統合、WordPressコア内部をパッチするプラグイン
+	</Card>
+</CardGrid>
+
+## プラグイン構造の比較
+
+<Tabs>
+<TabItem label="WordPress">
+```
+wp-content/plugins/my-plugin/
+├── my-plugin.php       # Main file with plugin header
+├── includes/
+│   ├── class-admin.php
+│   └── class-api.php
+└── admin/
+    └── js/
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+my-plugin/
+├── src/
+│   ├── index.ts    # Plugin definition (definePlugin)
+│   └── admin.tsx   # Admin UI exports (React)
+├── package.json
+└── tsconfig.json
+```
+</TabItem>
+</Tabs>
+
+## フックのマッピング
+
+WordPressは文字列フック名を使用した`add_action()`と`add_filter()`を使用します。EmDashはプラグイン定義で宣言された型付きフックを使用します。
+
+### ライフサイクルフック
+
+| WordPress                    | EmDash            | 注記                                    |
+| ---------------------------- | ------------------- | ---------------------------------------- |
+| `register_activation_hook()` | `plugin:install`    | 初回インストール時に一度実行               |
+| プラグイン有効化               | `plugin:activate`   | 有効化時に実行                        |
+| プラグイン無効化              | `plugin:deactivate` | 無効化時に実行                       |
+| `register_uninstall_hook()`  | `plugin:uninstall`  | `event.deleteData`はユーザーの選択を示します |
+
+### コンテンツフック
+
+| WordPress             | EmDash               | 注記                                      |
+| --------------------- | ---------------------- | ------------------------------------------ |
+| `wp_insert_post_data` | `content:beforeSave`   | 変更されたコンテンツを返すか、キャンセルするためにスロー |
+| `save_post`           | `content:afterSave`    | 保存後の副作用                    |
+| `before_delete_post`  | `content:beforeDelete` | `false`を返してキャンセル                   |
+| `deleted_post`        | `content:afterDelete`  | 削除後のクリーンアップ                     |
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+add_action('save_post', function($post_id, $post, $update) {
+    if ($post->post_type !== 'product') return;
+
+    $price = get_post_meta($post_id, 'price', true);
+    if ($price > 1000) {
+        update_post_meta($post_id, 'is_premium', true);
+    }
+
+}, 10, 3);
+
+````
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+hooks: {
+    "content:afterSave": async (event, ctx) => {
+        if (event.collection !== "products") return;
+
+        const price = event.content.price as number;
+        if (price > 1000) {
+            await ctx.kv.set(`premium:${event.content.id}`, true);
+        }
+    },
+}
+````
+
+</TabItem>
+</Tabs>
+
+### メディアフック
+
+| WordPress                    | EmDash             | 注記                 |
+| ---------------------------- | -------------------- | --------------------- |
+| `wp_handle_upload_prefilter` | `media:beforeUpload` | 検証または変換 |
+| `add_attachment`             | `media:afterUpload`  | アップロード後に反応    |
+
+## ストレージのマッピング
+
+### オプションAPI → KVストア
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+$api_key = get_option('my_plugin_api_key', '');
+update_option('my_plugin_api_key', 'abc123');
+delete_option('my_plugin_api_key');
+```
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+const apiKey = await ctx.kv.get<string>("settings:apiKey") ?? "";
+await ctx.kv.set("settings:apiKey", "abc123");
+await ctx.kv.delete("settings:apiKey");
+```
+</TabItem>
+</Tabs>
+
+<Aside>
+	ユーザー設定可能な値には`settings:`プレフィックスを、内部プラグイン状態には`state:`プレフィックスを使用してください。
+</Aside>
+
+### カスタムテーブル → ストレージコレクション
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+global $wpdb;
+$table = $wpdb->prefix . 'my_plugin_items';
+
+// 挿入
+$wpdb->insert($table, ['name' => 'Item 1', 'status' => 'active']);
+
+// クエリ
+$items = $wpdb->get_results(
+"SELECT \* FROM $table WHERE status = 'active' LIMIT 10"
+);
+
+````
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+// Declare in plugin definition
+storage: {
+    items: {
+        indexes: ["status", "createdAt"],
+    },
+},
+
+// フックまたはルート内:
+await ctx.storage.items.put("item-1", {
+    name: "Item 1",
+    status: "active",
+    createdAt: new Date().toISOString(),
+});
+
+const result = await ctx.storage.items.query({
+    where: { status: "active" },
+    limit: 10,
+});
+````
+
+</TabItem>
+</Tabs>
+
+## 設定スキーマ
+
+WordPressは管理パネル用フォームにSettings APIを使用します。EmDashはUIを自動生成する宣言型スキーマを使用します。
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+add_action('admin_init', function() {
+    register_setting('my_plugin', 'my_plugin_api_key');
+    add_settings_section('main', 'Settings', null, 'my-plugin');
+    add_settings_field('api_key', 'API Key', function() {
+        $value = get_option('my_plugin_api_key');
+        echo '<input type="text" name="my_plugin_api_key"
+              value="' . esc_attr($value) . '">';
+    }, 'my-plugin', 'main');
+});
+```
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+admin: {
+    settingsSchema: {
+        apiKey: {
+            type: "secret",
+            label: "API Key",
+            description: "Your API key from the dashboard",
+        },
+        enabled: {
+            type: "boolean",
+            label: "Enabled",
+            default: true,
+        },
+        limit: {
+            type: "number",
+            label: "Item Limit",
+            default: 100,
+            min: 1,
+            max: 1000,
+        },
+    },
+}
+```
+</TabItem>
+</Tabs>
+
+## 管理パネルUI
+
+WordPressの管理パネルページはPHPです。EmDashはReactコンポーネントを使用します。
+
+```
+tsx title="src/admin.tsx"
+import { useState, useEffect } from "react";
+
+export const widgets = {
+	summary: function SummaryWidget() {
+		const [count, setCount] = useState(0);
+
+		useEffect(() => {
+			fetch("/_emdash/api/plugins/my-plugin/status")
+				.then((r) => r.json())
+				.then((data) => setCount(data.count));
+		}, []);
+
+		return <div>総アイテム数: {count}</div>
+;
+	},
+};
+
+export const pages = {
+	settings: function SettingsPage() {
+		// React component for settings page
+		return <div>Settings content</div>
+;
+	},
+};
+```
+
+プラグイン定義で登録:
+
+```
+typescript title="src/index.ts"
+admin: {
+    entry: "@my-org/my-plugin/admin",
+    pages: [{ path: "/settings", label: "Dashboard" }],
+    widgets: [{ id: "summary", title: "Summary", size: "half" }],
+},
+```
+
+## REST API → プラグインルート
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+register_rest_route('my-plugin/v1', '/items', [
+    'methods' => 'GET',
+    'callback' => function($request) {
+        global $wpdb;
+        $items = $wpdb->get_results("SELECT * FROM items LIMIT 50");
+        return new WP_REST_Response($items);
+    },
+]);
+```
+</TabItem>
+<TabItem label="EmDash">
+```typescript
+routes: {
+    items: {
+        handler: async (ctx) => {
+            const result = await ctx.storage.items.query({ limit: 50 });
+            return { items: result.items };
+        },
+    },
+},
+```
+</TabItem>
+</Tabs>
+
+ルートは`/_emdash/api/plugins/{plugin-id}/{route-name}`で利用可能です。
+
+## 移植プロセス
+
+<Steps>
+
+1. **WordPressプラグインを分析**
+
+   機能を文書化: フック、データベース操作、管理パネルページ、RESTエンドポイント。
+
+2. **EmDashの概念にマッピング**
+
+   WordPressフック → EmDashフック。`wp_options` → `ctx.kv`。カスタムテーブル → ストレージコレクション。管理パネルページ → Reactコンポーネント。RESTエンドポイント → プラグインルート。
+
+3. **プラグインスケルトンを作成**
+
+   ```typescript title="src/index.ts"
+   import { definePlugin } from "emdash";
+
+   export function createPlugin() {
+   	return definePlugin({
+   		id: "my-ported-plugin",
+   		version: "1.0.0",
+   		capabilities: [],
+   		storage: {},
+   		hooks: {},
+   		routes: {},
+   		admin: {},
+   	});
+   }
+   ```
+
+4. **順番に実装**
+
+   ストレージ → フック → 管理パネルUI → ルート
+
+5. **徹底的にテスト**
+
+   フックが正しく発火するか、ストレージが機能するか、管理パネルUIがレンダリングされるかを確認。
+
+</Steps>
+
+## 例: 読了時間プラグイン
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php
+add_filter('wp_insert_post_data', function($data, $postarr) {
+    if ($data['post_type'] !== 'post') return $data;
+
+    $content = strip_tags($data['post_content']);
+    $word_count = str_word_count($content);
+    $read_time = ceil($word_count / 200);
+
+    if (!empty($postarr['ID'])) {
+        update_post_meta($postarr['ID'], '_read_time', $read_time);
+    }
+    return $data;
+
+}, 10, 2);
+
+````
+</TabItem>
+<TabItem label="EmDash">
+```
+typescript title="src/index.ts"
+export function createPlugin() {
+    return definePlugin({
+        id: "read-time",
+        version: "1.0.0",
+
+        admin: {
+            settingsSchema: {
+                wordsPerMinute: {
+                    type: "number",
+                    label: "Words per minute",
+                    default: 200,
+                    min: 100,
+                    max: 400,
+                },
+            },
+        },
+
+        hooks: {
+            "content:beforeSave": async (event, ctx) => {
+                if (event.collection !== "posts") return;
+
+                const wpm = await ctx.kv.get<number>("settings:wordsPerMinute") ?? 200;
+                const text = JSON.stringify(event.content.body || "");
+                const readTime = Math.ceil(text.split(/\s+/).length / wpm);
+
+                return { ...event.content, readTime };
+            },
+        },
+    });
+}
+````
+
+</TabItem>
+</Tabs>
+
+<Aside type="tip" title="AIによる移植支援">
+	プラグインの移植はテーマの移植よりも複雑ですが、AIエージェントは依然として大きな助けとなります。
+	WordPressプラグインのコードとEmDashのPlugin APIドキュメントを提供すれば、エージェントは
+	妥当な最初の草案を生成できます。複雑なプラグインは複数回の反復が必要になる場合があります。
+</Aside>
+
+## 機能
+
+プラグインはセキュリティサンドボックス化のために必要な機能を宣言する必要があります：
+
+| 機能            | 提供するもの                     | 使用例               |
+| --------------- | ----------------------------- | ------------------- |
+| `network:fetch` | `ctx.http.fetch()`            | 外部API呼び出し      |
+| `read:content`  | `ctx.content.get()`, `list()` | CMSコンテンツの読み取り |
+| `write:content` | `ctx.content.create()`など     | コンテンツの変更      |
+| `read:media`    | `ctx.media.get()`, `list()`   | メディアの読み取り    |
+| `write:media`   | `ctx.media.getUploadUrl()`    | メディアのアップロード |
+
+## よくある落とし穴
+
+**グローバル状態なし** — グローバル変数の代わりにストレージを使用してください。
+
+**すべてが非同期** — ストレージとAPI呼び出しは常に`await`してください。
+
+**直接SQLなし** — 構造化ストレージコレクションを使用してください。
+
+**ファイルシステムなし** — ファイルにはメディアAPIを使用してください。
+
+## 次のステップ
+
+- [フックリファレンス](/ja/plugins/hooks/) — すべてのフックとシグネチャ
+- [ストレージAPI](/ja/plugins/storage/) — コレクションとクエリ
+- [設定](/ja/plugins/settings/) — 設定スキーマとKVストア
+- [管理パネルUI](/ja/plugins/admin-ui/) — 管理ページの構築

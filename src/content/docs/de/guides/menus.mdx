@@ -1,0 +1,280 @@
+---
+title: Navigationsmenüs
+description: Erstellen und verwalten Sie Navigationsmenüs für Kopfzeilen, Fußzeilen und Seitenleisten.
+---
+
+import { Aside, Steps, Tabs, TabItem, Code } from "@astrojs/starlight/components";
+
+EmDash-Menüs sind geordnete Listen von Links, die Sie über die Admin-Oberfläche verwalten. Menüs unterstützen Verschachtelung für Dropdowns und können auf Seiten, Beiträge, Taxonomie-Begriffe oder externe URLs verlinken.
+
+## Menüs abfragen
+
+Verwenden Sie `getMenu()`, um ein Menü anhand seines eindeutigen Namens abzurufen:
+
+```astro title="src/layouts/Base.astro"
+---
+import { getMenu } from "emdash";
+
+const primaryMenu = await getMenu("primary");
+---
+
+{primaryMenu && (
+  <nav>
+    <ul>
+      {primaryMenu.items.map(item => (
+        <li>
+          <a href={item.url}>{item.label}</a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+Die Funktion gibt `null` zurück, wenn kein Menü mit diesem Namen existiert.
+
+## Menüstruktur
+
+Ein Menü enthält Metadaten und ein Array von Elementen:
+
+```ts
+interface Menu {
+	id: string;
+	name: string; // Eindeutige Kennung ("primary", "footer")
+	label: string; // Anzeigename ("Hauptnavigation")
+	items: MenuItem[];
+}
+
+interface MenuItem {
+	id: string;
+	label: string;
+	url: string; // Aufgeloeste URL
+	target?: string; // "_blank" fuer neues Fenster
+	titleAttr?: string; // HTML-title-Attribut
+	cssClasses?: string; // Benutzerdefinierte CSS-Klassen
+	children: MenuItem[]; // Verschachtelte Eintraege fuer Dropdowns
+}
+```
+
+URLs werden automatisch basierend auf dem Elementtyp aufgelöst:
+
+- **Seiten-/Beitragselemente** werden zu `/{collection}/{slug}` aufgelöst
+- **Taxonomie-Elemente** werden zu `/{taxonomy}/{slug}` aufgelöst
+- **Sammlungselemente** werden zu `/{collection}/` aufgelöst
+- **Benutzerdefinierte Links** verwenden die URL unverändert
+
+## Verschachtelte Menüs rendern
+
+Menüelemente können Kinder für die Dropdown-Navigation haben. Behandeln Sie die Verschachtelung durch rekursives Rendern des `children`-Arrays:
+
+```astro title="src/components/Navigation.astro"
+---
+import { getMenu } from "emdash";
+import type { MenuItem } from "emdash";
+
+interface Props {
+  name: string;
+}
+
+const menu = await getMenu(Astro.props.name);
+---
+
+{menu && (
+  <nav class="nav">
+    <ul class="nav-list">
+      {menu.items.map(item => (
+        <li class:list={["nav-item", item.cssClasses]}>
+          <a
+            href={item.url}
+            target={item.target}
+            title={item.titleAttr}
+            aria-current={Astro.url.pathname === item.url ? "page" : undefined}
+          >
+            {item.label}
+          </a>
+          {item.children.length > 0 && (
+            <ul class="submenu">
+              {item.children.map(child => (
+                <li>
+                  <a href={child.url} target={child.target}>
+                    {child.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+<Aside>
+	Verwenden Sie `aria-current="page"`, um die aktuelle Seite in der Navigation anzuzeigen. Screenreader geben dies bekannt, und der CSS-Selektor `[aria-current="page"]` ermöglicht die Gestaltung des aktiven Links.
+</Aside>
+
+## Menüelementtypen
+
+Die Admin-Oberfläche unterstützt fünf Arten von Menüelementen:
+
+| Typ          | Beschreibung                  | URL-Auflösung          |
+| ------------- | ----------------------------- | ---------------------- |
+| `page`        | Link zu einer Seite           | `/{collection}/{slug}` |
+| `post`        | Link zu einem Beitrag         | `/{collection}/{slug}` |
+| `taxonomy`    | Link zu einer Kategorie oder einem Tag | `/{taxonomy}/{slug}`   |
+| `collection`  | Link zu einem Sammlungsarchiv | `/{collection}/`       |
+| `custom`      | Externe oder benutzerdefinierte URL | Wird unverändert verwendet |
+
+## Alle Menüs auflisten
+
+Verwenden Sie `getMenus()`, um alle Menüdefinitionen (ohne Elemente) abzurufen:
+
+```ts
+import { getMenus } from "emdash";
+
+const menus = await getMenus();
+// Gibt zurück: [{ id, name, label }, ...]
+```
+
+Dies ist hauptsächlich für Admin-Oberflächen oder Debugging nützlich.
+
+## Menüs erstellen
+
+Erstellen Sie Menüs über die Admin-Oberfläche unter `/_emdash/admin/menus` oder verwenden Sie die Admin-API:
+
+```http
+POST /_emdash/api/menus
+Content-Type: application/json
+
+{
+  "name": "footer",
+  "label": "Footer Navigation"
+}
+```
+
+Elemente zu einem Menü hinzufügen:
+
+```http
+POST /_emdash/api/menus/footer/items
+Content-Type: application/json
+
+{
+  "type": "page",
+  "referenceCollection": "pages",
+  "referenceId": "page_privacy",
+  "label": "Privacy Policy"
+}
+```
+
+Einen benutzerdefinierten externen Link hinzufügen:
+
+```http
+POST /_emdash/api/menus/footer/items
+Content-Type: application/json
+
+{
+  "type": "custom",
+  "customUrl": "https://github.com/example",
+  "label": "GitHub",
+  "target": "_blank"
+}
+```
+
+## Neuordnen und Verschachteln
+
+Aktualisieren Sie die Reihenfolge der Elemente und Eltern-Kind-Beziehungen mit dem Reorder-Endpoint:
+
+```http
+POST /_emdash/api/menus/primary/reorder
+Content-Type: application/json
+
+{
+  "items": [
+    { "id": "item_1", "parentId": null, "sortOrder": 0 },
+    { "id": "item_2", "parentId": null, "sortOrder": 1 },
+    { "id": "item_3", "parentId": "item_2", "sortOrder": 0 }
+  ]
+}
+```
+
+Dadurch wird `item_3` zu einem Kind von `item_2` und erstellt ein Dropdown.
+
+## Vollständiges Beispiel
+
+Das folgende Beispiel zeigt einen responsiven Header mit primärer Navigation:
+
+```astro title="src/layouts/Base.astro"
+---
+import { getMenu, getSiteSettings } from "emdash";
+
+const settings = await getSiteSettings();
+const primaryMenu = await getMenu("primary");
+---
+
+<html lang="en">
+  <head>
+    <title>{settings.title}</title>
+  </head>
+  <body>
+    <header class="header">
+      <a href="/" class="logo">
+        {settings.logo ? (
+          <img src={settings.logo.url} alt={settings.logo.alt || settings.title} />
+        ) : (
+          settings.title
+        )}
+      </a>
+
+      {primaryMenu && (
+        <nav class="main-nav" aria-label="Hauptnavigation">
+          <ul>
+            {primaryMenu.items.map(item => (
+              <li class:list={[item.cssClasses, { "has-children": item.children.length > 0 }]}>
+                <a
+                  href={item.url}
+                  target={item.target}
+                  aria-current={Astro.url.pathname === item.url ? "page" : undefined}
+                >
+                  {item.label}
+                </a>
+                {item.children.length > 0 && (
+                  <ul class="dropdown">
+                    {item.children.map(child => (
+                      <li>
+                        <a href={child.url} target={child.target}>{child.label}</a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+    </header>
+
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>
+```
+
+## API-Referenz
+
+### `getMenu(name)`
+
+Ruft ein Menü anhand des Namens mit allen Elementen und aufgelösten URLs ab.
+
+**Parameter:**
+
+- `name` — Der eindeutige Bezeichner des Menüs (String)
+
+**Gibt zurück:** `Promise<Menu | null>`
+
+### `getMenus()`
+
+Listet alle Menüdefinitionen ohne Elemente auf.
+
+**Gibt zurück:** `Promise<Array<{ id: string; name: string; label: string }>>`

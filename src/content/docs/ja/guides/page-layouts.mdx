@@ -1,0 +1,147 @@
+---
+title: ページレイアウト
+description: テンプレートフィールドを使用して、編集者が個々のページに異なるレイアウトを選択できるようにします。
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+WordPressには「ページテンプレート」があります — エディター内のドロップダウンで、ページごとにレイアウトを選択できます（例：デフォルト、全幅、ランディングページ）。EmDashは`select`フィールドを使用して同じパターンをサポートします。
+
+## 仕組み
+
+1. ページコレクションに`template`セレクトフィールドを追加します
+2. 各オプションのレイアウトコンポーネントを作成します
+3. フィールドの値をページルートのレイアウトにマッピングします
+
+特別なシステムは必要ありません — これはEmDashの既存のセレクトフィールドとAstroのコンポーネントモデルを使用します。
+
+## フィールドを追加する
+
+管理UIで、ページコレクションにスラッグ`template`とレイアウトオプション（例：「デフォルト」、「全幅」）を持つセレクトフィールドを追加します。または、シードデータに含めます：
+
+```json title=".emdash/seed.json"
+{
+  "slug": "template",
+  "label": "Template",
+  "type": "select",
+  "validation": {
+    "options": ["Default", "Full Width"]
+  },
+  "defaultValue": "Default"
+}
+```
+
+## レイアウトコンポーネントを作成する
+
+各レイアウトは、異なるスタイリングでベースレイアウト内にコンテンツをラップします：
+
+```
+astro title="src/layouts/PageDefault.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../guides/Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-default">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-default {
+    max-width: var(--content-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+```
+astro title="src/layouts/PageFullWidth.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../guides/Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-wide">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-wide {
+    max-width: var(--wide-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+## ルートを接続する
+
+ページルートで、各レイアウトをインポートし、テンプレート値をマッピングします：
+
+```
+astro title="src/pages/pages/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import PageDefault from "../../../layouts/PageDefault.astro";
+import PageFullWidth from "../../../layouts/PageFullWidth.astro";
+
+const { slug } = Astro.params;
+
+if (!slug) {
+  return Astro.redirect("/404");
+}
+
+const { entry: page } = await getEmDashEntry("pages", slug);
+
+if (!page) {
+  return Astro.redirect("/404");
+}
+
+const layouts = {
+  "Default": PageDefault,
+  "Full Width": PageFullWidth,
+};
+
+const Layout = layouts[page.data.template as keyof typeof layouts] ?? PageDefault;
+---
+
+<Layout page={page} />
+```
+
+ルートは小さく保たれます。各レイアウトコンポーネントが自身のマークアップとスタイリングを所有します。レイアウトを追加するには：コンポーネントを作成し、セレクトフィールドにオプションを追加し、マップに行を追加します。
+
+<Aside type="tip">
+「full-width」のようなスラッグではなく、「全幅」のような人間が読みやすいオプション名を使用してください。値は保存される値と管理ドロップダウンのラベルの両方です。
+</Aside>
+
+## さらにレイアウトを追加する
+
+WordPressテーマからの一般的な選択肢：
+
+- **デフォルト** — 狭いコンテンツ列、読みやすい
+- **全幅** — より広いコンテンツエリア、サイドバーなし
+- **ランディングページ** — ヘッダー/フッターなし、ヒーローセクション
+- **サイドバー** — サイドバーウィジェットエリア付きコンテンツ
+
+それぞれは、`src/layouts/`ディレクトリ内の別のAstroコンポーネントと、ルートのレイアウトマップ内の別のエントリに過ぎません。

@@ -1,0 +1,429 @@
+---
+title: コンテンツインポート
+description: WordPressやその他のソースからEmDashにコンテンツをインポートします。
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDashのインポートシステムはプラグ可能なソースアーキテクチャを使用しています。各ソースは特定のプラットフォームからコンテンツを調査、分析、取得する方法を知っています。
+
+## インポートソース
+
+| ソースID        | プラットフォーム              | 調査 | OAuth | 完全インポート |
+| ---------------- | --------------------- | ----- | ----- | ----------- |
+| `wxr`            | WordPressエクスポートファイル | No    | No    | Yes         |
+| `wordpress-com`  | WordPress.com         | Yes   | Yes   | Yes         |
+| `wordpress-rest` | セルフホストWordPress | Yes   | No    | 調査のみ  |
+
+### WXRファイルアップロード
+
+最も完全なインポート方法です。WordPress拡張RSS（WXR）エクスポートファイルを管理ダッシュボードに直接アップロードします。
+
+**対応範囲:**
+
+- すべての投稿タイプ（カスタムを含む）
+- すべてのメタフィールド
+- 下書きと非公開投稿
+- 完全なタクソノミー階層
+- メディア添付ファイルのメタデータ
+
+**WXRファイルの取得方法:**
+
+<Steps>
+
+1. WordPress管理パネルで、**ツール → エクスポート**に移動
+2. **すべてのコンテンツ**または特定の投稿タイプを選択
+3. **エクスポートファイルをダウンロード**をクリック
+4. `.xml`ファイルをEmDashにアップロード
+
+</Steps>
+
+### WordPress.com OAuth
+
+WordPress.comでホストされているサイトの場合、OAuth経由で接続し、手動でのファイルエクスポートなしでインポートできます。
+
+<Steps>
+
+1. WordPress.comのサイトURLを入力
+2. **WordPress.comで接続**をクリック
+3. WordPress.comのポップアップでEmDashを承認
+4. インポートするコンテンツを選択
+
+</Steps>
+
+<Aside type="caution">
+	WordPress.com OAuthには環境変数`WPCOM_CLIENT_ID`と`WPCOM_CLIENT_SECRET`が必要です。
+	[developer.wordpress.com](https://developer.wordpress.com/apps/)でアプリを登録してください。
+</Aside>
+
+**含まれるもの:**
+
+- 公開済みおよび下書きコンテンツ
+- 非公開投稿（承認あり）
+- API経由のメディアファイル
+- REST APIに公開されたカスタムフィールド
+
+### WordPress REST API調査
+
+URLを入力すると、EmDashはサイトを調査し、WordPressを検出して利用可能なコンテンツを表示します:
+
+```
+Detected: WordPress 6.4
+├── Posts: 127 (published)
+├── Pages: 12 (published)
+└── Media: 89 files
+
+注: 下書きと非公開コンテンツには認証
+または完全なWXRエクスポートが必要です。
+```
+
+REST調査は情報提供用です。完全なインポートには、WXRファイルのアップロードまたはOAuth接続（WordPress.com用）を提案します。
+
+## インポートフロー
+
+すべてのソースは同じフローに従います:
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Connect   │────▶│   Analyze   │────▶│   Prepare   │────▶│   Execute   │
+│  (probe/    │     │  (schema    │     │  (create    │     │  (import    │
+│   upload)   │     │   check)    │     │   schema)   │     │   content)  │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+```
+
+### ステップ1: 接続
+
+URLを入力して調査するか、ファイルを直接アップロードします。
+
+**URL調査**は登録されたすべてのソースを並行して実行します。最も信頼性の高い一致が、提案される次のアクションを決定します:
+
+- **WordPress.comサイト** → OAuth接続を提供
+- **セルフホストWordPress** → エクスポート手順を表示
+- **不明** → ファイルアップロードを提案
+
+### ステップ2: 分析
+
+ソースはコンテンツを解析し、スキーマ互換性をチェックします:
+
+```
+Post Types:
+├── post (127) → posts [New collection]
+├── page (12)  → pages [Existing, compatible]
+├── product (45) → products [Add 3 fields]
+└── revision (234) → [Skip - internal type]
+
+必要なスキーマ変更:
+├── コレクションを作成: posts
+├── ページにフィールドを追加: featured_image
+└── コレクションを作成: products
+```
+
+各投稿タイプはそのステータスを表示します:
+
+| ステータス         | 意味                                  |
+| -------------- | ---------------------------------------- |
+| Ready          | 互換性のあるフィールドを持つコレクションが存在 |
+| New collection | 自動的に作成されます            |
+| Add fields     | コレクションは存在、不足フィールドを追加  |
+| Incompatible   | フィールドタイプの競合（手動修正が必要） |
+
+### ステップ3: スキーマの準備
+
+**スキーマ作成 & インポート**をクリックして以下を実行:
+
+1. SchemaRegistry経由で新しいコレクションを作成
+2. 正しいカラムタイプで不足フィールドを追加
+3. インデックス付きのコンテンツテーブルを設定
+
+### ステップ4: インポートの実行
+
+コンテンツは順次インポートされます:
+
+- Gutenberg/HTMLがPortable Textに変換
+- WordPressステータスがEmDashステータスにマッピング
+- WordPress著者が所有権（`authorId`）と表示用バイラインにマッピング
+- タクソノミーが作成されリンク
+- 再利用可能ブロック（`wp_block`）が[セクション](/ja/guides/sections/)としてインポート
+- 進捗がリアルタイムで表示
+
+著者インポートの動作:
+
+- 著者マッピングがEmDashユーザーを指す場合、所有権はそのユーザーに設定され、同じユーザーのためにリンクされたバイラインが作成/再利用されます。
+- ユーザーマッピングがない場合、WordPress著者IDからゲストバイラインが作成/再利用されます。
+- インポートされたエントリーには順序付きバイラインクレジットが付与され、最初のクレジットが`primaryBylineId`として設定されます。
+
+### ステップ5: メディアインポート（オプション）
+
+コンテンツの後、オプションでメディアをインポート:
+
+<Steps>
+
+1. **分析** — タイプ別の添付ファイル数を表示
+
+   ```
+   Media found:
+   ├── Images: 75 files
+   ├── Video: 10 files
+   └── Other: 4 files
+   ```
+
+2. **ダウンロード** — WordPress URLから進捗表示付きでストリーミング
+
+   ```
+   Importing media...
+   ├── 45 of 89 (50%)
+   ├── Current: vacation-photo.jpg
+   └── Status: Uploading
+   ```
+
+3. **URL書き換え** — コンテンツが新しいURLで自動更新
+
+</Steps>
+
+メディアインポートは重複排除のためにコンテンツハッシュ（xxHash64）を使用します。複数の投稿で使用される同じ画像は一度だけ保存されます。
+
+## ソースインターフェース
+
+インポートソースは標準インターフェースを実装します:
+
+```typescript
+interface ImportSource {
+	/** 一意の識別子 */
+	id: string;
+
+	/** 表示名 */
+	name: string;
+
+	/** URLを調査（オプション） */
+	probe?(url: string): Promise<SourceProbeResult | null>;
+
+	/** このソースからのコンテンツを分析 */
+	analyze(input: SourceInput, context: ImportContext): Promise<ImportAnalysis>;
+
+	/** コンテンツアイテムをストリーミング */
+	fetchContent(input: SourceInput, options: FetchOptions): AsyncGenerator<NormalizedItem>;
+}
+```
+
+### 入力タイプ
+
+ソースは異なる入力タイプを受け入れます:
+
+```typescript
+// File upload (WXR)
+{ type: "file", file: File }
+
+// オプショントークン付きURL（REST API）
+{ type: "url", url: string, token?: string }
+
+// OAuth接続（WordPress.com）
+{ type: "oauth", url: string, accessToken: string }
+```
+
+### 正規化された出力
+
+すべてのソースは同じ正規化された形式を生成します:
+
+```typescript
+interface NormalizedItem {
+	sourceId: string | number;
+	postType: string;
+	status: "publish" | "draft" | "pending" | "private" | "future";
+	slug: string;
+	title: string;
+	content: PortableTextBlock[];
+	excerpt?: string;
+	date: Date;
+	author?: string;
+	authors?: string[];
+	categories?: string[];
+	tags?: string[];
+	meta?: Record<string, unknown>;
+	featuredImage?: string;
+}
+```
+
+## APIエンドポイント
+
+インポートシステムは以下のエンドポイントを公開します:
+
+### URL調査
+
+```http
+POST /_emdash/api/import/probe
+Content-Type: application/json
+
+{ "url": "https://example.com" }
+```
+
+検出されたプラットフォームと提案アクションを返します。
+
+### WXR分析
+
+```http
+POST /_emdash/api/import/wordpress/analyze
+Content-Type: multipart/form-data
+
+file: [WordPress export .xml]
+```
+
+スキーマ互換性を含む投稿タイプ分析を返します。
+
+### スキーマ準備
+
+```http
+POST /_emdash/api/import/wordpress/prepare
+Content-Type: application/json
+
+{
+  "postTypes": [
+    { "name": "post", "collection": "posts", "enabled": true }
+  ]
+}
+```
+
+コレクションとフィールドを作成します。
+
+### インポート実行
+
+```http
+POST /_emdash/api/import/wordpress/execute
+Content-Type: multipart/form-data
+
+file: [WordPress export .xml]
+config: { "postTypeMappings": { "post": { "collection": "posts" } } }
+```
+
+指定されたコレクションにコンテンツをインポートします。
+
+### メディアインポート
+
+```http
+POST /_emdash/api/import/wordpress/media
+Content-Type: application/json
+
+{
+  "attachments": [{ "id": 123, "url": "https://..." }],
+  "stream": true
+}
+```
+
+ダウンロード/アップロード中の進捗をNDJSONでストリーミング更新します。
+
+### URL書き換え
+
+```http
+POST /_emdash/api/import/wordpress/rewrite-urls
+Content-Type: application/json
+
+{
+  "urlMap": { "https://old.com/image.jpg": "/_emdash/media/abc123" }
+}
+```
+
+Portable Textコンテンツを新しいメディアURLで更新します。
+
+## エラー処理
+
+### 回復可能なエラー
+
+- **ネットワークタイムアウト** — バックオフ付きで再試行
+- **単一アイテム解析失敗** — ログ記録、スキップ、インポート継続
+- **メディアダウンロード失敗** — 手動処理用にマーク
+
+### 致命的なエラー
+
+- **無効なファイル形式** — エラーメッセージでインポート停止
+- **データベース接続喪失** — インポート一時停止、再開可能
+- **ストレージクォータ超過** — インポート停止、使用量表示
+
+### エラーレポート
+
+インポート後：
+
+```
+Import Complete
+
+✓ 125件の投稿をインポート
+✓ 12件のページをインポート
+✓ 85件のメディア参照を記録
+
+⚠ 2件のアイテムに警告があります：
+  - 投稿「Special Characters ñ」 - タイトルエンコーディングを修正
+  - ページ「About」 - 重複スラッグを「about-1」にリネーム
+
+✗ 1件のアイテムが失敗しました：
+  - 投稿 ID 456 - コンテンツ解析エラー（下書きとして保存）
+```
+
+失敗したアイテムは、レビューのため元のコンテンツを `_importError` に含めて下書きとして保存されます。
+
+## カスタムソースの構築
+
+他のプラットフォーム用のソースを作成：
+
+```
+typescript title="src/import/custom-source.ts"
+import type { ImportSource } from "emdash/import";
+
+export const mySource: ImportSource = {
+	id: "my-platform",
+	name: "My Platform",
+	description: "Import from My Platform",
+	icon: "globe",
+	canProbe: true,
+
+	async probe(url) {
+		// URLがあなたのプラットフォームに一致するか確認
+		const response = await fetch(`${url}/api/info`);
+		if (!response.ok) return null;
+
+		return {
+			sourceId: "my-platform",
+			confidence: "definite",
+			detected: { platform: "my-platform" },
+			// ...
+		};
+	},
+
+	async analyze(input, context) {
+		// Parse and analyze content
+		// Return ImportAnalysis
+	},
+
+	async *fetchContent(input, options) {
+		// 各コンテンツピースに対してNormalizedItemを生成
+		for (const item of items) {
+			yield {
+				sourceId: item.id,
+				postType: "post",
+				title: item.title,
+				content: convertToPortableText(item.body),
+				// ...
+			};
+		}
+	},
+};
+```
+
+EmDash設定にソースを登録：
+
+```
+typescript title="astro.config.mjs"
+import { mySource } from "../../migration/src/import/custom-source";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			import: {
+				sources: [mySource],
+			},
+		}),
+	],
+});
+```
+
+## 次のステップ
+
+- **[WordPress移行](/ja/migration/from-wordpress/)** — WordPress移行完全ガイド
+- **[プラグイン移植](/ja/migration/plugin-porting/)** — WordPressプラグインをEmDashに移植

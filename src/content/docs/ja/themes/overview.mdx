@@ -1,0 +1,157 @@
+---
+title: テーマの概要
+description: EmDashテーマの仕組みと、新しいサイトをブートストラップする方法について理解します。
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+EmDashテーマは、`create-astro`を介して配布される完全なAstroサイト（ページ、レイアウト、コンポーネント、スタイル）です。また、初回実行時にデータベースをコレクション、フィールド、メニュー、リダイレクト、サンプルコンテンツでブートストラップする**シードファイル**も含まれています。
+
+## テーマが提供するもの
+
+テーマは、以下を含む動作するAstroプロジェクトです：
+
+- **ページ** — コンテンツをレンダリングするためのAstroルート（ホームページ、ブログ投稿、アーカイブなど）
+- **レイアウト** — 共有されるHTML構造
+- **コンポーネント** — 再利用可能なUI要素（ナビゲーション、カード、フッターなど）
+- **スタイル** — CSSまたはTailwind設定
+- **シードファイル** — CMSに作成するコンテンツタイプとフィールドを指示するJSON
+
+<Aside>
+	EmDashは、WordPressよりもはるかに詳細なコンテンツモデルの制御を提供します。テーマは、シードファイルを介して必要なコレクションとフィールドを正確に宣言することで、この機能を活用します。
+	ほとんどのテーマは、標準の**posts**および**pages**コレクションを基盤とし、必要に応じてフィールドやタクソノミーを追加するべきであり、完全に新しいコンテンツタイプを考案するべきではありません。
+</Aside>
+
+## テーマの構造
+
+```
+my-theme/
+├── package.json           # Theme metadata + EmDash config
+├── astro.config.mjs       # Astro integration setup
+├── src/
+│   ├── live.config.ts     # Live Collections configuration
+│   ├── pages/             # Astro routes
+│   ├── layouts/           # Layout components
+│   └── components/        # UI components
+└── .emdash/
+    ├── seed.json          # Schema + sample content
+    └── uploads/           # Optional local media files
+```
+
+## テーマがサイトをブートストラップする仕組み
+
+テーマからサイトを作成すると、以下の手順が実行されます：
+
+1. `create-astro`がテンプレートからプロジェクトをスキャフォールド
+2. `npm install`と`npm run dev`を実行
+3. 初回の管理者アクセス時に、**セットアップウィザード**が自動的に実行
+4. ウィザードがシードファイルを適用し、コレクション、メニュー、リダイレクト、コンテンツを作成
+5. サイトが使用可能になります
+
+<CardGrid>
+	<Card title="ユーザー向け" icon="laptop">
+		テーマを選択し、ウィザードを実行して編集を開始。データベースの知識は不要です。
+	</Card>
+	<Card title="開発者向け" icon="seti:config">
+		テーマは標準のAstroプロジェクトです。スキャフォールド後は自由にカスタマイズできます。
+	</Card>
+</CardGrid>
+
+## テーマのインストール
+
+テンプレートを指定して`create-astro`を使用します：
+
+```bash
+npm create astro@latest -- --template @emdash-cms/template-blog
+```
+
+コミュニティテーマはGitHub経由で動作します：
+
+```bash
+npm create astro@latest -- --template github:user/emdash-portfolio
+```
+
+インストール後：
+
+```bash
+cd my-site
+npm install
+npm run dev
+```
+
+`http://localhost:4321/_emdash/admin``にアクセスしてセットアップウィザードを完了してください。
+
+## セットアップウィザード
+
+セットアップウィザードは、初回の管理者アクセス時に自動的に実行されます。以下の処理を行います：
+
+1. サイトタイトル、タグライン、管理者認証情報の入力を促す
+2. サンプルコンテンツを含めるオプションを提供
+3. シードファイルをデータベースに適用
+4. 管理者ダッシュボードにリダイレクト
+
+```
+┌────────────────────────────────────────────────────────┐
+│                                                        │
+│                    ◆ EmDash                          │
+│                                                        │
+│                 新しいサイトへようこそ                 │
+│                                                        │
+│  サイトタイトル: [最高のブログ                        ] │
+│  タグライン:     [考えとアイデア                     ] │
+│                                                        │
+│  管理者メール:   [admin@example.com                  ] │
+│  管理者パスワード:[••••••••••••                      ] │
+│                                                        │
+│  ☑ Include sample content                              │
+│                                                        │
+│                   [Create Site →]                      │
+│                                                        │
+│  Template: Blog Starter                                │
+│  Creates: 2 collections, 3 pages, 1 post              │
+└────────────────────────────────────────────────────────┘
+```
+
+<Aside type="tip">
+	初めてテーマを試す際は、「サンプルコンテンツを含める」をチェックしてください。サンプルコンテンツは、テーマが想定するコンテンツ構造を実演します。
+</Aside>
+
+## 公式テーマ
+
+EmDashは公式スターターテーマを提供しており、各テーマはローカル（SQLite + ファイルシステム）バリアントとCloudflare（D1 + R2）バリアントで利用可能です：
+
+| テーマ | 説明 | ユースケース |
+| ----- | ----------- | -------- |
+| `@emdash-cms/template-blog` | 投稿、ページ、カテゴリー、ダークモードを備えたミニマルなブログ | 個人ブログ、シンプルなサイト |
+| `@emdash-cms/template-portfolio` | プロジェクト、セリフ書体（Playfair Display）、画像中心のレイアウトを備えた編集スタイルのポートフォリオ | フリーランサー、代理店、クリエイター |
+| `@emdash-cms/template-marketing` | カスタムPortable Textブロック（ヒーロー、機能、お客様の声、価格、FAQ）を備えた大胆なマーケティングサイト | ランディングページ、SaaSサイト、製品マーケティング |
+
+### Cloudflareバリアント
+
+Cloudflare Pages（D1およびR2）にデプロイする場合は、テンプレート名に`-cloudflare`を追加します：
+
+```bash
+npm create astro@latest -- --template @emdash-cms/template-blog-cloudflare
+npm create astro@latest -- --template @emdash-cms/template-portfolio-cloudflare
+npm create astro@latest -- --template @emdash-cms/template-marketing-cloudflare
+```
+
+これらのバリアントには、デプロイ設定用の`wrangler.jsonc`が含まれています。
+
+## インストール後のカスタマイズ
+
+セットアップウィザード完了後、サイトは標準のAstroプロジェクトになります。以下のように、任意のAstroサイトと同様にカスタマイズできます：
+
+- `src/pages/`内のページを編集
+- `src/layouts/`内のレイアウトを変更
+- 管理UI経由でコレクションを追加
+- Astroインテグレーションをインストール
+- Astroが動作する任意の場所にデプロイ
+
+シードファイルは初期セットアップ中のみ使用されます。適用後は、スキーマはデータベース内に存在します。
+
+## 次のステップ
+
+- **[テーマの作成](/ja/themes/creating-themes/)** — 独自のEmDashテーマを構築
+- **[シードファイル形式](/ja/themes/seed-files/)** — シードファイル構造のリファレンス
+- **[はじめに](/ja/getting-started/)** — 最初のEmDashサイトを作成

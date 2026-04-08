@@ -1,0 +1,483 @@
+---
+title: Medienbibliothek
+description: Bilder und Dateien in EmDash hochladen und verwalten.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+import mediaLibraryImg from "../../../../assets/screenshots/admin-media-library.png";
+
+EmDash enthält eine Mediathek zur Verwaltung von Bildern, Dokumenten und anderen Dateien. Diese Anleitung zeigt, wie Sie Medien hochladen, organisieren und in Ihren Inhalten einsetzen.
+
+## Zugriff auf die Mediathek
+
+Öffnen Sie die Mediathek über die Admin-Seitenleiste durch Klicken auf **Medien**. Die Bibliothek zeigt alle hochgeladenen Dateien mit Vorschauen, Dateinamen und Upload-Daten an.
+
+<img src={mediaLibraryImg.src} alt="EmDash media library showing image grid with upload button" />
+
+## Dateien hochladen
+
+### Über die Mediathek
+
+1. Klicken Sie in der Admin-Seitenleiste auf **Medien**
+
+2. Klicken Sie auf **Hochladen** oder ziehen Sie Dateien in den Upload-Bereich
+
+3. Wählen Sie eine oder mehrere Dateien von Ihrem Computer aus
+
+4. Warten Sie, bis die Uploads abgeschlossen sind
+
+### Über den Inhaltseditor
+
+1. Klicken Sie im Rich-Text-Editor auf die Schaltfläche für Bilder
+
+2. Klicken Sie im Medienauswahl-Dialog auf **Hochladen**
+
+3. Wählen Sie eine Datei von Ihrem Computer aus
+
+4. Fügen Sie Alt-Text hinzu und klicken Sie auf **Einfügen**
+
+## Unterstützte Dateitypen
+
+EmDash unterstützt gängige Web-Dateitypen:
+
+| Kategorie | Erweiterungen                                                |
+| --------- | --------------------------------------------------------- |
+| Bilder    | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.avif`, `.svg` |
+| Dokumente | `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx` |
+| Video     | `.mp4`, `.webm`, `.mov`                                   |
+| Audio     | `.mp3`, `.wav`, `.ogg`                                    |
+
+<Aside type="caution">
+	Die maximale Dateigröße hängt von Ihrer Speicherkonfiguration ab. Das Standardlimit beträgt 10MB pro Datei.
+</Aside>
+
+## Speicher-Backends
+
+EmDash unterstützt mehrere Speicher-Backends. Konfigurieren Sie den Speicher in Ihrer Astro-Konfiguration:
+
+<Tabs>
+  <TabItem label="Local Storage">
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: local({
+        directory: "./uploads",
+        baseUrl: "/_emdash/api/media/file",
+      }),
+    }),
+  ],
+});
+```
+
+Dateien werden im Verzeichnis `./uploads` gespeichert. Geeignet für Entwicklung und Single-Server-Bereitstellungen.
+
+  </TabItem>
+  <TabItem label="Cloudflare R2">
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { r2 } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: r2({
+        binding: "MEDIA_BUCKET",
+        publicUrl: "https://media.example.com",
+      }),
+    }),
+  ],
+});
+```
+
+Erfordert einen R2-Bucket, der in `wrangler.jsonc` konfiguriert ist:
+
+```jsonc title="wrangler.jsonc"
+{
+	"r2_buckets": [
+		{
+			"binding": "MEDIA_BUCKET",
+			"bucket_name": "my-media-bucket",
+		},
+	],
+}
+```
+
+  </TabItem>
+  <TabItem label="S3-Compatible">
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { s3 } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: s3({
+        endpoint: "https://s3.amazonaws.com",
+        bucket: "my-media-bucket",
+        accessKeyId: process.env.S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+        region: "us-east-1",
+        publicUrl: "https://media.example.com",
+      }),
+    }),
+  ],
+});
+```
+
+Funktioniert mit Cloudflare R2 (über S3-API), MinIO und anderen S3-kompatiblen Diensten.
+
+  </TabItem>
+</Tabs>
+
+## Wie Uploads funktionieren
+
+EmDash verwendet signierte URLs für sichere Uploads:
+
+1. Client fordert eine Upload-URL von der API an
+
+2. Server generiert eine signierte URL mit Ablaufdatum
+
+3. Client lädt direkt unter Verwendung der signierten URL in den Speicher hoch
+
+4. Server zeichnet die Dateimetadaten in der Datenbank auf
+
+Dieser Ansatz hält große Dateien von Ihrem Anwendungsserver fern und ermöglicht direkte Uploads in Cloud-Speicher.
+
+<Aside>
+	R2-Bindings unterstützen keine vorzeichenbehafteten URLs. Bei Verwendung des R2-Binding-Adapters gehen Uploads
+	durch Ihren Worker.
+</Aside>
+
+## Medien organisieren
+
+### Ordner
+
+Erstellen Sie Ordner, um Ihre Medien zu organisieren:
+
+1. Klicken Sie in der Mediathek auf **Neuer Ordner**
+
+2. Geben Sie einen Ordnernamen ein
+
+3. Klicken Sie auf **Erstellen**
+
+4. Ziehen Sie Dateien in Ordner, um sie zu organisieren
+
+### Suche
+
+Verwenden Sie das Suchfeld, um Dateien nach Namen zu finden. Die Suche findet teilweise übereinstimmende Dateinamen.
+
+### Filter
+
+Filtern Sie Medien nach:
+
+- **Typ** - Bilder, Dokumente, Video, Audio
+- **Datum** - Upload-Zeitraum
+- **Ordner** - Bestimmter Ordner
+
+## Medien in Inhalten verwenden
+
+### Im Rich-Text-Editor
+
+1. Platzieren Sie den Cursor an der Stelle, an der das Bild erscheinen soll
+
+2. Klicken Sie auf die Bildschaltfläche in der Symbolleiste
+
+3. Wählen Sie ein Bild aus der Mediathek oder laden Sie ein neues hoch
+
+4. Geben Sie Alt-Text ein
+
+5. Klicken Sie auf **Einfügen**
+
+### Als Beitragsbild
+
+1. Öffnen Sie einen Inhaltseintrag im Editor
+
+2. Finden Sie das Feld **Beitragsbild** in der Seitenleiste
+
+3. Klicken Sie auf **Bild auswählen**
+
+4. Wählen Sie aus der Mediathek oder laden Sie hoch
+
+5. Klicken Sie auf **Speichern**
+
+### In Benutzerdefinierten Feldern
+
+Für Felder, die als Bild- oder Dateitypen konfiguriert sind, klicken Sie auf das Feld, um den Medienauswahl-Dialog zu öffnen.
+
+## Medien in Templates anzeigen
+
+Greifen Sie auf Medien-URLs aus Ihren Inhaltsdaten zu:
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <img
+    src={post.data.featured_image}
+    alt={post.data.featured_image_alt ?? ""}
+  />
+)}
+```
+
+### Responsive Bilder
+
+Für responsive Bilder verwenden Sie die Image-Komponente von Astro mit externen URLs:
+
+```astro
+---
+import { Image } from "astro:assets";
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <Image
+    src={post.data.featured_image}
+    alt={post.data.featured_image_alt ?? ""}
+    width={800}
+    height={450}
+  />
+)}
+```
+
+<Aside type="tip">
+Konfigurieren Sie erlaubte Bilddomains in `astro.config.mjs`, um die Image-Komponente mit externen URLs zu verwenden:
+
+```js
+export default defineConfig({
+	image: {
+		domains: ["media.example.com"],
+	},
+});
+```
+
+</Aside>
+
+## Medien löschen
+
+1. Wählen Sie die Datei(en) aus, die Sie löschen möchten
+
+2. Klicken Sie auf **Löschen**
+
+3. Bestätigen Sie die Löschung
+
+<Aside type="caution">
+	Das Löschen von Medien entfernt nicht die Verweise in Ihren Inhalten. Stellen Sie sicher, dass Sie Inhalte,
+	die gelöschte Dateien verwenden, aktualisieren oder entfernen.
+</Aside>
+
+## Medien-API
+
+Greifen Sie programmatisch auf Medien über die Admin-API zu.
+
+### Eine Datei hochladen
+
+Laden Sie Medien als Multipart-Formulardaten hoch:
+
+```bash
+POST /_emdash/api/media
+Content-Type: multipart/form-data
+Authorization: Bearer YOUR_API_TOKEN
+
+file=<binary file data>
+```
+
+Antwort:
+
+```json
+{
+	"success": true,
+	"data": {
+		"item": {
+			"id": "01ABC123",
+			"filename": "hero-image.jpg",
+			"mime_type": "image/jpeg",
+			"storage_key": "media/abc123/hero-image.jpg",
+			"width": 1200,
+			"height": 800
+		}
+	}
+}
+```
+
+### Medien auflisten
+
+```bash
+GET /_emdash/api/media?prefix=images/&limit=20
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+### Medien löschen
+
+```bash
+DELETE /_emdash/api/media/images/hero.jpg
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+## Medienanbieter
+
+Zusätzlich zum lokalen Speicher unterstützt EmDash externe Medienanbieter für spezialisiertes Bild- und Video-Hosting. Medienanbieter erscheinen als Tabs im Medienauswahl-Dialog und ermöglichen es Redakteuren, aus mehreren Quellen zu wählen.
+
+### Verfügbare Anbieter
+
+<Tabs>
+  <TabItem label="Cloudflare Images">
+[Cloudflare Images](https://developers.cloudflare.com/images/) bietet Bild-Hosting mit automatischer Optimierung, Größenänderung und Formatkonvertierung.
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareImages } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      // ... database, storage config
+      mediaProviders: [
+        cloudflareImages({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_IMAGES_TOKEN,
+          // Optional: custom delivery domain
+          deliveryDomain: "images.example.com",
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+**Funktionen:**
+- Bilder direkt aus dem Admin durchsuchen und hochladen
+- Automatische Bildoptimierung und Formatkonvertierung
+- URL-basierte Transformationen (Größenänderung, Zuschneiden, Format)
+- Flexible Varianten für responsive Bilder
+
+</TabItem>
+<TabItem label="Cloudflare Stream">
+[Cloudflare Stream](https://developers.cloudflare.com/stream/) bietet Video-Hosting mit HLS/DASH Adaptive Streaming.
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareStream } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      // ... database, storage config
+      mediaProviders: [
+        cloudflareStream({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_STREAM_TOKEN,
+          // Optional: player settings
+          controls: true,
+          autoplay: false,
+          loop: false,
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+**Funktionen:**
+- Videos aus dem Admin durchsuchen, suchen und hochladen
+- HLS- und DASH-Adaptive-Streaming
+- Automatische Thumbnail-Generierung
+- Direktes Hochladen für große Dateien
+
+</TabItem>
+</Tabs>
+
+### Mehrere Anbieter nutzen
+
+Sie können mehrere Anbieter konfigurieren. Jeder erscheint als Tab im Medienauswahl-Dialog:
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareImages, cloudflareStream } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      database: d1({ binding: "DB" }),
+      storage: r2({ binding: "MEDIA" }),
+      mediaProviders: [
+        cloudflareImages({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_IMAGES_TOKEN,
+        }),
+        cloudflareStream({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_STREAM_TOKEN,
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+Die lokale Mediathek ("Bibliothek"-Tab) ist immer verfügbar, zusätzlich zu allen konfigurierten Anbietern.
+
+### Medien von Anbietern rendern
+
+Verwenden Sie die `Image`-Komponente, um Medien darzustellen:
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { Image } from "emdash/ui";
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <Image
+    image={post.data.featured_image}
+    width={800}
+    height={450}
+  />
+)}
+```
+
+Die Komponente automatisiert:
+- Erkennt den Anbieter aus dem gespeicherten Wert
+- Rendert ein optimiertes `<img>`-Element
+- Wendet anbieterspezifische Optimierungen an (z.B. Cloudflare Images-Transformationen)
+
+### MediaValue-Typ
+
+Medienfelder speichern ein `MediaValue`-Objekt, das Anbieterinformationen enthält:
+
+```ts
+interface MediaValue {
+  provider?: string;    // Provider ID, defaults to "local"
+  id: string;           // Provider-specific ID
+  src?: string;         // Direct URL (for local media or legacy data)
+  previewUrl?: string;  // Preview URL for admin display (external providers)
+  filename?: string;    // Original filename
+  mimeType?: string;    // MIME type
+  width?: number;       // Image/video width
+  height?: number;      // Image/video height
+  alt?: string;         // Alt text
+  meta?: Record<string, unknown>; // Provider-specific metadata
+}
+```
+
+Dadurch kann EmDash Medien unabhängig von ihrem Hosting-Ort korrekt darstellen.
+
+## Nächste Schritte
+
+- [Arbeiten mit Inhalten](/de/guides/working-with-content/) - Verwenden Sie Medien in Ihren Inhalten
+- [Blog erstellen](/de/guides/create-a-blog/) - Bilder zu Blogbeiträgen hinzufügen
+- [Abfragen von Inhalten](/de/guides/querying-content/) - Medien in Vorlagen anzeigen

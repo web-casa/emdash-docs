@@ -1,0 +1,283 @@
+---
+title: Menus de navigation
+description: Créez et gérez des menus de navigation pour les en-têtes, les pieds de page et les barres latérales.
+---
+
+import { Aside, Steps, Tabs, TabItem, Code } from "@astrojs/starlight/components";
+
+Les menus EmDash sont des listes ordonnées de liens que vous gérez via l'interface d'administration. Les menus prennent en charge l'imbrication pour les menus déroulants et peuvent pointer vers des pages, des articles, des termes de taxonomie ou des URL externes.
+
+## Interroger les menus
+
+Utilisez `getMenu()` pour récupérer un menu par son nom unique :
+
+```astro title="src/layouts/Base.astro"
+---
+import { getMenu } from "emdash";
+
+const primaryMenu = await getMenu("primary");
+---
+
+{primaryMenu && (
+  <nav>
+    <ul>
+      {primaryMenu.items.map(item => (
+        <li>
+          <a href={item.url}>{item.label}</a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+La fonction renvoie `null` si aucun menu n'existe avec ce nom.
+
+## Structure d'un menu
+
+Un menu contient des métadonnées et un tableau d'éléments :
+
+```ts
+interface Menu {
+	id: string;
+	name: string; // Identifiant unique ("primary", "footer")
+	label: string; // Nom affiché ("Navigation principale")
+	items: MenuItem[];
+}
+
+interface MenuItem {
+	id: string;
+	label: string;
+	url: string; // URL résolue
+	target?: string; // "_blank" pour une nouvelle fenêtre
+	titleAttr?: string; // Attribut HTML title
+	cssClasses?: string; // Classes CSS personnalisées
+	children: MenuItem[]; // Éléments imbriqués pour les menus déroulants
+}
+```
+
+Les URL sont résolues automatiquement en fonction du type d'élément :
+
+- **Éléments Page/Article** se résolvent en `/{collection}/{slug}`
+- **Éléments Taxonomie** se résolvent en `/{taxonomy}/{slug}`
+- **Éléments Collection** se résolvent en `/{collection}/`
+- **Liens personnalisés** utilisent l'URL telle quelle
+
+## Rendu des menus imbriqués
+
+Les éléments de menu peuvent avoir des enfants pour la navigation déroulante. Gérez l'imbrication en rendant récursivement le tableau `children` :
+
+```
+astro title="src/components/Navigation.astro"
+---
+import { getMenu } from "emdash";
+import type { MenuItem } from "emdash";
+
+interface Props {
+  name: string;
+}
+
+const menu = await getMenu(Astro.props.name);
+---
+
+{menu && (
+  <nav class="nav">
+    <ul class="nav-list">
+      {menu.items.map(item => (
+        <li class:list={["nav-item", item.cssClasses]}>
+          <a
+            href={item.url}
+            target={item.target}
+            title={item.titleAttr}
+            aria-current={Astro.url.pathname === item.url ? "page" : undefined}
+          >
+            {item.label}
+          </a>
+          {item.children.length > 0 && (
+            <ul class="submenu">
+              {item.children.map(child => (
+                <li>
+                  <a href={child.url} target={child.target}>
+                    {child.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+<Aside>
+	Utilisez `aria-current="page"` pour indiquer la page actuelle dans la navigation. Les lecteurs d'écran l'annoncent,
+	et le sélecteur CSS `[aria-current="page"]` permet de styliser le lien actif.
+</Aside>
+
+## Types d'éléments de menu
+
+L'administration prend en charge cinq types d'éléments de menu :
+
+| Type         | Description                  | Résolution de l'URL         |
+| ------------ | ---------------------------- | ---------------------- |
+| `page`       | Lien vers une page               | `/{collection}/{slug}` |
+| `post`       | Lien vers un article               | `/{collection}/{slug}` |
+| `taxonomy`   | Lien vers une catégorie ou un tag    | `/{taxonomy}/{slug}`   |
+| `collection` | Lien vers une archive de collection | `/{collection}/`       |
+| `custom`     | URL externe ou personnalisée       | Utilisée telle quelle             |
+
+## Lister tous les menus
+
+Utilisez `getMenus()` pour récupérer toutes les définitions de menus (sans les éléments) :
+
+```ts
+import { getMenus } from "emdash";
+
+const menus = await getMenus();
+// Renvoie : [{ id, name, label }, ...]
+```
+
+Cela est principalement utile pour les interfaces d'administration ou le débogage.
+
+## Créer des menus
+
+Créez des menus via l'interface d'administration à l'adresse `/_emdash/admin/menus`, ou utilisez l'API d'administration :
+
+```http
+POST /_emdash/api/menus
+Content-Type: application/json
+
+{
+  "name": "footer",
+  "label": "Footer Navigation"
+}
+```
+
+Ajoutez des éléments à un menu :
+
+```http
+POST /_emdash/api/menus/footer/items
+Content-Type: application/json
+
+{
+  "type": "page",
+  "referenceCollection": "pages",
+  "referenceId": "page_privacy",
+  "label": "Privacy Policy"
+}
+```
+
+Ajoutez un lien externe personnalisé :
+
+```http
+POST /_emdash/api/menus/footer/items
+Content-Type: application/json
+
+{
+  "type": "custom",
+  "customUrl": "https://github.com/example",
+  "label": "GitHub",
+  "target": "_blank"
+}
+```
+
+## Réorganisation et imbrication
+
+Mettez à jour l'ordre des éléments et les relations parent-enfant avec le point de terminaison de réorganisation :
+
+```http
+POST /_emdash/api/menus/primary/reorder
+Content-Type: application/json
+
+{
+  "items": [
+    { "id": "item_1", "parentId": null, "sortOrder": 0 },
+    { "id": "item_2", "parentId": null, "sortOrder": 1 },
+    { "id": "item_3", "parentId": "item_2", "sortOrder": 0 }
+  ]
+}
+```
+
+Cela fait de `item_3` un enfant de `item_2`, créant un menu déroulant.
+
+## Exemple complet
+
+L'exemple suivant montre un en-tête réactif avec une navigation principale :
+
+```
+astro title="src/layouts/Base.astro"
+---
+import { getMenu, getSiteSettings } from "emdash";
+
+const settings = await getSiteSettings();
+const primaryMenu = await getMenu("primary");
+---
+
+<html lang="en">
+  <head>
+    <title>{settings.title}</title>
+  </head>
+  <body>
+    <header class="header">
+      <a href="/" class="logo">
+        {settings.logo ? (
+          <img src={settings.logo.url} alt={settings.logo.alt || settings.title} />
+        ) : (
+          settings.title
+        )}
+      </a>
+
+      {primaryMenu && (
+        <nav class="main-nav" aria-label="Main navigation">
+          <ul>
+            {primaryMenu.items.map(item => (
+              <li class:list={[item.cssClasses, { "has-children": item.children.length > 0 }]}>
+                <a
+                  href={item.url}
+                  target={item.target}
+                  aria-current={Astro.url.pathname === item.url ? "page" : undefined}
+                >
+                  {item.label}
+                </a>
+                {item.children.length > 0 && (
+                  <ul class="dropdown">
+                    {item.children.map(child => (
+                      <li>
+                        <a href={child.url} target={child.target}>{child.label}</a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+    </header>
+
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>
+```
+
+## Référence API
+
+### `getMenu(name)`
+
+Récupère un menu par son nom avec tous ses éléments et les URL résolues.
+
+**Paramètres :**
+
+- `name` — L'identifiant unique du menu (chaîne de caractères)
+
+**Retourne :** `Promise<Menu | null>`
+
+### `getMenus()`
+
+Liste toutes les définitions de menus sans les éléments.
+
+**Retourne :** `Promise<Array<{ id: string; name: string; label: string }>>`

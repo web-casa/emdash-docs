@@ -1,0 +1,65 @@
+---
+title: HiEmdash 문서
+description: 애호가가 만든 서드파티 EmDash 문서 사이트로, 초보자 친화적인 가이드, 실용적인 FAQ, 다국어 번역을 제공합니다.
+lastUpdated: 2026-04-07
+template: splash
+hero:
+  tagline: 공식 문서를 넘어서는 초보자 친화적인 가이드, 실용적인 FAQ, 다국어 번역을 갖춘 커뮤니티 기반 EmDash 문서 허브입니다.
+  actions:
+    - text: 시작하기
+      link: /ko/getting-started/
+      icon: right-arrow
+    - text: GitHub에서 보기
+      link: https://github.com/emdash-cms/emdash
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## HiEmdash 문서를 선택하는 이유
+
+<CardGrid stagger>
+	<Card title="초보자 친화적" icon="document">
+		공식 문서를 넘어서, 이 사이트는 EmDash를 처음 사용하는 사용자들을 위한 온보딩 가이드와 추가적인 컨텍스트를 제공합니다.
+	</Card>
+	<Card title="다국어 지원" icon="puzzle">
+		영어가 원본 소스로 유지되며, 간체 중국어 번역과 향후 더 많은 언어를 위한 번역 워크플로우가 준비되어 있습니다.
+	</Card>
+	<Card title="커뮤니티 노트" icon="setting">
+		또한, 시작 단계에서 놓치기 쉬운 일반적인 질문, 실용적인 주의사항, 설정 팁들을 수집합니다.
+	</Card>
+</CardGrid>
+
+## 여기서 찾을 수 있는 내용
+
+- **시작하기 가이드** — 새로운 EmDash 사용자를 위한 명확한 설정 지침
+- **실용적인 FAQ** — 공개 프로젝트 토론과 일반적인 어려움에서 수집된 추가 답변
+- **다국어 문서** — 더 넓은 접근성을 위한 현지화된 번역과 함께 제공되는 영어 원본 콘텐츠
+- **마이그레이션 노트** — WordPress 또는 Astro 전용 워크플로우에서 오는 사람들을 위한 유용한 컨텍스트
+
+## 인기 있는 읽을거리
+
+- [EmDash란 무엇인가요?](/ko/what-is-emdash/) — 프로젝트에 대한 쉬운 언어로 된 개요
+- [최고의 Astro CMS](/ko/best-astro-cms/) — 일반적인 Astro CMS 요구사항에 대한 EmDash 평가
+- [EmDash vs WordPress](/ko/emdash-vs-wordpress/) — 편집, 배포, 아키텍처에 대한 직접적인 비교
+- [WordPress에서 Astro로 (EmDash 사용)](/ko/wordpress-to-astro-with-emdash/) — 마이그레이션 중심 개요
+
+## 빠른 시작
+
+```bash
+# Create a new EmDash site
+npm create astro@latest -- --template @emdash-cms/template-blog
+
+# 개발 서버 시작하기
+npm run dev
+
+# 관리자 페이지 방문하기 http://localhost:4321/_emdash/admin
+```
+
+## EmDash 소개
+
+- **Astro 네이티브 CMS** — 나중에 적응하는 것이 아닌 Astro를 위해 구축됨
+- **타입 안전 콘텐츠** — 구조화된 콘텐츠 모델과 생성된 TypeScript 지원
+- **확장 가능한 아키텍처** — 플러그인, 훅, 관리자 UI 확장 및 배포 유연성
+- **WordPress 친화적 개념** — 메뉴, 위젯, 분류 체계 및 마이그레이션 지향 워크플로우

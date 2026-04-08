@@ -1,0 +1,88 @@
+---
+title: よくある質問
+description: EmDashの評価や導入に関する実用的な回答と現在の注意点。
+lastUpdated: 2026-04-07
+---
+
+import FaqJsonLd from "../../../components/FaqJsonLd.astro";
+
+<FaqJsonLd />
+
+このFAQは、公式ガイドを補完するもので、公開ドキュメント、リポジトリREADME、およびGitHubの公開イシューから集めた回答を提供します。「現在の注意点」セクションは、2026年4月7日時点での公開プロジェクトステータスを反映しています。
+
+## 一般
+
+### EmDashとは何ですか？
+
+EmDashは、型安全なコンテンツ、非開発者向けの管理パネル、およびサンドボックス化されたCloudflare Worker isolateで実行可能なプラグインアーキテクチャに焦点を当てたAstroネイティブCMSです。WordPressをご存知なら、最も短い説明は「WordPressのアイデアをAstro、TypeScript、およびポータブルなデプロイメントを中心に再構築したもの」です。
+
+[イントロダクション](/ja/introduction/)、[なぜEmDashなのか](/ja/why-emdash/)、およびプロジェクト[README](https://github.com/emdash-cms/emdash)をご覧ください。
+
+### EmDashはCloudflareを必要としますか？
+
+いいえ。EmDashはCloudflare上で動作しますが、Node.jsとSQLite、およびローカルまたはS3互換ストレージでも実行できます。主な例外は**サンドボックス化されたプラグイン**です：READMEには、Dynamic Workersは現在有料のCloudflareアカウントでのみ利用可能であると記載されているため、その特定のプラグイン分離モデルはCloudflareのプラットフォームに依存しています。
+
+[Node.jsへのデプロイ](/ja/deployment/nodejs/)、[Cloudflareへのデプロイ](/ja/deployment/cloudflare/)、および[README](https://github.com/emdash-cms/emdash/blob/main/README.md)をご覧ください。
+
+### CloudflareなしでEmDashをローカルで実行できますか？
+
+はい。ローカルの入門フローは標準のAstroプロジェクトを使用し、Cloudflareアカウントなしで動作します。ローカル開発やよりシンプルなデプロイメントには、Node.js + SQLiteが最も直接的なセットアップです。
+
+[はじめに](/ja/getting-started/)と[Node.jsへのデプロイ](/ja/deployment/nodejs/)をご覧ください。
+
+### コンテンツの変更にはリビルドが必要ですか？
+
+いいえ。EmDashはAstro Live Content Collectionsを中心に文書化されているため、コンテンツの変更はサイトをリビルドせずにランタイムで反映されます。
+
+[はじめに](/ja/getting-started/)、[コンテンツのクエリ](/ja/guides/querying-content/)、および[アーキテクチャ](/ja/concepts/architecture/)をご覧ください。
+
+### 認証はどのように機能しますか？
+
+EmDashはパスキーファーストです。デフォルトのフローはWebAuthnパスキーを使用し、設定時にオプションでマジックリンクおよびOAuthフォールバックを利用できます。
+
+[認証](/ja/guides/authentication/)をご覧ください。
+
+### EmDashはプロダクション環境で使用可能ですか？
+
+リポジトリREADMEでは、EmDashは現在**ベータプレビュー**と記載されています。これは実際の評価や開発に使用可能であることを意味しますが、APIや機能の活発な変更はまだ予想されるべきです。
+
+[READMEのステータスセクション](https://github.com/emdash-cms/emdash/blob/main/README.md#status)をご覧ください。
+
+まずより広範な概要を知りたい場合は、[EmDashとは何ですか？](/ja/what-is-emdash/)と[EmDash vs WordPress](/ja/emdash-vs-wordpress/)をお読みください。
+
+## 現在の注意点
+
+### `admin.settingsSchema`は既にプラグイン設定UIを自動生成しますか？
+
+まだ確実には生成されません。プラグイン設定ガイドではスキーマ駆動の管理UI生成について説明していますが、[イシュー #341](https://github.com/emdash-cms/emdash/issues/341)では、スキーマは検証され型付けされるものの、管理パネルで期待される設定フォームが生成されないと報告されています。この問題が解決されるまでは、進行中の機能として扱ってください。
+
+関連ドキュメント：[プラグイン設定](/ja/plugins/settings/)。
+
+### メニューエディタは`/about`のような相対URLを受け入れますか？
+
+現在、フォームが`type="url"`を使用しており、ブラウザの検証がスキームを含む完全なURLを期待するため、相対URLを拒否しているというオープンバグレポートがあります。
+
+内部相対パスがメニューワークフローで重要な場合は、[イシュー #342](https://github.com/emdash-cms/emdash/issues/342)を追跡してください。
+
+### プラグインはウィジェットエリア向けにカスタムウィジェットコンポーネントを登録できますか？
+
+まだできません、少なくとも完成した公開機能としては。[イシュー #343](https://github.com/emdash-cms/emdash/issues/343)では、プラグイン提供のウィジェットコンポーネントに必要な登録APIとランタイムレンダリングサポートの両方が要求されています。
+
+プラグイン戦略が再利用可能なウィジェットブロックに依存する場合は、追加のフレームワーク作業がまだ必要であると想定してください。
+
+### プロダクションサイトでEmDashを採用する前に何を確認すべきですか？
+
+まず以下の4点を確認してください：
+
+- ターゲットデプロイメントモデル：Cloudflare vs. Node.js
+- サンドボックス化されたプラグインが必要かどうか、および有料Cloudflare機能が許容可能かどうか
+- 現在のプラグインAPIが、未解決のイシューに依存せずにユースケースをカバーしているかどうか
+- チームがベータプレビューCMSを採用することに問題がないかどうか
+
+ほとんどのチームでは、完全な移行の前に小規模なパイロットプロジェクトから始めるのが適切です。
+
+## 関連記事
+
+- [EmDashとは何ですか？](/ja/what-is-emdash/)
+- [最高のAstro CMS](/ja/best-astro-cms/)
+- [WordPressからAstroへ（EmDashを使用）](/ja/wordpress-to-astro-with-emdash/)

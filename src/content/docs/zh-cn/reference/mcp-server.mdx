@@ -1,0 +1,566 @@
+---
+title: MCP 服务器参考
+description: MCP 服务器的协议详情、工具规范及 OAuth 配置。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash 内置了 [模型上下文协议](https://modelcontextprotocol.io) (MCP) 服务器，地址为 `/_emdash/api/mcp`。它会将内容管理操作作为工具暴露给 AI 助手。
+
+<Aside>
+	想要将 Claude、ChatGPT 或其他 AI 工具连接到你的站点吗？请参阅 [AI 工具指南](/zh-cn/guides/ai-tools) 了解设置说明和使用技巧。
+</Aside>
+
+本页介绍协议层面的细节：认证、传输方式、工具规范、OAuth 发现和错误处理。
+
+## 身份验证
+
+MCP 服务器支持三种身份验证方法：
+
+| 方法 | 工作原理 |
+| --- | --- |
+| **OAuth 2.1 授权码 + PKCE** | MCP 客户端的标准流程。用户在浏览器中批准授权范围。 |
+| **个人访问令牌 (PAT)** | 在管理面板中创建的长效 `ec_pat_*` 令牌。 |
+| **设备流** | CLI 风格的流程，你在浏览器中批准一个代码。由 `emdash login` 使用。 |
+
+会话 Cookie（来自管理界面）也有效，但对于外部 MCP 客户端来说不实用。
+
+### 授权范围
+
+令牌被限定范围，以限制客户端可以执行的操作。范围在 OAuth 授权期间请求，并在每次工具调用时强制执行。
+
+| 范围 | 授予访问权限 |
+| --- | --- |
+| `content:read` | 列出、获取、比较和搜索内容。列出分类术语和菜单。 |
+| `content:write` | 创建、更新、删除、发布、取消发布、计划、复制和恢复内容。创建分类术语。 |
+| `media:read` | 列出和获取媒体项。 |
+| `media:write` | 更新和删除媒体元数据。 |
+| `schema:read` | 列出集合并获取集合模式。 |
+| `schema:write` | 创建和删除集合及字段。 |
+| `admin` | 对所有操作的完全访问权限。 |
+
+`admin` 范围授予对所有内容的访问权限。基于会话的身份验证（无令牌）也根据用户的角色拥有完全访问权限。
+
+### 角色要求
+
+除了授权范围，某些工具还需要最低的 RBAC 角色：
+
+| 操作 | 最低角色 |
+| --- | --- |
+| 内容操作 | 无最低要求（由范围控制访问） |
+| 模式读取 | 编辑者 (40) |
+| 模式写入 | 管理员 (50) |
+
+有关角色定义，请参阅 [身份验证指南](/zh-cn/guides/authentication#user-roles)。
+
+## 传输
+
+服务器使用 **无状态模式** 下的可流式 HTTP 传输。每个请求都是独立的——没有会话或长连接。
+
+- **`POST /_emdash/api/mcp`** -- 发送 JSON-RPC 工具调用
+- **`GET /_emdash/api/mcp`** -- 返回 405（无状态模式下不支持 SSE）
+- **`DELETE /_emdash/api/mcp`** -- 返回 405（无会话可关闭）
+
+响应遵循 [JSON-RPC 2.0](https://www.jsonrpc.org/specification) 格式。错误使用标准 JSON-RPC 错误码，对于范围和权限失败有 MCP 特定的错误码。
+
+## 工具
+
+服务器在七个领域公开了 33 个工具。每个工具返回的结果为 JSON 文本内容，或在失败时返回带有 `isError: true` 的错误消息。
+
+### 内容工具
+
+#### `content_list`
+
+列出集合中的内容项，支持可选过滤和分页。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符（例如 `posts`、`pages`） |
+| `status` | `string` | 否 | 过滤器：`draft`、`published` 或 `scheduled` |
+| `limit` | `integer` | 否 | 返回的最大项目数（1-100，默认 50） |
+| `cursor` | `string` | 否 | 来自先前响应的分页游标 |
+| `orderBy` | `string` | 否 | 排序字段（例如 `created_at`、`updated_at`） |
+| `order` | `string` | 否 | 排序方向：`asc` 或 `desc`（默认 `desc`） |
+| `locale` | `string` | 否 | 按语言环境过滤（例如 `en`、`fr`）。仅与 i18n 相关。 |
+
+**范围：** `content:read` | **只读：** 是
+
+#### `content_get`
+
+通过 ID 或 slug 获取单个内容项。返回所有字段值、元数据，以及用于乐观并发控制的 `_rev` 令牌。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID（ULID）或标识符 |
+| `locale` | `string` | 否 | 用于标识符查找的语言环境。ID 是全局唯一的。 |
+
+**范围：** `content:read` | **只读：** 是
+
+<Aside>
+	响应中的 `_rev` 令牌用于冲突检测。在更新时将其传回，以确保自您读取该项目以来没有其他人修改过它。
+</Aside>
+
+#### `content_create`
+
+创建新的内容项。`data` 对象应包含与集合模式匹配的字段值——使用 `schema_get_collection` 来检查有哪些可用字段。默认情况下，项目以 `draft` 状态创建。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `data` | `object` | 是 | 键值对形式的字段值 |
+| `slug` | `string` | 否 | URL 标识符（如果省略，则从标题自动生成） |
+| `status` | `string` | 否 | 初始状态：`draft` 或 `published`（默认 `draft`） |
+| `locale` | `string` | 否 | 此内容的语言环境（默认为站点默认值） |
+| `translationOf` | `string` | 否 | 此内容作为翻译来源的项目 ID |
+
+**范围：** `content:write`
+
+#### `content_update`
+
+更新现有的内容项。仅包含您想要更改的字段——未指定的字段保持不变。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+| `data` | `object` | 否 | 要更新的字段值 |
+| `slug` | `string` | 否 | 新的 URL 标识符 |
+| `status` | `string` | 否 | 新状态：`draft` 或 `published` |
+| `_rev` | `string` | 否 | 来自 `content_get` 的修订令牌，用于冲突检测 |
+
+**范围：** `content:write`
+
+#### `content_delete`
+
+通过将内容项移至回收站来软删除。使用 `content_restore` 撤销，或使用 `content_permanent_delete` 永久删除。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+
+**范围：** `content:write` | **破坏性：** 是
+
+#### `content_restore`
+
+从回收站恢复软删除的内容项。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+
+**范围：** `content:write`
+
+#### `content_permanent_delete`
+
+永久且不可逆地删除回收站中的内容项。该项目必须首先位于回收站中。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+
+**范围：** `content:write` | **破坏性：** 是
+
+#### `content_publish`
+
+发布内容项，使其在网站上生效。从当前草稿创建已发布的修订。进一步的编辑会创建新的草稿，而不会影响实时版本，直到重新发布。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+
+**范围：** `content:write`
+
+#### `content_unpublish`
+
+将已发布的项目恢复为草稿状态。它将不再在实时网站上可见，但其内容会被保留。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+
+**范围：** `content:write`
+
+#### `content_schedule`
+
+安排内容项在将来发布。它将在指定的日期/时间自动发布。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+| `scheduledAt` | `string` | 是 | ISO 8601 日期时间（例如 `2026-06-01T09:00:00Z`） |
+
+**范围：** `content:write`
+
+#### `content_compare`
+
+比较内容项的已发布（实时）版本与其当前草稿。返回两个版本以及一个指示是否有更改的标志。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+
+**范围：** `content:read` | **只读：** 是
+
+#### `content_discard_draft`
+
+丢弃当前草稿并恢复到上次发布的版本。仅适用于至少已发布过一次的项目。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+
+**范围：** `content:write` | **破坏性：** 是
+
+#### `content_list_trashed`
+
+列出集合回收站中的软删除内容项。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `limit` | `integer` | 否 | 最大项目数（1-100，默认 50） |
+| `cursor` | `string` | 否 | 分页游标 |
+
+**范围：** `content:read` | **只读：** 是
+
+#### `content_duplicate`
+
+创建现有内容项的副本。副本以草稿状态创建，标题附加“（副本）”，并自动生成标识符。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 要复制的内容项 ID 或标识符 |
+
+**范围：** `content:write`
+
+#### `content_translations`
+
+获取内容项的所有语言环境变体。返回翻译组和每个语言环境版本的摘要。仅当启用 i18n 时相关。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+
+**范围：** `content:read` | **只读：** 是
+
+### 模式工具
+
+<Aside type="caution">
+	模式工具修改数据库结构。创建或删除集合和字段会更改底层表。这些操作需要管理员角色。
+</Aside>
+
+#### `schema_list_collections`
+
+列出 CMS 中定义的所有内容集合。返回标识符、标签、支持的功能和时间戳。
+
+**无参数。**
+
+**范围：** `schema:read` | **最低角色：** 编辑 | **只读：** 是
+
+#### `schema_get_collection`
+
+获取集合的详细信息，包括所有字段定义。字段描述数据模型：名称、类型、约束和验证规则。使用此工具来了解 `content_create` 和 `content_update` 期望什么。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `slug` | `string` | 是 | 集合标识符（例如 `posts`） |
+
+**范围：** `schema:read` | **最低角色：** 编辑 | **只读：** 是
+
+#### `schema_create_collection`
+
+创建新的内容集合。这将创建一个数据库表和模式定义。标识符必须是小写字母数字加下划线，以字母开头。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `slug` | `string` | 是 | 唯一标识符（`/^[a-z][a-z0-9_]*$/`） |
+| `label` | `string` | 是 | 显示名称（复数，例如“博客文章”） |
+| `labelSingular` | `string` | 否 | 单数显示名称 |
+| `description` | `string` | 否 | 此集合的描述 |
+| `icon` | `string` | 否 | 管理界面的图标名称 |
+| `supports` | `string[]` | 否 | 功能：`drafts`、`revisions`、`preview`、`scheduling`、`search`（默认：`['drafts', 'revisions']`） |
+
+**范围：** `schema:write` | **最低角色：** 管理员
+
+#### `schema_delete_collection`
+
+删除集合及其数据库表。这是不可逆的，会删除集合中的所有内容。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `slug` | `string` | 是 | 要删除的集合标识符 |
+| `force` | `boolean` | 否 | 即使集合有内容也强制删除 |
+
+**范围：** `schema:write` | **最低角色：** 管理员 | **破坏性：** 是
+
+#### `schema_create_field`
+
+向集合的模式添加新字段。这会在数据库表中添加一列。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `slug` | `string` | 是 | 字段标识符（`/^[a-z][a-z0-9_]*$/`） |
+| `label` | `string` | 是 | 显示名称 |
+| `type` | `string` | 是 | 数据类型（见下文） |
+| `required` | `boolean` | 否 | 字段是否必需 |
+| `unique` | `boolean` | 否 | 值是否必须唯一 |
+| `defaultValue` | `any` | 否 | 新项目的默认值 |
+| `validation` | `object` | 否 | 约束：`min`、`max`、`minLength`、`maxLength`、`pattern`、`options` |
+| `options` | `object` | 否 | 小部件配置：`collection`（用于引用）、`rows`（用于文本区域） |
+| `searchable` | `boolean` | 否 | 包含在全文搜索索引中 |
+| `translatable` | `boolean` | 否 | 此字段是否可翻译（默认为 true） |
+
+字段类型：`string`、`text`、`number`、`integer`、`boolean`、`datetime`、`select`、`multiSelect`、`portableText`、`image`、`file`、`reference`、`json`、`slug`。
+
+对于 `select` 和 `multiSelect` 类型，请在 `validation.options` 中提供允许的值。
+
+**范围：** `schema:write` | **最低角色：** 管理员
+
+#### `schema_delete_field`
+
+从集合中移除字段。这将删除列并删除该字段中的所有数据。不可逆。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `fieldSlug` | `string` | 是 | 要移除的字段标识符 |
+
+**范围：** `schema:write` | **最低角色：** 管理员 | **破坏性：** 是
+
+### 媒体工具
+
+#### `media_list`
+
+列出上传的媒体文件，支持可选的 MIME 类型过滤和分页。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `mimeType` | `string` | 否 | 按 MIME 类型前缀过滤（例如 `image/`、`application/pdf`） |
+| `limit` | `integer` | 否 | 最大项目数（1-100，默认 50） |
+| `cursor` | `string` | 否 | 分页游标 |
+
+**范围：** `media:read` | **只读：** 是
+
+#### `media_get`
+
+通过 ID 获取单个媒体文件的详细信息。返回元数据，包括文件名、MIME 类型、大小、尺寸、替代文本和 URL。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `id` | `string` | 是 | 媒体项 ID |
+
+**范围：** `media:read` | **只读：** 是
+
+#### `media_update`
+
+更新已上传媒体文件的元数据。文件本身无法更改。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `id` | `string` | 是 | 媒体项 ID |
+| `alt` | `string` | 否 | 用于可访问性的替代文本 |
+| `caption` | `string` | 否 | 标题文本 |
+| `width` | `integer` | 否 | 图像宽度（像素） |
+| `height` | `integer` | 否 | 图像高度（像素） |
+
+**范围：** `media:write`
+
+#### `media_delete`
+
+永久删除媒体文件。从存储中移除数据库记录和文件。引用此媒体的内容将出现引用中断。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `id` | `string` | 是 | 媒体项 ID |
+
+**范围：** `media:write` | **破坏性：** 是
+
+### 搜索工具
+
+#### `search`
+
+跨内容集合进行全文搜索。集合的 `supports` 列表中必须包含 `search`，并且字段必须标记为 `searchable`。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `query` | `string` | 是 | 搜索查询文本 |
+| `collections` | `string[]` | 否 | 将搜索限制在特定的集合标识符 |
+| `locale` | `string` | 否 | 按语言环境过滤结果 |
+| `limit` | `integer` | 否 | 最大结果数（1-50，默认 20） |
+
+**范围：** `content:read` | **只读：** 是
+
+### 分类法工具
+
+#### `taxonomy_list`
+
+列出所有分类法定义（例如类别、标签）。返回名称、标签、是否为分层结构以及关联的集合。
+
+**无参数。**
+
+**范围：** `content:read` | **只读：** 是
+
+#### `taxonomy_list_terms`
+
+列出分类法中的术语，支持分页。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `taxonomy` | `string` | 是 | 分类法名称（例如 `categories`、`tags`） |
+| `limit` | `integer` | 否 | 最大项目数（1-100，默认 50） |
+| `cursor` | `string` | 否 | 分页游标 |
+
+**范围：** `content:read` | **只读：** 是
+
+#### `taxonomy_create_term`
+
+在分类法中创建新术语。对于分层分类法，指定 `parentId` 以创建子术语。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `taxonomy` | `string` | 是 | 分类法名称 |
+| `slug` | `string` | 是 | URL 安全标识符 |
+| `label` | `string` | 是 | 显示名称 |
+| `parentId` | `string` | 否 | 父术语 ID（用于分层分类法） |
+| `description` | `string` | 否 | 术语描述 |
+
+**范围：** `content:write`
+
+### 菜单工具
+
+#### `menu_list`
+
+列出所有导航菜单。返回名称、标签和时间戳。
+
+**无参数。**
+
+**范围：** `content:read` | **只读：** 是
+
+#### `menu_get`
+
+按名称获取菜单，包括按顺序排列的所有菜单项。菜单项包含标签、URL、类型，以及用于嵌套的可选父项。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `name` | `string` | 是 | 菜单名称（例如 `main`、`footer`） |
+
+**范围：** `content:read` | **只读：** 是
+
+### 修订工具
+
+#### `revision_list`
+
+列出内容项的修订历史，按最新优先排序。要求集合支持 `revisions`。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `collection` | `string` | 是 | 集合标识符 |
+| `id` | `string` | 是 | 内容项 ID 或标识符 |
+| `limit` | `integer` | 否 | 最大修订数（1-50，默认 20） |
+
+**范围：** `content:read` | **只读：** 是
+
+#### `revision_restore`
+
+将内容项恢复到先前的某个修订版本。它会用指定修订的数据替换当前草稿。不会自动发布，如有需要请随后调用 `content_publish`。
+
+| 参数 | 类型 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `revisionId` | `string` | 是 | 要恢复的修订 ID |
+
+**范围：** `content:write`
+
+## OAuth 发现
+
+支持 OAuth 2.1 的 MCP 客户端可以自动发现认证方式。服务器会公开两个元数据文档：
+
+### 受保护资源元数据
+
+```http
+GET /.well-known/oauth-protected-resource
+```
+
+```json
+{
+  "resource": "https://example.com/_emdash/api/mcp",
+  "authorization_servers": ["https://example.com/_emdash"],
+  "scopes_supported": [
+    "content:read", "content:write",
+    "media:read", "media:write",
+    "schema:read", "schema:write",
+    "admin"
+  ],
+  "bearer_methods_supported": ["header"]
+}
+```
+
+### 授权服务器元数据
+
+```http
+GET /_emdash/.well-known/oauth-authorization-server
+```
+
+```json
+{
+  "issuer": "https://example.com/_emdash",
+  "authorization_endpoint": "https://example.com/_emdash/oauth/authorize",
+  "token_endpoint": "https://example.com/_emdash/api/oauth/token",
+  "scopes_supported": ["content:read", "content:write", "..."],
+  "response_types_supported": ["code"],
+  "grant_types_supported": [
+    "authorization_code",
+    "refresh_token",
+    "urn:ietf:params:oauth:grant-type:device_code"
+  ],
+  "code_challenge_methods_supported": ["S256"],
+  "token_endpoint_auth_methods_supported": ["none"],
+  "device_authorization_endpoint": "https://example.com/_emdash/api/oauth/device/code"
+}
+```
+
+当未经身份验证的请求访问 MCP 端点时，服务器会返回：
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"
+```
+
+这会触发标准的 MCP 客户端发现流程。
+
+## 错误处理
+
+工具错误会以文本内容形式返回，并附带 `isError: true` 标记：
+
+```json
+{
+  "content": [{ "type": "text", "text": "Collection 'nonexistent' not found" }],
+  "isError": true
+}
+```
+
+作用域和权限错误会抛出 MCP 协议错误：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32600,
+    "message": "Insufficient scope: requires content:write"
+  },
+  "id": 1
+}
+```
+
+传输层错误（服务器配置错误、未处理的异常）会返回 JSON-RPC 错误代码 `-32603`（内部错误），而不会泄露实现细节。

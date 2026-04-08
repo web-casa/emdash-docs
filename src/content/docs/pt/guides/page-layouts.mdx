@@ -1,0 +1,147 @@
+---
+title: Layouts de Página
+description: Permita que editores escolham layouts diferentes para páginas individuais usando um campo de modelo.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+O WordPress possui "Modelos de Página" — um menu suspenso no editor que permite escolher um layout por página (ex: Padrão, Largura Total, Página de Destino). O EmDash suporta o mesmo padrão usando um campo `select`.
+
+## Como funciona
+
+1. Adicione um campo `select` de `template` à sua coleção de páginas
+2. Crie componentes de layout para cada opção
+3. Mapeie o valor do campo para um layout na sua rota de página
+
+Nenhum sistema especial é necessário — isso usa o campo select existente do EmDash e o modelo de componentes do Astro.
+
+## Adicione o campo
+
+Na interface de administração, adicione um campo select à sua coleção de páginas com o slug `template` e suas opções de layout (ex: "Padrão", "Largura Total"). Ou inclua-o nos seus dados de seed:
+
+```json title=".emdash/seed.json"
+{
+  "slug": "template",
+  "label": "Template",
+  "type": "select",
+  "validation": {
+    "options": ["Default", "Full Width"]
+  },
+  "defaultValue": "Default"
+}
+```
+
+## Crie componentes de layout
+
+Cada layout envolve o conteúdo no seu layout base com estilização diferente:
+
+```
+astro title="src/layouts/PageDefault.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../guides/Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-default">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-default {
+    max-width: var(--content-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+```
+astro title="src/layouts/PageFullWidth.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../guides/Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-wide">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-wide {
+    max-width: var(--wide-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+## Conecte a rota
+
+Na sua rota de página, importe cada layout e mapeie o valor do template:
+
+```
+astro title="src/pages/pages/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import PageDefault from "../../../layouts/PageDefault.astro";
+import PageFullWidth from "../../../layouts/PageFullWidth.astro";
+
+const { slug } = Astro.params;
+
+if (!slug) {
+  return Astro.redirect("/404");
+}
+
+const { entry: page } = await getEmDashEntry("pages", slug);
+
+if (!page) {
+  return Astro.redirect("/404");
+}
+
+const layouts = {
+  "Default": PageDefault,
+  "Full Width": PageFullWidth,
+};
+
+const Layout = layouts[page.data.template as keyof typeof layouts] ?? PageDefault;
+---
+
+<Layout page={page} />
+```
+
+A rota permanece pequena. Cada componente de layout possui sua própria marcação e estilização. Adicionar um layout é: criar um componente, adicionar a opção ao campo select, adicionar uma linha ao mapa.
+
+<Aside type="tip">
+Use nomes de opção legíveis por humanos como "Largura Total" em vez de slugs como "full-width". O valor é tanto o valor armazenado quanto o rótulo do menu suspenso do admin.
+</Aside>
+
+## Adicionando mais layouts
+
+Escolhas comuns de temas do WordPress:
+
+- **Padrão** — coluna de conteúdo estreita, boa para leitura
+- **Largura Total** — área de conteúdo mais ampla, sem barra lateral
+- **Página de Destino** — sem cabeçalho/rodapé, seções de herói
+- **Barra Lateral** — conteúdo com uma área de widgets na barra lateral
+
+Cada um é apenas outro componente Astro no seu diretório `src/layouts/` e outra entrada no mapa de layouts da rota.

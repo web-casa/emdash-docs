@@ -1,0 +1,714 @@
+---
+title: Referencia de Hooks
+description: Hooks de plugin para extender la funcionalidad de EmDash.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Los Hooks permiten a los plugins interceptar y modificar el comportamiento de EmDash en puntos específicos del ciclo de vida del contenido, medios, correos electrónicos, comentarios y páginas.
+
+## Resumen de Hooks
+
+| Hook                    | Activador                               | Puede Modificar        | Exclusivo |
+| ----------------------- | ------------------------------------- | ----------------- | --------- |
+| `content:beforeSave`    | Antes de guardar el contenido          | Datos del contenido | No        |
+| `content:afterSave`     | Después de guardar el contenido        | Nada               | No        |
+| `content:beforeDelete`  | Antes de eliminar el contenido         | Puede cancelar     | No        |
+| `content:afterDelete`   | Después de eliminar el contenido       | Nada               | No        |
+| `media:beforeUpload`    | Antes de subir un archivo              | Metadatos del archivo | No        |
+| `media:afterUpload`     | Después de subir un archivo            | Nada               | No        |
+| `cron`                  | Se ejecuta una tarea programada        | Nada               | No        |
+| `email:beforeSend`      | Antes del envío del correo             | Mensaje, puede cancelar | No      |
+| `email:deliver`         | Entrega el correo vía transporte       | Nada               | Sí        |
+| `email:afterSend`       | Después del envío exitoso del correo   | Nada               | No        |
+| `comment:beforeCreate`  | Antes de almacenar un comentario       | Comentario, puede cancelar | No      |
+| `comment:moderate`      | Decide el estado de aprobación del comentario | Estado            | Sí        |
+| `comment:afterCreate`   | Después de almacenar un comentario     | Nada               | No        |
+| `comment:afterModerate` | Después de que un admin cambia el estado del comentario | Nada | No        |
+| `page:metadata`         | Al renderizar la cabecera de la página pública | Contribuir etiquetas | No        |
+| `page:fragments`        | Al renderizar el cuerpo de la página pública | Inyectar scripts | No        |
+| `plugin:install`        | Cuando un plugin se instala por primera vez | Nada           | No        |
+| `plugin:activate`       | Cuando un plugin se habilita           | Nada               | No        |
+| `plugin:deactivate`     | Cuando un plugin se deshabilita        | Nada               | No        |
+| `plugin:uninstall`      | Cuando un plugin se elimina            | Nada               | No        |
+
+## Hooks de Contenido
+
+### `content:beforeSave`
+
+Se ejecuta antes de que el contenido se guarde en la base de datos. Úsalo para validar, transformar o enriquecer contenido.
+
+```ts
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "my-plugin",
+	version: "1.0.0",
+	hooks: {
+		"content:beforeSave": async (event, ctx) => {
+			const { content, collection, isNew } = event;
+
+			// Agregar marcas de tiempo
+			if (isNew) {
+				content.createdBy = "system";
+			}
+			content.modifiedAt = new Date().toISOString();
+
+			// Devolver contenido modificado
+			return content;
+		},
+	},
+});
+```
+
+#### Evento
+
+```ts
+interface ContentHookEvent {
+	content: Record<string, unknown>; // Content data
+	collection: string; // Collection slug
+	isNew: boolean; // True for creates, false for updates
+}
+```
+
+#### Valor de Retorno
+
+- Devuelve un objeto de contenido modificado para aplicar cambios
+- Devuelve `void` para pasar sin cambios
+
+### `content:afterSave`
+
+Se ejecuta después de guardar el contenido. Úsalo para efectos secundarios como notificaciones, invalidación de caché o sincronización externa.
+
+```ts
+hooks: {
+  "content:afterSave": async (event, ctx) => {
+    const { content, collection, isNew } = event;
+
+    if (collection === "posts" && content.status === "published") {
+      // Notificar servicio externo
+      await ctx.http?.fetch("https://api.example.com/notify", {
+        method: "POST",
+        body: JSON.stringify({ postId: content.id }),
+      });
+    }
+  },
+}
+```
+
+#### Valor de Retorno
+
+No se espera un valor de retorno.
+
+### `content:beforeDelete`
+
+Se ejecuta antes de eliminar contenido. Úsalo para validar la eliminación o prevenirla.
+
+```ts
+hooks: {
+  "content:beforeDelete": async (event, ctx) => {
+    const { id, collection } = event;
+
+    // Prevenir eliminación de contenido protegido
+    const item = await ctx.content?.get(collection, id);
+    if (item?.data.protected) {
+      return false; // Cancel deletion
+    }
+
+    // Permitir eliminación
+    return true;
+  },
+}
+```
+
+#### Evento
+
+```ts
+interface ContentDeleteEvent {
+	id: string; // Entry ID
+	collection: string; // Collection slug
+}
+```
+
+#### Valor de Retorno
+
+- Devuelve `false` para cancelar la eliminación
+- Devuelve `true` o `void` para permitir
+
+### `content:afterDelete`
+
+Se ejecuta después de eliminar contenido. Úsalo para tareas de limpieza.
+
+```ts
+hooks: {
+  "content:afterDelete": async (event, ctx) => {
+    const { id, collection } = event;
+
+    // Limpiar datos relacionados
+    await ctx.storage.relatedItems.delete(`${collection}:${id}`);
+  },
+}
+```
+
+## Hooks de Medios
+
+### `media:beforeUpload`
+
+Se ejecuta antes de subir un archivo. Úsalo para validar, renombrar o rechazar archivos.
+
+```ts
+hooks: {
+  "media:beforeUpload": async (event, ctx) => {
+    const { file } = event;
+
+    // Rechazar archivos mayores a 10MB
+    if (file.size > 10 * 1024 * 1024) {
+      throw new Error("File too large");
+    }
+
+    // Renombrar archivo
+    return {
+      name: `${Date.now()}-${file.name}`,
+      type: file.type,
+      size: file.size,
+    };
+  },
+}
+```
+
+#### Evento
+
+```ts
+interface MediaUploadEvent {
+	file: {
+		name: string; // Original filename
+		type: string; // MIME type
+		size: number; // Size in bytes
+	};
+}
+```
+
+#### Valor de Retorno
+
+- Devuelve metadatos de archivo modificados para aplicar cambios
+- Devuelve `void` para pasar sin cambios
+- Lanza una excepción para rechazar la subida
+
+### `media:afterUpload`
+
+Se ejecuta después de subir un archivo. Úsalo para procesamiento, miniaturas o extracción de metadatos.
+
+```ts
+hooks: {
+  "media:afterUpload": async (event, ctx) => {
+    const { media } = event;
+
+    if (media.mimeType.startsWith("image/")) {
+      // Almacenar metadatos de la imagen
+      await ctx.kv.set(`media:${media.id}:analyzed`, {
+        processedAt: new Date().toISOString(),
+      });
+    }
+  },
+}
+```
+
+#### Evento
+
+```ts
+interface MediaAfterUploadEvent {
+	media: {
+		id: string;
+		filename: string;
+		mimeType: string;
+		size: number | null;
+		url: string;
+		createdAt: string;
+	};
+}
+```
+
+## Hooks de Ciclo de Vida
+
+### `plugin:install`
+
+Se ejecuta cuando un plugin se instala por primera vez. Úsalo para configuración inicial, crear colecciones de almacenamiento o sembrar datos.
+
+```ts
+hooks: {
+  "plugin:install": async (event, ctx) => {
+    // Initialize default settings
+    await ctx.kv.set("settings:enabled", true);
+    await ctx.kv.set("settings:threshold", 100);
+
+    ctx.log.info("Plugin instalado exitosamente");
+  },
+}
+```
+
+### `plugin:activate`
+
+Se ejecuta cuando un plugin se habilita (después de la instalación o re-habilitación).
+
+```ts
+hooks: {
+  "plugin:activate": async (event, ctx) => {
+    ctx.log.info("Plugin activated");
+  },
+}
+```
+
+### `plugin:deactivate`
+
+Se ejecuta cuando un plugin se deshabilita.
+
+```ts
+hooks: {
+  "plugin:deactivate": async (event, ctx) => {
+    ctx.log.info("Plugin deactivated");
+  },
+}
+```
+
+### `plugin:uninstall`
+
+Se ejecuta cuando un plugin se elimina. Úsalo para limpieza.
+
+```ts
+hooks: {
+  "plugin:uninstall": async (event, ctx) => {
+    const { deleteData } = event;
+
+    if (deleteData) {
+      // Limpiar todos los datos del plugin
+      const items = await ctx.kv.list("settings:");
+      for (const { key } of items) {
+        await ctx.kv.delete(key);
+      }
+    }
+
+    ctx.log.info("Plugin desinstalado");
+  },
+}
+```
+
+#### Evento
+
+```ts
+interface UninstallEvent {
+	deleteData: boolean; // User chose to delete data
+}
+```
+
+## Hook Cron
+
+### `cron`
+
+Se activa cuando se ejecuta una tarea programada. Programa tareas con `ctx.cron.schedule()`.
+
+```ts
+hooks: {
+  "cron": async (event, ctx) => {
+    if (event.name === "daily-sync") {
+      const data = await ctx.http?.fetch("https://api.example.com/data");
+      ctx.log.info("Sync complete");
+    }
+  },
+}
+```
+
+#### Evento
+
+```ts
+interface CronEvent {
+	name: string;
+	data?: Record<string, unknown>;
+	scheduledAt: string;
+}
+```
+
+## Hooks de Correo Electrónico
+
+Los hooks de correo forman un pipeline: `email:beforeSend` → `email:deliver` → `email:afterSend`.
+
+### `email:beforeSend`
+
+**Capacidad:** `email:intercept`
+
+Hook de middleware que se ejecuta antes de la entrega. Transforma mensajes o cancela la entrega.
+
+```ts
+hooks: {
+  "email:beforeSend": async (event, ctx) => {
+    // Anade un pie a todos los correos
+    return {
+      ...event.message,
+      text: event.message.text + "\n\n—Enviado desde Mi sitio",
+    };
+
+    // O devuelve false para cancelar la entrega
+  },
+}
+```
+
+#### Evento
+
+```ts
+interface EmailBeforeSendEvent {
+	message: { to: string; subject: string; text: string; html?: string };
+	source: string;
+}
+```
+
+#### Valor de Retorno
+
+- Devuelve un mensaje modificado para transformar
+- Devuelve `false` para cancelar la entrega
+- Devuelve `void` para pasar sin cambios
+
+### `email:deliver`
+
+**Capacidad:** `email:provide` | **Exclusivo:** Sí
+
+El proveedor de transporte. Solo un plugin puede entregar correos. Responsable de enviar realmente el mensaje a través de un servicio de correo.
+
+```ts
+hooks: {
+  "email:deliver": {
+    exclusive: true,
+    handler: async (event, ctx) => {
+      await sendViaSES(event.message);
+    },
+  },
+}
+```
+
+### `email:afterSend`
+
+**Capacidad:** `email:intercept`
+
+Gancho de disparar y olvidar después de una entrega exitosa. Los errores se registran pero no se propagan.
+
+```ts
+hooks: {
+  "email:afterSend": async (event, ctx) => {
+    await ctx.kv.set(`email:log:${Date.now()}`, {
+      to: event.message.to,
+      subject: event.message.subject,
+    });
+  },
+}
+```
+
+## Ganchos de Comentarios
+
+Los ganchos de comentarios forman una canalización: `comment:beforeCreate` → `comment:moderate` → `comment:afterCreate`. El gancho `comment:afterModerate` se dispara por separado cuando un administrador cambia el estado de un comentario.
+
+### `comment:beforeCreate`
+
+**Capacidad:** `read:users`
+
+Gancho de middleware antes de que se almacene un comentario. Enriquece, valida o rechaza comentarios.
+
+```ts
+hooks: {
+  "comment:beforeCreate": async (event, ctx) => {
+    // Reject comments with links
+    if (event.comment.body.includes("http")) {
+      return false;
+    }
+  },
+}
+```
+
+#### Evento
+
+```ts
+interface CommentBeforeCreateEvent {
+	comment: {
+		collection: string;
+		contentId: string;
+		parentId: string | null;
+		authorName: string;
+		authorEmail: string;
+		authorUserId: string | null;
+		body: string;
+		ipHash: string | null;
+		userAgent: string | null;
+	};
+	metadata: Record<string, unknown>;
+}
+```
+
+#### Valor de Retorno
+
+- Devuelve un evento modificado para transformar
+- Devuelve `false` para rechazar
+- Devuelve `void` para pasar
+
+### `comment:moderate`
+
+**Capacidad:** `read:users` | **Exclusivo:** Sí
+
+Decide si un comentario es aprobado, pendiente o spam. Solo un proveedor de moderación está activo.
+
+```ts
+hooks: {
+  "comment:moderate": {
+    exclusive: true,
+    handler: async (event, ctx) => {
+      const score = await checkSpam(event.comment);
+      return {
+        status: score > 0.8 ? "spam" : score > 0.5 ? "pending" : "approved",
+        reason: `Spam score: ${score}`,
+      };
+    },
+  },
+}
+```
+
+#### Evento
+
+```ts
+interface CommentModerateEvent {
+	comment: { /* same as beforeCreate */ };
+	metadata: Record<string, unknown>;
+	collectionSettings: {
+		commentsEnabled: boolean;
+		commentsModeration: "all" | "first_time" | "none";
+		commentsClosedAfterDays: number;
+		commentsAutoApproveUsers: boolean;
+	};
+	priorApprovedCount: number;
+}
+```
+
+#### Valor de Retorno
+
+```ts
+{ status: "approved" | "pending" | "spam"; reason?: string }
+```
+
+### `comment:afterCreate`
+
+**Capacidad:** `read:users`
+
+Gancho de disparar y olvidar después de que se almacena un comentario. Úsalo para notificaciones.
+
+```ts
+hooks: {
+  "comment:afterCreate": async (event, ctx) => {
+    if (event.comment.status === "approved") {
+      await ctx.email?.send({
+        to: event.contentAuthor?.email,
+        subject: `New comment on "${event.content.title}"`,
+        text: `${event.comment.authorName} commented: ${event.comment.body}`,
+      });
+    }
+  },
+}
+```
+
+### `comment:afterModerate`
+
+**Capacidad:** `read:users`
+
+Gancho de disparar y olvidar cuando un administrador cambia manualmente el estado de un comentario.
+
+#### Evento
+
+```ts
+interface CommentAfterModerateEvent {
+	comment: { id: string; /* ... */ };
+	previousStatus: string;
+	newStatus: string;
+	moderator: { id: string; name: string | null };
+}
+```
+
+## Ganchos de Página
+
+Los ganchos de página se ejecutan al renderizar páginas públicas. Permiten a los plugins inyectar metadatos y scripts.
+
+### `page:metadata`
+
+**Capacidad:** `page:inject`
+
+Contribuye con metaetiquetas, propiedades de Open Graph, datos estructurados JSON-LD o etiquetas de enlace al encabezado de la página.
+
+```ts
+hooks: {
+  "page:metadata": async (event, ctx) => {
+    return [
+      { kind: "meta", name: "generator", content: "EmDash" },
+      { kind: "property", property: "og:site_name", content: event.page.siteName },
+      { kind: "jsonld", graph: { "@type": "WebSite", name: event.page.siteName } },
+    ];
+  },
+}
+```
+
+#### Tipos de Contribución
+
+```ts
+type PageMetadataContribution =
+	| { kind: "meta"; name: string; content: string; key?: string }
+	| { kind: "property"; property: string; content: string; key?: string }
+	| { kind: "link"; rel: string; href: string; hreflang?: string; key?: string }
+	| { kind: "jsonld"; id?: string; graph: Record<string, unknown> };
+```
+
+El campo `key` desduplica contribuciones — solo se usa la última contribución con una clave dada.
+
+### `page:fragments`
+
+**Capacidad:** `page:inject`
+
+Inyecta scripts o HTML en las páginas. Solo disponible para plugins confiables (nativos).
+
+```ts
+hooks: {
+  "page:fragments": async (event, ctx) => {
+    return [
+      {
+        kind: "external-script",
+        placement: "body:end",
+        src: "https://analytics.example.com/script.js",
+        async: true,
+      },
+      {
+        kind: "inline-script",
+        placement: "head",
+        code: `window.siteId = "abc123";`,
+      },
+    ];
+  },
+}
+```
+
+#### Tipos de Contribución
+
+```ts
+type PageFragmentContribution =
+	| {
+			kind: "external-script";
+			placement: "head" | "body:start" | "body:end";
+			src: string;
+			async?: boolean;
+			defer?: boolean;
+			attributes?: Record<string, string>;
+			key?: string;
+		}
+	| {
+			kind: "inline-script";
+			placement: "head" | "body:start" | "body:end";
+			code: string;
+			attributes?: Record<string, string>;
+			key?: string;
+		}
+	| {
+			kind: "html";
+			placement: "head" | "body:start" | "body:end";
+			html: string;
+			key?: string;
+		};
+```
+
+## Configuración de Ganchos
+
+Los ganchos aceptan una función manejadora o un objeto de configuración:
+
+```ts
+hooks: {
+  // Simple handler
+  "content:afterSave": async (event, ctx) => { ... },
+
+  // Con configuración
+  "content:beforeSave": {
+    priority: 50,        // Los valores más bajos se ejecutan primero (por defecto: 100)
+    timeout: 10000,      // Tiempo máximo de ejecución en ms (por defecto: 5000)
+    dependencies: [],    // Ejecutar después de estos plugins
+    errorPolicy: "abort", // "continue" o "abort" (por defecto)
+    handler: async (event, ctx) => { ... },
+  },
+}
+```
+
+### Opciones de Configuración
+
+| Opción         | Tipo       | Por Defecto | Descripción                                          |
+| -------------- | ---------- | --------- | ---------------------------------------------------- |
+| `priority`     | `number`   | `100`     | Orden de ejecución (más bajo = más temprano)         |
+| `timeout`      | `number`   | `5000`    | Tiempo máximo de ejecución en milisegundos          |
+| `dependencies` | `string[]` | `[]`      | IDs de plugins que deben ejecutarse primero          |
+| `errorPolicy`  | `string`   | `"abort"` | `"continue"` para ignorar errores                    |
+| `exclusive`    | `boolean`  | `false`   | Solo un plugin puede ser el proveedor activo (para ganchos con patrón de proveedor como `email:deliver`, `comment:moderate`) |
+
+## Contexto del Plugin
+
+Todos los ganchos reciben un objeto de contexto con acceso a las APIs del plugin:
+
+```ts
+interface PluginContext {
+	plugin: { id: string; version: string };
+	storage: PluginStorage;
+	kv: KVAccess;
+	content?: ContentAccess;
+	media?: MediaAccess;
+	http?: HttpAccess;
+	log: LogAccess;
+	site: { name: string; url: string; locale: string };
+	url(path: string): string;
+	users?: UserAccess;
+	cron?: CronAccess;
+	email?: EmailAccess;
+}
+```
+
+Consulta [Resumen de Plugins — Contexto del Plugin](/es/plugins/overview/#plugin-context) para los requisitos de capacidad y detalles de los métodos.
+
+<Aside>
+	Las APIs de contexto están controladas por las capacidades del plugin. Declara las capacidades requeridas en la
+	definición del plugin.
+</Aside>
+
+## Manejo de Errores
+
+Los errores en los ganchos se registran y manejan según la `errorPolicy`:
+
+- `"abort"` (por defecto) — Detiene la ejecución, revierte la transacción si es aplicable
+- `"continue"` — Registra el error y continúa con el siguiente gancho
+
+```ts
+hooks: {
+  "content:beforeSave": {
+    errorPolicy: "continue", // Don't block save if this fails
+    handler: async (event, ctx) => {
+      try {
+        await ctx.http?.fetch("https://api.example.com/validate");
+      } catch (error) {
+        ctx.log.warn("Validation service unavailable", error);
+      }
+    },
+  },
+}
+```
+
+## Orden de Ejecución
+
+Los ganchos se ejecutan en este orden:
+
+1. Ordenados por `priority` (ascendente)
+2. Los plugins con `dependencies` se ejecutan después de sus dependencias
+3. Dentro de la misma prioridad, el orden es determinista pero no especificado
+
+```ts
+// This runs first (priority 10)
+{ priority: 10, handler: ... }
+
+// Esto se ejecuta segundo (prioridad 50)
+{ priority: 50, handler: ... }
+
+// Esto se ejecuta último (prioridad por defecto 100)
+{ handler: ... }
+```

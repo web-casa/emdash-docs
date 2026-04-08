@@ -1,0 +1,363 @@
+---
+title: 小工具区域
+description: 向侧边栏、页脚和其他模板区域添加动态内容块。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+小工具区域是模板中命名的区域，管理员可以在其中放置内容块。可将它们用于侧边栏、页脚栏、推广横幅或任何编辑人员应能控制而无需接触代码的部分。
+
+## 查询小工具区域
+
+使用 `getWidgetArea()` 通过名称获取小工具区域：
+
+```astro title="src/layouts/Base.astro"
+---
+import { getWidgetArea } from "emdash";
+
+const sidebar = await getWidgetArea("sidebar");
+---
+
+{sidebar && sidebar.widgets.length > 0 && (
+  <aside class="sidebar">
+    {sidebar.widgets.map(widget => (
+      <div class="widget">
+        {widget.title && <h3>{widget.title}</h3>}
+        <!-- Render widget content -->
+      </div>
+    ))}
+  </aside>
+)}
+```
+
+如果小工具区域不存在，该函数返回 `null`。
+
+## 小工具区域结构
+
+一个小工具区域包含元数据和一个小工具数组：
+
+```ts
+interface WidgetArea {
+	id: string;
+	name: string; // Unique identifier ("sidebar", "footer-1")
+	label: string; // Display name ("Main Sidebar")
+	description?: string;
+	widgets: Widget[];
+}
+
+interface Widget {
+	id: string;
+	type: "content" | "menu" | "component";
+	title?: string;
+	// Type-specific fields
+	content?: PortableTextBlock[]; // For content widgets
+	menuName?: string; // For menu widgets
+	componentId?: string; // For component widgets
+	componentProps?: Record<string, unknown>;
+}
+```
+
+## 小工具类型
+
+EmDash 支持三种小工具类型：
+
+### 内容小工具
+
+以 Portable Text 格式存储的富文本内容。使用 `PortableText` 组件进行渲染：
+
+```astro
+---
+import { PortableText } from "emdash/ui";
+---
+
+{widget.type === "content" && widget.content && (
+  <div class="widget-content">
+    <PortableText value={widget.content} />
+  </div>
+)}
+```
+
+### 菜单小工具
+
+在小工具区域内显示导航菜单：
+
+```astro
+---
+import { getMenu } from "emdash";
+
+const menu = widget.menuName ? await getMenu(widget.menuName) : null;
+---
+
+{widget.type === "menu" && menu && (
+  <nav class="widget-nav">
+    <ul>
+      {menu.items.map(item => (
+        <li><a href={item.url}>{item.label}</a></li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+### 组件小工具
+
+渲染一个具有可配置属性的已注册组件。EmDash 包含以下核心组件：
+
+| 组件 ID            | 描述               | 属性                                 |
+| ------------------ | ------------------ | ------------------------------------ |
+| `core:recent-posts` | 近期文章列表       | `count`, `showThumbnails`, `showDate` |
+| `core:categories`   | 分类列表           | `showCount`, `hierarchical`           |
+| `core:tags`         | 标签云             | `showCount`, `limit`                  |
+| `core:search`       | 搜索表单           | `placeholder`                         |
+| `core:archives`     | 月度/年度归档      | `type`, `limit`                       |
+
+## 渲染小工具
+
+创建一个可复用的小工具渲染器组件：
+
+```astro title="src/components/WidgetRenderer.astro"
+---
+import { PortableText } from "emdash/ui";
+import { getMenu } from "emdash";
+import type { Widget } from "emdash";
+
+// Import your widget components
+import RecentPosts from "./widgets/RecentPosts.astro";
+import Categories from "./widgets/Categories.astro";
+import TagCloud from "./widgets/TagCloud.astro";
+import SearchForm from "./widgets/SearchForm.astro";
+import Archives from "./widgets/Archives.astro";
+
+interface Props {
+  widget: Widget;
+}
+
+const { widget } = Astro.props;
+
+const componentMap: Record<string, any> = {
+  "core:recent-posts": RecentPosts,
+  "core:categories": Categories,
+  "core:tags": TagCloud,
+  "core:search": SearchForm,
+  "core:archives": Archives,
+};
+
+const menu = widget.type === "menu" && widget.menuName
+  ? await getMenu(widget.menuName)
+  : null;
+---
+
+<div class="widget">
+  {widget.title && <h3 class="widget-title">{widget.title}</h3>}
+
+  {widget.type === "content" && widget.content && (
+    <div class="widget-content">
+      <PortableText value={widget.content} />
+    </div>
+  )}
+
+  {widget.type === "menu" && menu && (
+    <nav class="widget-menu">
+      <ul>
+        {menu.items.map(item => (
+          <li><a href={item.url}>{item.label}</a></li>
+        ))}
+      </ul>
+    </nav>
+  )}
+
+  {widget.type === "component" && widget.componentId && componentMap[widget.componentId] && (
+    <Fragment>
+      {(() => {
+        const Component = componentMap[widget.componentId!];
+        return <Component {...widget.componentProps} />;
+      })()}
+    </Fragment>
+  )}
+</div>
+```
+
+## 小工具组件示例
+
+### 近期文章小工具
+
+```astro title="src/components/widgets/RecentPosts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+interface Props {
+  count?: number;
+  showThumbnails?: boolean;
+  showDate?: boolean;
+}
+
+const { count = 5, showThumbnails = false, showDate = true } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  limit: count,
+  orderBy: { publishedAt: "desc" },
+});
+---
+
+<ul class="recent-posts">
+  {posts.map(post => (
+    <li>
+      {showThumbnails && post.data.featured_image && (
+        <img src={post.data.featured_image} alt="" class="thumbnail" />
+      )}
+      <a href={`/posts/${post.slug}`}>{post.data.title}</a>
+      {showDate && post.data.publishedAt && (
+        <time datetime={post.data.publishedAt.toISOString()}>
+          {post.data.publishedAt.toLocaleDateString()}
+        </time>
+      )}
+    </li>
+  ))}
+</ul>
+```
+
+### 搜索小工具
+
+```astro title="src/components/widgets/SearchForm.astro"
+---
+interface Props {
+  placeholder?: string;
+}
+
+const { placeholder = "Search..." } = Astro.props;
+---
+
+<form action="/search" method="get" class="search-form">
+  <input
+    type="search"
+    name="q"
+    placeholder={placeholder}
+    aria-label="Search"
+  />
+  <button type="submit">Search</button>
+</form>
+```
+
+## 在布局中使用小工具区域
+
+以下示例展示了一个带有侧边栏小工具区域的博客布局：
+
+```astro title="src/layouts/BlogPost.astro"
+---
+import { getWidgetArea } from "emdash";
+import WidgetRenderer from "../components/WidgetRenderer.astro";
+
+const sidebar = await getWidgetArea("sidebar");
+---
+
+<div class="layout">
+  <main class="content">
+    <slot />
+  </main>
+
+  {sidebar && sidebar.widgets.length > 0 && (
+    <aside class="sidebar">
+      {sidebar.widgets.map(widget => (
+        <WidgetRenderer widget={widget} />
+      ))}
+    </aside>
+  )}
+</div>
+
+<style>
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .layout {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+```
+
+## 列出所有小工具区域
+
+使用 `getWidgetAreas()` 检索所有小工具区域及其包含的小工具：
+
+```ts
+import { getWidgetAreas } from "emdash";
+
+const areas = await getWidgetAreas();
+// Returns all areas with widgets populated
+```
+
+## 创建小工具区域
+
+通过管理界面 `/_emdash/admin/widgets` 创建小工具区域，或使用管理 API：
+
+```http
+POST /_emdash/api/widget-areas
+Content-Type: application/json
+
+{
+  "name": "footer-1",
+  "label": "Footer Column 1",
+  "description": "First column in the footer"
+}
+```
+
+添加一个内容小工具：
+
+```http
+POST /_emdash/api/widget-areas/footer-1/widgets
+Content-Type: application/json
+
+{
+  "type": "content",
+  "title": "About Us",
+  "content": [
+    {
+      "_type": "block",
+      "style": "normal",
+      "children": [{ "_type": "span", "text": "Welcome to our site." }]
+    }
+  ]
+}
+```
+
+添加一个组件小工具：
+
+```http
+POST /_emdash/api/widget-areas/sidebar/widgets
+Content-Type: application/json
+
+{
+  "type": "component",
+  "title": "Recent Posts",
+  "componentId": "core:recent-posts",
+  "componentProps": { "count": 5, "showDate": true }
+}
+```
+
+## API 参考
+
+### `getWidgetArea(name)`
+
+通过名称获取一个小工具区域及其所有小工具。
+
+**参数：**
+
+- `name` — 小工具区域的唯一标识符（字符串）
+
+**返回：** `Promise<WidgetArea | null>`
+
+### `getWidgetAreas()`
+
+列出所有小工具区域及其包含的小工具。
+
+**返回：** `Promise<WidgetArea[]>`
+
+### `getWidgetComponents()`
+
+列出管理界面中可用的小工具组件定义。
+
+**返回：** `WidgetComponentDef[]`

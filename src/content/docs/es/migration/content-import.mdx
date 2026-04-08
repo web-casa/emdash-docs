@@ -1,0 +1,427 @@
+---
+title: Importación de Contenido
+description: Importa contenido desde WordPress y otras fuentes a EmDash.
+---
+
+import { Aside, Card, CardGrid, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+El sistema de importación de EmDash utiliza una arquitectura de fuentes conectables. Cada fuente sabe cómo sondear, analizar y obtener contenido de una plataforma específica.
+
+## Fuentes de Importación
+
+| ID de Fuente    | Plataforma              | Sondear | OAuth | Importación Completa |
+| ---------------- | --------------------- | ----- | ----- | ----------- |
+| `wxr`            | Archivo de exportación de WordPress | No    | No    | Sí         |
+| `wordpress-com`  | WordPress.com         | Sí   | Sí   | Sí         |
+| `wordpress-rest` | WordPress auto-alojado | Sí   | No    | Solo sondeo  |
+
+### Carga de Archivo WXR
+
+El método de importación más completo. Carga un archivo de exportación WordPress eXtended RSS (WXR) directamente al panel de administración.
+
+**Capacidades:**
+
+- Todos los tipos de contenido (incluyendo personalizados)
+- Todos los campos meta
+- Borradores y entradas privadas
+- Jerarquía completa de taxonomías
+- Metadatos de archivos adjuntos de medios
+
+**Cómo obtener un archivo WXR:**
+
+<Steps>
+
+1. En el administrador de WordPress, ve a **Herramientas → Exportar**
+2. Selecciona **Todo el contenido** o tipos de contenido específicos
+3. Haz clic en **Descargar archivo de exportación**
+4. Sube el archivo `.xml` a EmDash
+
+</Steps>
+
+### OAuth de WordPress.com
+
+Para sitios alojados en WordPress.com, conéctate vía OAuth para importar sin exportaciones manuales de archivos.
+
+<Steps>
+
+1. Ingresa la URL de tu sitio WordPress.com
+2. Haz clic en **Conectar con WordPress.com**
+3. Autoriza a EmDash en la ventana emergente de WordPress.com
+4. Selecciona el contenido a importar
+
+</Steps>
+
+<Aside type="caution">
+	OAuth de WordPress.com requiere las variables de entorno `WPCOM_CLIENT_ID` y `WPCOM_CLIENT_SECRET`.
+	Registra una aplicación en [developer.wordpress.com](https://developer.wordpress.com/apps/).
+</Aside>
+
+**Qué se incluye:**
+
+- Contenido publicado y en borrador
+- Entradas privadas (con autorización)
+- Archivos de medios vía API
+- Campos personalizados expuestos a la API REST
+
+### Sondear API REST de WordPress
+
+Cuando ingresas una URL, EmDash sondea el sitio para detectar WordPress y mostrar el contenido disponible:
+
+```
+Detectado: WordPress 6.4
+├── Entradas: 127 (publicadas)
+├── Paginas: 12 (publicadas)
+└── Medios: 89 archivos
+
+Nota: Los borradores y contenido privado requieren autenticación
+o una exportación WXR completa.
+```
+
+El sondeo REST es informativo. Para importaciones completas, sugiere cargar un archivo WXR o conectarse vía OAuth (para WordPress.com).
+
+## Flujo de Importación
+
+Todas las fuentes siguen el mismo flujo:
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Conectar   │────▶│  Analizar   │────▶│  Preparar   │────▶│  Ejecutar   │
+│ (sondeo/    │     │ (revisar    │     │  (crear     │     │ (importar   │
+│  carga)     │     │  esquema)   │     │  esquema)   │     │  contenido) │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+```
+
+### Paso 1: Conectar
+
+Ingresa una URL para sondear o carga un archivo directamente.
+
+**El sondeo de URL** ejecuta todas las fuentes registradas en paralelo. La coincidencia con mayor confianza determina la siguiente acción sugerida:
+
+- **Sitio WordPress.com** → Ofrecer conexión OAuth
+- **WordPress auto-alojado** → Mostrar instrucciones de exportación
+- **Desconocido** → Sugerir carga de archivo
+
+### Paso 2: Analizar
+
+La fuente analiza el contenido y verifica la compatibilidad del esquema:
+
+```
+Tipos de contenido:
+├── post (127) → posts [Nueva coleccion]
+├── page (12)  → pages [Existente, compatible]
+├── product (45) → products [Agregar 3 campos]
+└── revision (234) → [Omitir - tipo interno]
+
+Cambios de Esquema Requeridos:
+├── Crear colección: posts
+├── Agregar campos a páginas: featured_image
+└── Crear colección: products
+```
+
+Cada tipo de contenido muestra su estado:
+
+| Estado         | Significado                                  |
+| -------------- | ---------------------------------------- |
+| Listo          | La colección existe con campos compatibles |
+| Nueva colección | Se creará automáticamente            |
+| Agregar campos | La colección existe, se agregarán campos faltantes  |
+| Incompatible   | Conflictos de tipo de campo (se necesita corrección manual) |
+
+### Paso 3: Preparar Esquema
+
+Haz clic en **Crear Esquema e Importar** para:
+
+1. Crear nuevas colecciones vía SchemaRegistry
+2. Agregar campos faltantes con tipos de columna correctos
+3. Configurar tablas de contenido con índices
+
+### Paso 4: Ejecutar Importación
+
+El contenido se importa secuencialmente:
+
+- Gutenberg/HTML convertido a Portable Text
+- Estado de WordPress mapeado al estado de EmDash
+- Autores de WordPress mapeados a propiedad (`authorId`) y líneas de autor de presentación
+- Taxonomías creadas y enlazadas
+- Bloques reutilizables (`wp_block`) importados como [Secciones](/es/guides/sections/)
+- Progreso mostrado en tiempo real
+
+Comportamiento de importación de autores:
+
+- Si un mapeo de autor apunta a un usuario de EmDash, la propiedad se establece en ese usuario y se crea/reutiliza una línea de autor vinculada para el mismo usuario.
+- Si no hay un mapeo de usuario, se crea/reutiliza una línea de autor invitado a partir de la identidad del autor de WordPress.
+- Las entradas importadas obtienen créditos de línea de autor ordenados, con el primer crédito establecido como `primaryBylineId`.
+
+### Paso 5: Importación de Medios (Opcional)
+
+Después del contenido, opcionalmente importa medios:
+
+<Steps>
+
+1. **Análisis** — Muestra recuentos de archivos adjuntos por tipo
+
+	   ```
+	   Medios encontrados:
+	   ├── Imagenes: 75 archivos
+	   ├── Video: 10 archivos
+	   └── Otros: 4 archivos
+	   ```
+
+2. **Descarga** — Transmite desde URLs de WordPress con progreso
+
+	   ```
+	   Importando medios...
+	   ├── 45 de 89 (50%)
+	   ├── Actual: vacation-photo.jpg
+	   └── Estado: Subiendo
+	   ```
+
+3. **Reescribir URLs** — El contenido se actualiza automáticamente con las nuevas URLs
+
+</Steps>
+
+La importación de medios utiliza hash de contenido (xxHash64) para deduplicación. La misma imagen usada en múltiples entradas se almacena una vez.
+
+## Interfaz de Fuente
+
+Las fuentes de importación implementan una interfaz estándar:
+
+```typescript
+interface ImportSource {
+		/** Identificador unico */
+	id: string;
+
+	/** Nombre para mostrar */
+	name: string;
+
+	/** Sondear una URL (opcional) */
+	probe?(url: string): Promise<SourceProbeResult | null>;
+
+	/** Analizar contenido de esta fuente */
+	analyze(input: SourceInput, context: ImportContext): Promise<ImportAnalysis>;
+
+	/** Transmitir elementos de contenido */
+	fetchContent(input: SourceInput, options: FetchOptions): AsyncGenerator<NormalizedItem>;
+}
+```
+
+### Tipos de Entrada
+
+Las fuentes aceptan diferentes tipos de entrada:
+
+```typescript
+// Carga de archivo (WXR)
+{ type: "file", file: File }
+
+// URL con token opcional (API REST)
+{ type: "url", url: string, token?: string }
+
+// Conexión OAuth (WordPress.com)
+{ type: "oauth", url: string, accessToken: string }
+```
+
+### Salida Normalizada
+
+Todas las fuentes producen el mismo formato normalizado:
+
+```typescript
+interface NormalizedItem {
+	sourceId: string | number;
+	postType: string;
+	status: "publish" | "draft" | "pending" | "private" | "future";
+	slug: string;
+	title: string;
+	content: PortableTextBlock[];
+	excerpt?: string;
+	date: Date;
+	author?: string;
+	authors?: string[];
+	categories?: string[];
+	tags?: string[];
+	meta?: Record<string, unknown>;
+	featuredImage?: string;
+}
+```
+
+## Endpoints de la API
+
+El sistema de importación expone estos endpoints:
+
+### Sondear URL
+
+```http
+POST /_emdash/api/import/probe
+Content-Type: application/json
+
+{ "url": "https://example.com" }
+```
+
+Devuelve la plataforma detectada y la acción sugerida.
+
+### Analizar WXR
+
+```http
+POST /_emdash/api/import/wordpress/analyze
+Content-Type: multipart/form-data
+
+file: [WordPress export .xml]
+```
+
+Devuelve el análisis de tipos de contenido con compatibilidad de esquema.
+
+### Preparar Esquema
+
+```http
+POST /_emdash/api/import/wordpress/prepare
+Content-Type: application/json
+
+{
+  "postTypes": [
+    { "name": "post", "collection": "posts", "enabled": true }
+  ]
+}
+```
+
+Crea colecciones y campos.
+
+### Ejecutar Importación
+
+```http
+POST /_emdash/api/import/wordpress/execute
+Content-Type: multipart/form-data
+
+file: [WordPress export .xml]
+config: { "postTypeMappings": { "post": { "collection": "posts" } } }
+```
+
+Importa contenido a las colecciones especificadas.
+
+### Importar Medios
+
+```http
+POST /_emdash/api/import/wordpress/media
+Content-Type: application/json
+
+{
+  "attachments": [{ "id": 123, "url": "https://..." }],
+  "stream": true
+}
+```
+
+Transmite actualizaciones de progreso NDJSON durante la descarga/carga.
+
+### Reescribir URLs
+
+```http
+POST /_emdash/api/import/wordpress/rewrite-urls
+Content-Type: application/json
+
+{
+  "urlMap": { "https://old.com/image.jpg": "/_emdash/media/abc123" }
+}
+```
+
+Actualiza el contenido Portable Text con las nuevas URLs de medios.
+
+## Manejo de Errores
+
+### Errores Recuperables
+
+- **Tiempo de espera de red** — Reintentado con retroceso
+- **Error de análisis de un solo elemento** — Registrado, omitido, la importación continúa
+- **Error de descarga de medios** — Marcado para manejo manual
+
+### Errores Fatales
+
+- **Formato de archivo inválido** — La importación se detiene con mensaje de error
+- **Conexión a base de datos perdida** — La importación se pausa, permite reanudar
+- **Cuota de almacenamiento excedida** — La importación se detiene, muestra el uso
+
+### Informe de Errores
+
+Después de la importación:
+
+```
+Importacion completada
+
+✓ 125 publicaciones importadas
+✓ 12 páginas importadas
+✓ 85 referencias de medios registradas
+
+⚠ 2 elementos tuvieron advertencias:
+  - Publicación "Special Characters ñ" - codificación del título corregida
+  - Pagina "Acerca de" - slug duplicado renombrado a "about-1"
+
+✗ 1 elemento falló:
+  - ID de publicación 456 - error de análisis de contenido (guardado como borrador)
+```
+
+Los elementos fallidos se guardan como borradores con el contenido original en `_importError` para revisión.
+
+## Crear fuentes personalizadas
+
+Crea una fuente para otras plataformas:
+
+```typescript title="src/import/custom-source.ts"
+import type { ImportSource } from "emdash/import";
+
+export const mySource: ImportSource = {
+	id: "my-platform",
+	name: "Mi plataforma",
+	description: "Importa desde Mi plataforma",
+	icon: "globe",
+	canProbe: true,
+
+	async probe(url) {
+		// Comprueba si la URL coincide con tu plataforma
+		const response = await fetch(`${url}/api/info`);
+		if (!response.ok) return null;
+
+		return {
+			sourceId: "my-platform",
+			confidence: "definite",
+			detected: { platform: "my-platform" },
+			// ...
+		};
+	},
+
+	async analyze(input, context) {
+		// Analiza y procesa el contenido
+		// Devuelve un ImportAnalysis
+	},
+
+	async *fetchContent(input, options) {
+		// Emite un NormalizedItem por cada pieza de contenido
+		for (const item of items) {
+			yield {
+				sourceId: item.id,
+				postType: "post",
+				title: item.title,
+				content: convertToPortableText(item.body),
+				// ...
+			};
+		}
+	},
+};
+```
+
+Registra la fuente en tu configuración de EmDash:
+
+```typescript title="astro.config.mjs"
+import { mySource } from "../../migration/src/import/custom-source";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			import: {
+				sources: [mySource],
+			},
+		}),
+	],
+});
+```
+
+## Próximos Pasos
+
+- **[Migrar desde WordPress](/es/migration/from-wordpress/)** — Guía completa de migración desde WordPress
+- **[Migración de plugins](/es/migration/porting-plugins/)** — Llevar plugins de WordPress a EmDash

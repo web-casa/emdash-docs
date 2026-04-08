@@ -1,0 +1,337 @@
+---
+title: 미리보기 모드
+description: 게시 전 초안 콘텐츠의 안전한 미리보기를 활성화합니다.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash의 미리보기 시스템을 통해 편집자는 안전하고 시간 제한이 있는 URL을 통해 게시되지 않은 콘텐츠를 볼 수 있습니다. 미리보기 링크는 HMAC-SHA256 서명된 토큰을 사용하며, 전체 초안 콘텐츠를 노출하지 않고 검토자와 공유할 수 있습니다.
+
+## 작동 방식
+
+1. 관리자가 초안 게시물에 대한 미리보기 URL을 생성합니다.
+2. URL에는 만료 시간이 포함된 서명된 `_preview` 쿼리 매개변수가 포함됩니다.
+3. EmDash의 미들웨어가 토큰을 자동으로 검증하고 요청 컨텍스트를 설정합니다.
+4. 템플릿 코드가 평소처럼 `getEmDashEntry()`를 호출하면 초안 콘텐츠가 자동으로 제공됩니다.
+
+미리보기는 **암시적**입니다. 템플릿 코드는 토큰을 처리하거나 미리보기 옵션을 전달할 필요가 없습니다. 미들웨어와 쿼리 함수가 `AsyncLocalStorage`를 통해 모든 것을 처리합니다.
+
+## 미리보기 설정
+
+환경 변수에 미리보기 비밀 키를 추가하세요:
+
+```bash title=".env"
+EMDASH_PREVIEW_SECRET="your-random-secret-key-here"
+```
+
+안전한 임의 문자열을 생성하세요. 이 비밀 키는 미리보기 토큰에 서명하고 검증하는 데 사용됩니다.
+
+이것으로 끝입니다. 기존 템플릿이 미리보기와 자동으로 작동합니다:
+
+```
+astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+
+// 특별한 미리보기 처리가 필요하지 않습니다 — 미들웨어가
+// _preview 토큰을 감지하고 초안 콘텐츠를 자동으로 제공합니다
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+{isPreview && (
+  <div class="preview-banner">
+    You are viewing a preview. This content is not published.
+  </div>
+)}
+
+<article>
+  <h1>{entry.data.title}</h1>
+</article>
+```
+
+`isPreview` 플래그는 유효한 미리보기 토큰을 통해 초안 콘텐츠가 제공될 때 `true`입니다.
+
+## 미리보기 URL 생성
+
+미리보기 링크를 생성하려면 `getPreviewUrl()`을 사용하세요:
+
+```ts
+import { getPreviewUrl } from "emdash";
+
+const previewUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	expiresIn: "1h",
+});
+// 반환값: /posts/my-draft-post?_preview=eyJjaWQ...
+```
+
+절대 링크를 위한 기본 URL과 함께:
+
+```ts
+const fullUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	baseUrl: "https://example.com",
+});
+// Returns: https://example.com/posts/my-draft-post?_preview=eyJjaWQ...
+```
+
+사용자 정의 경로 패턴과 함께:
+
+```ts
+const blogUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	pathPattern: "/blog/{id}",
+});
+// Returns: /blog/my-draft-post?_preview=eyJjaWQ...
+```
+
+## 토큰 만료
+
+미리보기 링크가 유효한 기간을 제어하세요:
+
+```ts
+// Valid for 1 hour (default)
+await getPreviewUrl({ ..., expiresIn: "1h" });
+
+// 30분 동안 유효
+await getPreviewUrl({ ..., expiresIn: "30m" });
+
+// 1일 동안 유효
+await getPreviewUrl({ ..., expiresIn: "1d" });
+
+// 2주 동안 유효
+await getPreviewUrl({ ..., expiresIn: "2w" });
+
+// 3600초 동안 유효
+await getPreviewUrl({ ..., expiresIn: 3600 });
+```
+
+지원되는 단위: `s` (초), `m` (분), `h` (시간), `d` (일), `w` (주).
+
+## 토큰 검증
+
+들어오는 미리보기 요청을 검증하려면 `verifyPreviewToken()`을 사용하세요:
+
+```ts
+import { verifyPreviewToken } from "emdash";
+
+// URL에서 (_preview 쿼리 매개변수 추출)
+const result = await verifyPreviewToken({
+	url: Astro.url,
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+});
+
+// 또는 토큰을 직접 사용하여
+const result = await verifyPreviewToken({
+	token: someTokenString,
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+});
+```
+
+결과는 토큰이 유효한지 여부를 나타냅니다:
+
+```ts
+if (result.valid) {
+	// Token is valid
+	console.log(result.payload.cid); // "posts:my-draft-post"
+	console.log(result.payload.exp); // Expiry timestamp
+	console.log(result.payload.iat); // Issued-at timestamp
+} else {
+	// Token is invalid
+	console.log(result.error);
+	// "none" - no token present
+	// "malformed" - token structure is invalid
+	// "invalid" - signature verification failed
+	// "expired" - token has expired
+}
+```
+
+## 미리보기 표시기
+
+콘텐츠가 미리보기 중일 때 시각적 표시기를 보여줄 수 있습니다. `getEmDashEntry`가 반환하는 `isPreview` 플래그는 초안 콘텐츠가 제공될 때를 알려줍니다:
+
+```astro
+{isPreview && (
+  <div class="preview-banner" role="alert">
+    <strong>Preview</strong>
+ — You are viewing unpublished content.
+    <a href={Astro.url.pathname}>Exit preview</a>
+  </div>
+)}
+```
+
+<Aside type="tip">
+	시각적 편집을 사용하는 인증된 편집자의 경우, EmDash는 편집/미리보기 모드를 나타내는
+	플로팅 툴바를 자동으로 주입합니다. 공유된 미리보기 링크에 대해서만 사용자 정의 미리보기 배너가 필요합니다.
+</Aside>
+
+## 도우미 함수
+
+### `isPreviewRequest(url)`
+
+URL에 미리보기 토큰이 포함되어 있는지 확인하세요:
+
+```ts
+import { isPreviewRequest } from "emdash";
+
+if (isPreviewRequest(Astro.url)) {
+	// Handle preview request
+}
+```
+
+### `getPreviewToken(url)`
+
+URL에서 토큰 문자열을 추출하세요:
+
+```ts
+import { getPreviewToken } from "emdash";
+
+const token = getPreviewToken(Astro.url);
+// 토큰 문자열 또는 null을 반환합니다.
+```
+
+### `parseContentId(contentId)`
+
+콘텐츠 ID를 컬렉션과 ID로 파싱하세요:
+
+```ts
+import { parseContentId } from "emdash";
+
+const { collection, id } = parseContentId("posts:my-draft-post");
+// { collection: "posts", id: "my-draft-post" }
+```
+
+## 토큰 형식
+
+미리보기 토큰은 간결한 형식을 사용합니다: `base64url(payload).base64url(signature)`
+
+페이로드에는 다음이 포함됩니다:
+
+- `cid` — `collection:id` 형식의 콘텐츠 ID
+- `exp` — 만료 타임스탬프 (에포크 이후 초 단위)
+- `iat` — 발행 타임스탬프 (에포크 이후 초 단위)
+
+토큰은 미리보기 비밀 키를 사용하여 HMAC-SHA256으로 서명됩니다.
+
+<Aside type="caution">
+	`EMDASH_PREVIEW_SECRET`을 안전하게 보관하세요. 이 비밀 키를 가진 사람은
+	어떤 콘텐츠에 대해서도 유효한 미리보기 토큰을 생성할 수 있습니다.
+</Aside>
+
+## 완전한 예제
+
+미리보기 및 시각적 편집 지원이 포함된 전체 블로그 게시물 페이지:
+
+```
+astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import BaseLayout from "../../../layouts/Base.astro";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+
+// 미리보기는 자동입니다 — 미들웨어가 토큰 검증을 처리합니다.
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+<BaseLayout title={entry.data.title}>
+  {isPreview && (
+    <div class="preview-banner" role="alert">
+      <strong>Preview</strong>
+ — This content is not published.
+    </div>
+  )}
+
+  <article {...entry.edit}>
+    <header>
+      <h1 {...entry.edit.title}>{entry.data.title}</h1>
+      {entry.data.publishedAt && (
+        <time datetime={entry.data.publishedAt.toISOString()}>
+          {entry.data.publishedAt.toLocaleDateString()}
+        </time>
+      )}
+      {isPreview && !entry.data.publishedAt && (
+        <span class="draft-indicator">Draft</span>
+      )}
+    </header>
+
+    <div class="content" {...entry.edit.content}>
+      <PortableText value={entry.data.content} />
+    </div>
+  </article>
+</BaseLayout>
+```
+
+`{...entry.edit}` 및 `{...entry.edit.title}` 스프레드 연산자에 주목하세요 — 이들은 인증된 편집자를 위한 시각적 편집을 가능하게 하는 `data-emdash-ref` 속성을 추가합니다. 프로덕션에서는 출력을 생성하지 않습니다.
+
+## API 참조
+
+### `getPreviewUrl(options)`
+
+서명된 토큰이 포함된 미리보기 URL을 생성합니다.
+
+**옵션:**
+
+- `collection` — 컬렉션 슬러그 (문자열)
+- `id` — 콘텐츠 ID 또는 슬러그 (문자열)
+- `secret` — 서명 비밀 키 (문자열)
+- `expiresIn` — 토큰 유효 기간 (기본값: `"1h"`)
+- `baseUrl` — 절대 링크를 위한 선택적 기본 URL
+- `pathPattern` — `{collection}` 및 `{id}` 자리 표시자가 있는 URL 패턴 (기본값: `"/{collection}/{id}"`)
+
+**반환값:** `Promise<string>`
+
+### `verifyPreviewToken(options)`
+
+미리보기 토큰을 검증합니다.
+
+**옵션:**
+
+- `secret` — 검증 비밀 키 (문자열)
+- `url` — 토큰을 추출할 URL, 또는
+- `token` — 직접 토큰 문자열
+
+**반환값:** `Promise<VerifyPreviewTokenResult>`
+
+```ts
+type VerifyPreviewTokenResult =
+	| { valid: true; payload: PreviewTokenPayload }
+	| { valid: false; error: "invalid" | "expired" | "malformed" | "none" };
+```
+
+### `generatePreviewToken(options)`
+
+URL을 구축하지 않고 토큰을 생성합니다.
+
+**옵션:**
+
+- `contentId` — `collection:id` 형식의 콘텐츠 ID
+- `expiresIn` — 토큰 유효 기간 (기본값: `"1h"`)
+- `secret` — 서명 비밀 키
+
+**반환값:** `Promise<string>`

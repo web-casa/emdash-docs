@@ -1,0 +1,106 @@
+---
+title: 为什么在 Astro 项目中选择 EmDash？
+description: 了解 EmDash 作为 Astro CMS 的差异点，包括类型安全内容、单体部署体验，以及更接近 WordPress 的编辑工作流。
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+EmDash 是一个专为 Astro 打造的原生 CMS。它把传统 CMS 的内容编辑体验，与现代 Web 开发中的类型安全、组件化和灵活部署结合在一起。
+
+## EmDash 有何不同
+
+### 专为 Astro 构建的架构
+
+EmDash 是专门为 Astro 构建的，而非从通用 CMS 改造而来。内容与您的站点部署在同一环境中，通过 Astro 的 Live Content Collections 进行查询。无需单独的服务、无需 API 往返、无需 Webhook 同步。
+
+### 熟悉的内容模型
+
+如果您使用过 WordPress，EmDash 的概念会让您感到熟悉：集合（类似于文章类型）、分类法、菜单、小部件区域和媒体库。心智模型是相通的——但实现使用了现代工具。
+
+### 框架深度集成
+
+EmDash 是为 Astro 量身打造的。这种深度集成让它可以提供类型安全的查询、组件级缓存和内置预览能力。
+
+## 核心能力
+
+<CardGrid>
+	<Card title="单一部署" icon="rocket">
+		内容和前端一同部署。一个代码库，一次部署，一个系统管理。
+	</Card>
+	<Card title="类型安全" icon="approve-check">
+		模式定义在数据库中。TypeScript 类型从数据库流向模板，提供完整的自动补全。
+	</Card>
+	<Card title="实时更新" icon="star">
+		基于 Astro 的 Live Content Collections 构建。内容更改即时生效——无需重新构建。
+	</Card>
+	<Card title="云平台可移植" icon="setting">
+		可在 Cloudflare Workers（使用 D1 和 R2）上运行，也兼容 Node.js、SQLite 以及任何 S3 兼容的存储。
+	</Card>
+</CardGrid>
+
+## 与其他方案对比
+
+不同的 CMS 方法适用于不同的需求：
+
+| 方面                | 传统 CMS        | 无头 CMS        | EmDash              |
+| ------------------- | ---------------- | --------------- | --------------------- |
+| **架构**            | 单体式           | 解耦式          | 与 Astro 集成         |
+| **内容编辑**        | 内置管理面板     | 内置管理面板    | 内置管理面板          |
+| **前端**            | 主题/模板        | 自备前端        | Astro 组件            |
+| **部署**            | 单一服务器       | CMS + 前端分离  | 单一部署              |
+| **类型安全**        | 运行时           | API 类型        | 完整的 TypeScript     |
+| **内容更新**        | 即时             | Webhook/重建    | 即时 (SSR)            |
+| **插件模型**        | 同进程           | API 扩展        | 基于钩子的沙盒化插件  |
+
+## Cloudflare 部署
+
+EmDash 可以在任何支持 SQLite 和 S3 兼容存储的平台上运行。它还支持 Cloudflare 的特定功能：
+
+- **D1** — 边缘的 SQLite，具备自动复制功能
+- **R2** — S3 兼容存储，无出口费用
+- **Workers** — 全球部署，冷启动速度快
+
+## 插件迁移
+
+EmDash 提供了工具来帮助迁移 WordPress 插件功能：
+
+- **概念映射** — WordPress 的钩子、过滤器和 API 可映射到 EmDash 的等效功能
+- **迁移指南** — 用于移植特定插件模式的文档
+- **AI 辅助移植** — 文档结构有助于 AI 工具根据 WordPress 插件代码生成 EmDash 插件
+
+复杂的插件仍然需要人工审查，但对于简单的插件，迁移指南可以大大减少移植工作量。
+
+## 何时使用 EmDash
+
+**EmDash 专为以下场景设计：**
+
+- 需要 CMS 的新 Astro 项目
+- 希望使用现代工具的 WordPress 迁移项目
+- 内容编辑人员不应接触代码的站点
+- 部署到 Cloudflare 的项目
+- 重视类型安全和开发者体验的站点
+
+**EmDash 可能不适合：**
+
+- 非 Astro 项目（它与 Astro 紧密耦合）
+- 电子商务（尚不具备 WooCommerce 级别的功能）
+- 您对现有无头架构感到满意
+- 需要 WordPress 特定插件生态系统的项目
+
+## 开始使用
+
+<CardGrid>
+	<Card title="快速开始" icon="rocket">
+		[创建您的第一个站点](/zh-cn/getting-started/)，用时不到 5 分钟。
+	</Card>
+	<Card title="迁移指南" icon="right-arrow">
+		通过内容导入和概念映射，[从 WordPress 迁移](/zh-cn/migration/from-wordpress/)。
+	</Card>
+</CardGrid>
+
+## 延伸阅读
+
+- [什么是 EmDash？](/zh-cn/what-is-emdash/)
+- [Astro CMS 该怎么选？](/zh-cn/best-astro-cms/)
+- [EmDash 与 WordPress 对比](/zh-cn/emdash-vs-wordpress/)

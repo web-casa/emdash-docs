@@ -1,0 +1,324 @@
+---
+title: 站点设置
+description: 配置全局设置，如站点标题、徽标和社交链接。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+站点设置是您网站的全局配置值：标题、标语、徽标、社交链接和显示偏好。管理员通过管理界面管理这些设置，您可以在模板中访问它们。
+
+## 查询设置
+
+使用 `getSiteSettings()` 获取所有站点设置：
+
+```astro title="src/layouts/Base.astro"
+---
+import { getSiteSettings } from "emdash";
+
+const settings = await getSiteSettings();
+---
+
+<html lang="en">
+  <head>
+    <title>{settings.title}</title>
+    {settings.favicon && (
+      <link rel="icon" href={settings.favicon.url} />
+    )}
+  </head>
+  <body>
+    <header>
+      {settings.logo ? (
+        <img src={settings.logo.url} alt={settings.logo.alt || settings.title} />
+      ) : (
+        <span class="site-title">{settings.title}</span>
+      )}
+      {settings.tagline && <p class="tagline">{settings.tagline}</p>}
+    </header>
+    <slot />
+  </body>
+</html>
+```
+
+## 可用设置
+
+EmDash 提供以下核心设置：
+
+```ts
+interface SiteSettings {
+	// Identity
+	title: string;
+	tagline?: string;
+	logo?: MediaReference;
+	favicon?: MediaReference;
+
+	// URLs
+	url?: string;
+
+	// Display
+	postsPerPage: number;
+	dateFormat: string;
+	timezone: string;
+
+	// Social
+	social?: {
+		twitter?: string;
+		github?: string;
+		facebook?: string;
+		instagram?: string;
+		linkedin?: string;
+		youtube?: string;
+	};
+}
+
+interface MediaReference {
+	mediaId: string;
+	alt?: string;
+	url?: string; // Resolved URL (read-only)
+}
+```
+
+## 获取单个设置
+
+使用 `getSiteSetting()` 通过键名获取单个设置：
+
+```ts
+import { getSiteSetting } from "emdash";
+
+const title = await getSiteSetting("title");
+// Returns: "My Site" or undefined
+
+const logo = await getSiteSetting("logo");
+// Returns: { mediaId: "...", url: "/_emdash/api/media/file/..." }
+```
+
+当您只需要一两个值并希望避免获取所有内容时，这很有用。
+
+## 在组件中使用设置
+
+### 站点页眉
+
+```astro title="src/components/Header.astro"
+---
+import { getSiteSettings, getMenu } from "emdash";
+
+const settings = await getSiteSettings();
+const menu = await getMenu("primary");
+---
+
+<header class="header">
+  <a href="/" class="logo">
+    {settings.logo ? (
+      <img
+        src={settings.logo.url}
+        alt={settings.logo.alt || settings.title}
+        width="150"
+        height="50"
+      />
+    ) : (
+      <span class="site-name">{settings.title}</span>
+    )}
+  </a>
+
+  {menu && (
+    <nav>
+      {menu.items.map(item => (
+        <a href={item.url}>{item.label}</a>
+      ))}
+    </nav>
+  )}
+</header>
+```
+
+### 社交链接
+
+```astro title="src/components/SocialLinks.astro"
+---
+import { getSiteSetting } from "emdash";
+
+const social = await getSiteSetting("social");
+
+const platforms = [
+  { key: "twitter", label: "Twitter", baseUrl: "https://twitter.com/" },
+  { key: "github", label: "GitHub", baseUrl: "https://github.com/" },
+  { key: "facebook", label: "Facebook", baseUrl: "https://facebook.com/" },
+  { key: "instagram", label: "Instagram", baseUrl: "https://instagram.com/" },
+  { key: "linkedin", label: "LinkedIn", baseUrl: "https://linkedin.com/in/" },
+  { key: "youtube", label: "YouTube", baseUrl: "https://youtube.com/@" },
+] as const;
+---
+
+{social && (
+  <div class="social-links">
+    {platforms.map(({ key, label, baseUrl }) => (
+      social[key] && (
+        <a
+          href={baseUrl + social[key]}
+          rel="noopener noreferrer"
+          target="_blank"
+          aria-label={label}
+        >
+          {label}
+        </a>
+      )
+    ))}
+  </div>
+)}
+```
+
+### SEO 元标签
+
+```astro title="src/components/SEO.astro"
+---
+import { getSiteSettings } from "emdash";
+
+interface Props {
+  title?: string;
+  description?: string;
+  image?: string;
+}
+
+const settings = await getSiteSettings();
+const {
+  title,
+  description = settings.tagline,
+  image,
+} = Astro.props;
+
+const pageTitle = title
+  ? `${title} | ${settings.title}`
+  : settings.title;
+---
+
+<title>{pageTitle}</title>
+{description && <meta name="description" content={description} />}
+
+<!-- Open Graph -->
+<meta property="og:title" content={pageTitle} />
+{description && <meta property="og:description" content={description} />}
+{image && <meta property="og:image" content={image} />}
+{settings.url && <meta property="og:url" content={settings.url + Astro.url.pathname} />}
+
+<!-- Twitter -->
+{settings.social?.twitter && (
+  <meta name="twitter:site" content={settings.social.twitter} />
+)}
+<meta name="twitter:card" content={image ? "summary_large_image" : "summary"} />
+```
+
+## 日期格式化
+
+使用 `dateFormat` 和 `timezone` 设置来保持日期显示的一致性：
+
+```astro title="src/components/PostDate.astro"
+---
+import { getSiteSetting } from "emdash";
+
+interface Props {
+  date: string;
+}
+
+const { date } = Astro.props;
+const dateFormat = await getSiteSetting("dateFormat") || "MMMM d, yyyy";
+const timezone = await getSiteSetting("timezone") || "UTC";
+
+// Format using Intl.DateTimeFormat or a library like date-fns
+const formatted = new Intl.DateTimeFormat("en-US", {
+  timeZone: timezone,
+  dateStyle: "long",
+}).format(new Date(date));
+---
+
+<time datetime={date}>{formatted}</time>
+```
+
+<Aside>
+	`dateFormat` 设置使用模式字符串（例如 "MMMM d, yyyy"）。您可能需要像 `date-fns` 这样的库来解析和应用这些模式。
+</Aside>
+
+## 管理 API
+
+以编程方式获取设置：
+
+```http
+GET /_emdash/api/settings
+```
+
+响应：
+
+```json
+{
+	"title": "My EmDash Site",
+	"tagline": "A modern CMS",
+	"logo": {
+		"mediaId": "med_123",
+		"url": "/_emdash/api/media/file/abc123"
+	},
+	"postsPerPage": 10,
+	"dateFormat": "MMMM d, yyyy",
+	"timezone": "America/New_York",
+	"social": {
+		"twitter": "@handle",
+		"github": "username"
+	}
+}
+```
+
+更新设置（支持部分更新）：
+
+```http
+POST /_emdash/api/settings
+Content-Type: application/json
+
+{
+  "title": "New Site Title",
+  "tagline": "Updated tagline"
+}
+```
+
+只有提供的字段会被更改。省略的字段保留其当前值。
+
+## 媒体引用
+
+`logo` 和 `favicon` 设置存储媒体引用。当您读取它们时，EmDash 会自动解析 `url` 属性：
+
+```ts
+const logo = await getSiteSetting("logo");
+// {
+//   mediaId: "med_123",
+//   alt: "Site logo",
+//   url: "/_emdash/api/media/file/abc123"
+// }
+```
+
+通过 API 更新时，只需提供 `mediaId`：
+
+```json
+{
+	"logo": {
+		"mediaId": "med_456",
+		"alt": "New logo"
+	}
+}
+```
+
+## API 参考
+
+### `getSiteSettings()`
+
+获取所有站点设置，并解析媒体 URL。
+
+**返回：** `Promise<Partial<SiteSettings>>`
+
+返回一个部分对象。未设置的值是 `undefined`。
+
+### `getSiteSetting(key)`
+
+通过键名获取单个设置。
+
+**参数：**
+
+- `key` — 设置键名（例如 `"title"`、`"logo"`、`"social"`）
+
+**返回：** `Promise<SiteSettings[K] | undefined>`
+
+类型安全：返回类型与您请求的键名匹配。

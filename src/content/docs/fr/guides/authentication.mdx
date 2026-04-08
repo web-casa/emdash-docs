@@ -1,0 +1,349 @@
+---
+title: Authentification
+description: Authentification prioritaire par clé d'accès pour votre site EmDash.
+---
+
+import { Aside, Steps, Tabs, TabItem, Code } from "@astrojs/starlight/components";
+
+EmDash utilise l'authentification par clé d'accès comme méthode de connexion principale. Les clés d'accès sont résistantes au phishing, ne nécessitent pas de mots de passe et fonctionnent sur tous les appareils via votre navigateur ou gestionnaire de mots de passe.
+
+Pour les déploiements sur Cloudflare, vous pouvez optionnellement utiliser [Cloudflare Access](#cloudflare-access) comme fournisseur d'authentification alternatif.
+
+## Fonctionnement
+
+Les clés d'accès utilisent WebAuthn, une norme web qui crée des identifiants à clé publique stockés sur votre appareil ou synchronisés via votre gestionnaire de mots de passe. Lorsque vous vous connectez, votre appareil prouve la possession de l'identifiant sans jamais envoyer de mot de passe sur le réseau.
+
+Avantages de l'authentification par clé d'accès :
+
+- **Aucun mot de passe à mémoriser ou à fuiter**
+- **Résistant au phishing** — les identifiants sont liés au domaine de votre site
+- **Synchronisation multi-appareils** — fonctionne avec iCloud Keychain, Google Password Manager, 1Password, etc.
+- **Connexion rapide** — un simple appui avec biométrie ou code PIN
+
+## Configuration du premier utilisateur
+
+La première fois que vous accédez au panneau d'administration, l'Assistant de Configuration vous guide dans la création de votre compte administrateur.
+
+<Steps>
+
+1. Accédez à `http://localhost:4321/_emdash/admin`
+
+2. Vous serez redirigé vers l'Assistant de Configuration. Saisissez :
+   - **Titre du site** — Le nom de votre site
+   - **Slogan** — Une courte description
+   - **Email administrateur** — Votre adresse email
+
+3. Cliquez sur **Créer le site** pour enregistrer votre clé d'accès
+
+4. Votre navigateur vous invitera à créer une clé d'accès :
+   - Sur macOS : Touch ID, mot de passe de l'appareil ou clé de sécurité
+   - Sur Windows : Windows Hello ou clé de sécurité
+   - Sur mobile : Face ID, empreinte digitale ou code PIN
+
+5. Une fois votre clé d'accès enregistrée, vous êtes connecté et redirigé vers le tableau de bord d'administration.
+
+</Steps>
+
+<Aside>
+	Votre email est stocké mais non vérifié lors de la configuration initiale. Vous pouvez configurer l'email plus tard pour
+	activer des fonctionnalités comme les invitations et la connexion par lien magique.
+</Aside>
+
+## Connexion
+
+Après la configuration, le retour au panneau d'administration déclenche l'authentification par clé d'accès :
+
+<Steps>
+
+1. Visitez `/_emdash/admin`
+
+2. Si vous n'êtes pas connecté, vous verrez la page de connexion
+
+3. Cliquez sur **Se connecter** pour vous authentifier
+
+4. Votre navigateur demande votre clé d'accès (biométrie, code PIN ou clé de sécurité)
+
+5. Après vérification, vous êtes redirigé vers le tableau de bord d'administration
+
+</Steps>
+
+## Solution de secours par lien magique
+
+Si vous ne pouvez pas utiliser votre clé d'accès (par exemple, appareil perdu), les liens magiques offrent une alternative. Cela nécessite que l'email soit configuré.
+
+<Steps>
+
+1. Sur la page de connexion, cliquez sur **Se connecter par email**
+
+2. Saisissez votre adresse email
+
+3. Vérifiez votre boîte de réception pour un lien de connexion
+
+4. Cliquez sur le lien pour vous authentifier (valable 15 minutes)
+
+</Steps>
+
+<Aside type="caution">
+	Les liens magiques sont à usage unique et expirent après 15 minutes. Demandez un nouveau lien si le vôtre a expiré.
+</Aside>
+
+## Connexion OAuth
+
+EmDash prend en charge la connexion OAuth avec GitHub et Google lorsqu'ils sont configurés. Les utilisateurs peuvent lier leurs comptes après la configuration initiale par clé d'accès.
+
+Voir le [guide de configuration](/fr/reference/configuration#oauth) pour les instructions d'installation.
+
+## Rôles utilisateurs
+
+EmDash utilise un contrôle d'accès basé sur les rôles avec cinq niveaux :
+
+| Rôle        | Niveau | Description                     |
+| ----------- | ----- | ------------------------------- |
+| Abonné      | 10    | Accès en lecture seule          |
+| Contributeur | 20    | Créer du contenu (nécessite approbation) |
+| Auteur      | 30    | Créer/modifier/publier son propre contenu |
+| Éditeur     | 40    | Gérer tout le contenu           |
+| Administrateur | 50    | Accès complet incluant les paramètres  |
+
+Chaque rôle hérite des permissions de tous les niveaux inférieurs. Le premier utilisateur est toujours créé en tant qu'Administrateur.
+
+## Inviter des utilisateurs
+
+Les administrateurs peuvent inviter de nouveaux utilisateurs via le panneau d'administration :
+
+<Steps>
+
+1. Allez dans **Paramètres** > **Utilisateurs**
+
+2. Cliquez sur **Inviter un utilisateur**
+
+3. Saisissez l'email de l'utilisateur et sélectionnez un rôle
+
+4. Cliquez sur **Envoyer l'invitation**
+
+5. L'utilisateur reçoit un email avec un lien d'invitation
+
+6. Il clique sur le lien et enregistre sa clé d'accès
+
+</Steps>
+
+Les invitations sont valables 7 jours. Les administrateurs peuvent renvoyer ou révoquer les invitations depuis la page Utilisateurs.
+
+## Gérer les clés d'accès
+
+Les utilisateurs peuvent gérer leurs clés d'accès depuis les paramètres du compte :
+
+- **Ajouter une clé d'accès** — Enregistrer des clés d'accès supplémentaires pour sauvegarde ou autres appareils
+- **Supprimer une clé d'accès** — Supprimer les clés d'accès que vous n'utilisez plus
+- **Renommer une clé d'accès** — Donner des noms descriptifs aux clés d'accès
+
+Chaque utilisateur peut avoir jusqu'à 10 clés d'accès enregistrées.
+
+<Aside type="tip">
+	Enregistrez des clés d'accès sur plusieurs appareils (par exemple, ordinateur portable et téléphone) pour vous assurer d'avoir toujours un moyen de
+	vous connecter.
+</Aside>
+
+## Inscription autonome
+
+Pour les sites d'équipe, vous pouvez activer l'inscription autonome pour des domaines email spécifiques :
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			auth: {
+				selfSignup: {
+					domains: ["example.com"],
+					defaultRole: "contributor",
+				},
+			},
+		}),
+	],
+});
+```
+
+Les utilisateurs avec des domaines email correspondants peuvent s'inscrire sans invitation. Ils recevront un email de vérification et enregistreront une clé d'accès pour finaliser l'inscription.
+
+## Configuration des sessions
+
+Les sessions utilisent des cookies HttpOnly sécurisés avec des valeurs par défaut raisonnables :
+
+```
+js title="astro.config.mjs"
+emdash({
+	auth: {
+		session: {
+			maxAge: 30 * 24 * 60 * 60, // 30 days (default)
+			sliding: true, // Reset expiry on activity
+		},
+	},
+});
+```
+
+## Notes de sécurité
+
+- **Les clés d'accès sont stockées comme des clés publiques** — la clé privée ne quitte jamais votre appareil
+- **La vérification par défi** empêche les attaques par rejeu
+- **La limitation de débit** protège contre les attaques par force brute (5 tentatives/minute/IP)
+- **Les sessions sont HttpOnly, Secure, SameSite=Lax** pour la sécurité des cookies
+- **Les jetons de lien magique sont hachés en SHA-256** — les jetons bruts ne sont jamais stockés
+
+## Dépannage
+
+### « Aucune clé d'accès enregistrée »
+
+Si vous voyez cette erreur lors de la connexion, votre clé d'accès a peut-être été supprimée de votre gestionnaire de mots de passe. Demandez à un administrateur de vous envoyer un lien magique ou une nouvelle invitation.
+
+### « Échec de l'authentification par clé d'accès »
+
+Cela signifie généralement que la clé d'accès a été créée pour un domaine différent. Les clés d'accès sont liées au domaine — une clé d'accès pour `localhost:4321` ne fonctionnera pas sur `example.com`. Enregistrez une nouvelle clé d'accès pour chaque domaine.
+
+### « Session expirée »
+
+Les sessions durent 30 jours par défaut avec expiration glissante. Si vous êtes déconnecté de manière inattendue, effacez vos cookies et reconnectez-vous.
+
+### Perte de toutes les clés d'accès
+
+Si vous avez perdu l'accès à toutes vos clés d'accès enregistrées :
+
+1. Demandez à un autre administrateur de vous envoyer un lien magique (nécessite la configuration de l'email)
+2. Utilisez le lien magique pour vous connecter
+3. Enregistrez une nouvelle clé d'accès dans les paramètres du compte
+
+Si vous êtes le seul administrateur et que l'email n'est pas configuré, vous devrez réinitialiser l'authentification de votre site via la base de données.
+
+## Cloudflare Access
+
+Lors du déploiement sur Cloudflare, vous pouvez utiliser [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/) comme fournisseur d'authentification à la place des clés d'accès. Access gère l'authentification au niveau du réseau périphérique en utilisant votre fournisseur d'identité existant.
+
+<Aside>
+	Lorsque Cloudflare Access est configuré, il devient la méthode d'authentification **exclusive**.
+	Les clés d'accès, OAuth, les liens magiques et l'inscription automatique sont tous désactivés.
+</Aside>
+
+### Pourquoi utiliser Cloudflare Access ?
+
+- **Authentification unique** — Les utilisateurs s'authentifient avec l'IdP de votre entreprise
+- **Contrôle d'accès centralisé** — Gérez qui peut accéder à l'administration dans le tableau de bord Cloudflare
+- **Pas de gestion des clés d'accès** — Pas besoin d'enregistrer ou de gérer des clés d'accès
+- **Rôles basés sur les groupes** — Associez automatiquement les groupes IdP aux rôles EmDash
+
+### Configuration
+
+1. Créez une [application Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/) pour votre site EmDash
+2. Notez l'**Étiquette d'audience de l'application (AUD)** dans les paramètres de l'application
+3. Configurez EmDash pour utiliser Access :
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import cloudflare from "@astrojs/cloudflare";
+import emdash from "emdash/astro";
+import { d1, access } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	output: "server",
+	adapter: cloudflare(),
+	integrations: [
+		emdash({
+			database: d1({ binding: "DB" }),
+			auth: access({
+				teamDomain: "myteam.cloudflareaccess.com",
+				audience: "abc123def456...", // From Access app settings
+			}),
+		}),
+	],
+});
+```
+
+### Options de configuration
+
+| Option          | Type      | Par défaut  | Description                                                   |
+| --------------- | --------- | -------- | ------------------------------------------------------------- |
+| `teamDomain`    | `string`  | requis | Votre domaine d'équipe Access (ex : `myteam.cloudflareaccess.com`) |
+| `audience`      | `string`  | requis | Étiquette d'audience de l'application (AUD) des paramètres Access           |
+| `autoProvision` | `boolean` | `true`   | Créer des utilisateurs EmDash lors de la première connexion via Access                   |
+| `defaultRole`   | `number`  | `30`     | Rôle pour les utilisateurs ne correspondant à aucun groupe (30 = Auteur)           |
+| `syncRoles`     | `boolean` | `false`  | Mettre à jour le rôle à chaque connexion en fonction des groupes IdP                 |
+| `roleMapping`   | `object`  | —        | Associer les noms de groupes IdP aux niveaux de rôle                            |
+| `audienceEnvVar`| `string`  | `"CF_ACCESS_AUDIENCE"` | Nom de la variable d'environnement pour l'étiquette d'audience (alternative au codage en dur) |
+
+### Association des rôles
+
+Associez vos groupes IdP aux rôles EmDash :
+
+```
+js title="astro.config.mjs"
+emdash({
+	auth: access({
+		teamDomain: "myteam.cloudflareaccess.com",
+		audience: "abc123...",
+		roleMapping: {
+			Admins: 50, // Admin
+			"Content Editors": 40, // Editor
+			Writers: 30, // Author
+		},
+		defaultRole: 20, // Contributor for users not in any group
+	}),
+});
+```
+
+Le premier groupe correspondant l'emporte si un utilisateur appartient à plusieurs groupes. Le **premier utilisateur** à accéder au site devient toujours Administrateur, quel que soit ses groupes.
+
+### Comportement de la synchronisation des rôles
+
+Par défaut (`syncRoles: false`), le rôle d'un utilisateur est défini lors de sa première connexion et ne change pas ensuite. Cela permet aux administrateurs d'ajuster manuellement les rôles dans EmDash.
+
+Définissez `syncRoles: true` si vous souhaitez que les groupes IdP fassent autorité — le rôle de l'utilisateur sera mis à jour à chaque connexion en fonction de ses groupes actuels.
+
+### Fonctionnement
+
+1. L'utilisateur visite `/_emdash/admin`
+2. Cloudflare Access intercepte et redirige vers votre IdP
+3. L'utilisateur s'authentifie (SSO, MFA, etc.)
+4. Access place un JWT signé dans la requête
+5. EmDash valide le JWT et crée/authentifie l'utilisateur
+
+<Aside type="tip">
+	Vous pouvez toujours désactiver les utilisateurs localement dans EmDash. Un utilisateur désactivé sera rejeté même si Access
+	l'autorise à passer.
+</Aside>
+
+### Fonctionnalités désactivées
+
+Lorsque Access est activé, ces fonctionnalités ne sont pas disponibles :
+
+- Page de connexion (`/_emdash/admin/login`)
+- Enregistrement et gestion des clés d'accès
+- Connexion OAuth
+- Connexion par lien magique
+- Inscription automatique
+- Invitations d'utilisateurs
+
+La gestion des utilisateurs se fait entièrement via vos politiques Cloudflare Access.
+
+### Dépannage
+
+#### "Aucun JWT Access présent"
+
+La requête est arrivée à EmDash sans JWT Access. Cela signifie :
+
+- Access n'est pas configuré pour protéger votre application
+- La politique Access ne correspond pas aux routes d'administration
+
+Vérifiez que votre application Access couvre `/_emdash/admin/*`.
+
+#### "Incompatibilité de l'audience du JWT"
+
+L'`audience` dans votre configuration ne correspond pas au JWT. Vérifiez à nouveau l'Étiquette d'audience de l'application dans les paramètres de votre application Access.
+
+#### "Utilisateur non autorisé"
+
+L'utilisateur s'est authentifié via Access mais `autoProvision` est `false` et il n'existe pas dans EmDash. Soit :
+
+- Définissez `autoProvision: true`, soit
+- Créez l'utilisateur manuellement avant sa connexion

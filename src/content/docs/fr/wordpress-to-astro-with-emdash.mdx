@@ -1,0 +1,49 @@
+---
+title: WordPress vers Astro avec EmDash
+description: Comprenez le parcours de migration de WordPress vers Astro avec EmDash, incluant pourquoi les équipes le considèrent, ce qui change, et comment aborder le déplacement en toute sécurité.
+lastUpdated: 2026-04-07
+sidebar:
+  label: WordPress vers Astro
+---
+
+
+Passer de WordPress à Astro soulève généralement deux questions distinctes :
+
+1. Comment moderniser le frontend ?
+2. Comment conserver un CMS utilisable pour les éditeurs ?
+
+EmDash est intéressant car il répond aux deux simultanément. Astro devient la couche d'application et de rendu, tandis qu'EmDash fournit le flux de travail de gestion de contenu auquel les équipes WordPress sont habituées.
+
+## Pourquoi les équipes envisagent ce changement
+
+- Un meilleur contrôle sur l'architecture frontend
+- Un flux de développement plus moderne basé sur TypeScript
+- La possibilité de conserver des concepts de publication conviviaux pour les éditeurs
+- Moins de compromis que d'exécuter Astro avec un CMS complètement séparé
+
+## Ce qui change en pratique
+
+- Les thèmes deviennent des mises en page et des composants Astro
+- `WP_Query` devient des fonctions de requête de contenu EmDash
+- Les types de publication et taxonomies WordPress correspondent aux collections et structures de taxonomie d'EmDash
+- L'importation de contenu se fait via les outils de migration d'EmDash au lieu d'un copier-coller manuel
+
+## Ce qui reste généralement familier
+
+- Les éditeurs travaillent toujours avec une interface CMS
+- Les articles, pages, taxonomies, médias et navigation restent des concepts reconnaissables
+- La planification de migration tourne toujours autour du contenu, des redirections, des médias et de l'intégrité des taxonomies
+
+## Ordre de migration recommandé
+
+1. Évaluer EmDash avec un projet pilote Astro
+2. Consulter [EmDash vs WordPress](/fr/emdash-vs-wordpress/) et [Qu'est-ce qu'EmDash ?](/fr/what-is-emdash/)
+3. Tester l'importation de contenu sur une exportation WordPress représentative
+4. Valider les redirections, la gestion des médias et le mappage des champs personnalisés
+5. Migrer un site ou une section plus petit avant de s'engager dans une migration importante
+
+## Continuer avec
+
+- [Migrer de WordPress vers EmDash](/fr/migration/from-wordpress/)
+- [EmDash pour les développeurs WordPress](/fr/coming-from/wordpress/)
+- [FAQ](/fr/faq/)

@@ -1,0 +1,428 @@
+---
+title: Referencia de tipos de campo
+description: Referencia completa de todos los tipos de campo de EmDash.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash admite 14 tipos de campos para definir esquemas de contenido. Cada tipo se asigna a un tipo de columna SQLite y proporciona una interfaz de administración apropiada.
+
+## Resumen
+
+| Tipo           | Columna SQLite | Descripción                |
+| -------------- | ------------- | -------------------------- |
+| `string`       | TEXT          | Entrada de texto corto     |
+| `text`         | TEXT          | Texto multilínea           |
+| `number`       | REAL          | Número decimal             |
+| `integer`      | INTEGER       | Número entero              |
+| `boolean`      | INTEGER       | Verdadero/falso            |
+| `datetime`     | TEXT          | Fecha y hora               |
+| `select`       | TEXT          | Elección única de opciones |
+| `multiSelect`  | JSON          | Múltiples elecciones       |
+| `portableText` | JSON          | Contenido de texto enriquecido |
+| `image`        | TEXT          | Referencia de imagen       |
+| `file`         | TEXT          | Referencia de archivo      |
+| `reference`    | TEXT          | Referencia a otra entrada  |
+| `json`         | JSON          | Datos JSON arbitrarios     |
+| `slug`         | TEXT          | Identificador seguro para URL |
+
+## Tipos de Texto
+
+### `string`
+
+Texto corto de una sola línea. Úsalo para títulos, nombres y valores cortos.
+
+```ts
+{
+  slug: "title",
+  label: "Titulo",
+  type: "string",
+  required: true,
+  validation: {
+    minLength: 1,
+    maxLength: 200,
+  },
+}
+```
+
+**Opciones de validación:**
+
+- `minLength` — Número mínimo de caracteres
+- `maxLength` — Número máximo de caracteres
+- `pattern` — Patrón de regex para coincidir
+
+**Opciones de widget:**
+
+- Ninguna específica
+
+### `text`
+
+Texto plano multilínea. Úsalo para descripciones, extractos y texto plano más largo.
+
+```ts
+{
+  slug: "excerpt",
+  label: "Resumen",
+  type: "text",
+  options: {
+    rows: 3,
+  },
+}
+```
+
+**Opciones de validación:**
+
+- `minLength` — Número mínimo de caracteres
+- `maxLength` — Número máximo de caracteres
+
+**Opciones de widget:**
+
+- `rows` — Número de filas en el área de texto (predeterminado: 3)
+
+### `slug`
+
+Identificador seguro para URL. Se genera automáticamente desde otro campo o se introduce manualmente.
+
+```ts
+{
+  slug: "slug",
+  label: "Slug de URL",
+  type: "slug",
+  required: true,
+  unique: true,
+}
+```
+
+Los slugs se sanitizan automáticamente: se convierten a minúsculas, los espacios se reemplazan por guiones y se eliminan los caracteres especiales.
+
+## Tipos Numéricos
+
+### `number`
+
+Número decimal. Úsalo para precios, calificaciones y medidas.
+
+```ts
+{
+  slug: "price",
+  label: "Precio",
+  type: "number",
+  required: true,
+  validation: {
+    min: 0,
+    max: 999999.99,
+  },
+}
+```
+
+**Opciones de validación:**
+
+- `min` — Valor mínimo
+- `max` — Valor máximo
+
+Almacenado como SQLite REAL (punto flotante de 64 bits).
+
+### `integer`
+
+Número entero. Úsalo para cantidades, conteos y valores de orden.
+
+```ts
+{
+  slug: "quantity",
+  label: "Cantidad",
+  type: "integer",
+  defaultValue: 1,
+  validation: {
+    min: 0,
+    max: 1000,
+  },
+}
+```
+
+**Opciones de validación:**
+
+- `min` — Valor mínimo
+- `max` — Valor máximo
+
+Almacenado como SQLite INTEGER.
+
+### `boolean`
+
+Verdadero o falso. Úsalo para interruptores y banderas.
+
+```ts
+{
+  slug: "featured",
+  label: "Destacado",
+  type: "boolean",
+  defaultValue: false,
+}
+```
+
+Almacenado como SQLite INTEGER (0 o 1).
+
+## Fecha y Hora
+
+### `datetime`
+
+Valor de fecha y hora. Almacenado en formato ISO 8601.
+
+```ts
+{
+  slug: "publishedAt",
+  label: "Fecha de publicacion",
+  type: "datetime",
+}
+```
+
+**Opciones de validación:**
+
+- `min` — Fecha mínima (cadena ISO)
+- `max` — Fecha máxima (cadena ISO)
+
+**Formato de almacenamiento:** `2025-01-24T12:00:00.000Z`
+
+## Tipos de Selección
+
+### `select`
+
+Selección única de opciones predefinidas.
+
+```ts
+{
+  slug: "status",
+  label: "Estado",
+  type: "select",
+  required: true,
+  defaultValue: "draft",
+  validation: {
+    options: ["draft", "published", "archived"],
+  },
+}
+```
+
+**Opciones de validación:**
+
+- `options` — Matriz de valores permitidos (requerido)
+
+Almacenado como TEXT que contiene el valor seleccionado.
+
+### `multiSelect`
+
+Múltiples selecciones de opciones predefinidas.
+
+```ts
+{
+  slug: "tags",
+  label: "Etiquetas",
+  type: "multiSelect",
+  validation: {
+    options: ["news", "tutorial", "review", "opinion"],
+  },
+}
+```
+
+**Opciones de validación:**
+
+- `options` — Matriz de valores permitidos (requerido)
+
+Almacenado como matriz JSON: `["news", "tutorial"]`
+
+## Contenido Enriquecido
+
+### `portableText`
+
+Contenido de texto enriquecido usando el formato Portable Text. Admite encabezados, listas, enlaces, imágenes y bloques personalizados.
+
+```ts
+{
+  slug: "content",
+  label: "Contenido",
+  type: "portableText",
+  required: true,
+}
+```
+
+Almacenado como matriz JSON de bloques de Portable Text:
+
+```json
+[
+	{
+		"_type": "block",
+		"style": "normal",
+			"children": [{ "_type": "span", "text": "Hola mundo" }]
+	}
+]
+```
+
+Los complementos pueden agregar tipos de bloques personalizados (incrustaciones, widgets, etc.) al editor. Estos aparecen en el menú de comandos de barra diagonal y se renderizan automáticamente en el sitio. Consulta [Creando Complementos — Tipos de Bloques de Portable Text](/es/plugins/creating-plugins/#portable-text-block-types).
+
+<Aside>
+	Portable Text es una especificación para texto enriquecido estructurado. Consulta
+	[portabletext.org](https://portabletext.org) para más detalles.
+</Aside>
+
+## Tipos de Medios
+
+### `image`
+
+Referencia a una imagen subida. Incluye metadatos como dimensiones y texto alternativo.
+
+```ts
+{
+  slug: "featuredImage",
+  label: "Imagen destacada",
+  type: "image",
+  options: {
+    showPreview: true,
+  },
+}
+```
+
+**Opciones de widget:**
+
+- `showPreview` — Mostrar vista previa de la imagen en el administrador (predeterminado: true)
+
+**Valor almacenado:**
+
+```json
+{
+	"id": "01HXK5MZSN...",
+	"url": "https://cdn.example.com/image.jpg",
+		"alt": "Descripcion",
+	"width": 1920,
+	"height": 1080
+}
+```
+
+### `file`
+
+Referencia a un archivo subido (documentos, PDFs, etc.).
+
+```ts
+{
+  slug: "document",
+  label: "Documento",
+  type: "file",
+}
+```
+
+**Valor almacenado:**
+
+```json
+{
+	"id": "01HXK5MZSN...",
+	"url": "https://cdn.example.com/doc.pdf",
+	"filename": "report.pdf",
+	"mimeType": "application/pdf",
+	"size": 102400
+}
+```
+
+## Tipos Relacionales
+
+### `reference`
+
+Referencia a otra entrada de contenido.
+
+```ts
+{
+  slug: "author",
+  label: "Autor",
+  type: "reference",
+  required: true,
+  options: {
+    collection: "authors",
+  },
+}
+```
+
+**Opciones de widget:**
+
+- `collection` — Slug de la colección objetivo (requerido)
+- `allowMultiple` — Permitir múltiples referencias (predeterminado: false)
+
+**Valor almacenado para referencia única:**
+
+```json
+"01HXK5MZSN..."
+```
+
+**Valor almacenado para múltiples referencias:**
+
+```json
+["01HXK5MZSN...", "01HXK6NATS..."]
+```
+
+## Tipos Flexibles
+
+### `json`
+
+Datos JSON arbitrarios. Úsalo para estructuras anidadas complejas, integraciones de terceros o datos sin un esquema fijo.
+
+```ts
+{
+  slug: "metadata",
+  label: "Metadatos",
+  type: "json",
+}
+```
+
+Almacenado tal cual en la columna JSON de SQLite.
+
+<Aside type="caution">Los campos JSON no tienen validación. Úsalos con moderación para datos verdaderamente dinámicos.</Aside>
+
+## Propiedades de los Campos
+
+Todos los campos admiten estas propiedades comunes:
+
+| Propiedad     | Tipo         | Descripción                         |
+| -------------- | ------------ | ----------------------------------- |
+| `slug`         | `string`    | Identificador único (requerido)     |
+| `label`        | `string`    | Nombre para mostrar (requerido)     |
+| `type`         | `FieldType` | Tipo de campo (requerido)           |
+| `required`     | `boolean`   | Requerir un valor (predeterminado: false) |
+| `unique`       | `boolean`   | Forzar unicidad (predeterminado: false) |
+| `defaultValue` | `unknown`   | Valor predeterminado para nuevas entradas |
+| `validation`   | `object`    | Reglas de validación específicas del tipo |
+| `widget`       | `string`    | Anulación de widget personalizado   |
+| `options`      | `object`    | Configuración del widget            |
+| `sortOrder`    | `number`    | Orden de visualización en el administrador |
+
+## Slugs de Campos Reservados
+
+Estos slugs están reservados y no se pueden usar:
+
+- `id`
+- `slug`
+- `status`
+- `author_id`
+- `created_at`
+- `updated_at`
+- `published_at`
+- `deleted_at`
+- `version`
+
+## Tipos de TypeScript
+
+Importa los tipos de campos para uso programático:
+
+```ts
+import type { FieldType, Field, CreateFieldInput } from "emdash";
+
+const fieldTypes: FieldType[] = [
+	"string",
+	"text",
+	"number",
+	"integer",
+	"boolean",
+	"datetime",
+	"select",
+	"multiSelect",
+	"portableText",
+	"image",
+	"file",
+	"reference",
+	"json",
+	"slug",
+];
+```

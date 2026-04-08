@@ -1,0 +1,408 @@
+---
+title: Consultar contenido
+description: Usa getEmDashCollection y getEmDashEntry para recuperar contenido en tus plantillas.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash proporciona funciones de consulta para recuperar contenido en tus páginas y componentes de Astro. Estas funciones siguen el patrón de [colecciones de contenido en vivo](https://docs.astro.build/en/reference/experimental-flags/live-content-collections/) de Astro, devolviendo resultados estructurados con manejo de errores.
+
+## Funciones de consulta
+
+EmDash exporta dos funciones de consulta principales:
+
+| Función                | Propósito                                | Devuelve                       |
+| ----------------------- | -------------------------------------- | ----------------------------- |
+| `getEmDashCollection` | Recuperar todas las entradas de un tipo de contenido | `{ entries, error }`          |
+| `getEmDashEntry`      | Recuperar una sola entrada por ID o slug  | `{ entry, error, isPreview }` |
+
+Impórtalas desde `emdash`:
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+```
+
+## Obtener todas las entradas
+
+Usa `getEmDashCollection` para recuperar todas las entradas de un tipo de contenido:
+
+```astro title="src/pages/posts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts, error } = await getEmDashCollection("posts");
+
+if (error) {
+  console.error("Error al cargar las entradas:", error);
+}
+---
+
+<ul>
+  {posts.map((post) => (
+    <li>{post.data.title}</li>
+  ))}
+</ul>
+```
+
+<Aside>
+  La sintaxis de desestructuración `{ entries: posts }` renombra `entries` a `posts` para un código más limpio. Usar `{ entries }` directamente también funciona.
+</Aside>
+
+### Filtrar por idioma
+
+Cuando la [i18n está habilitada](/es/guides/internationalization/), filtra por idioma para recuperar contenido en un idioma específico:
+
+```ts
+// Entradas en francés
+const { entries: frenchPosts } = await getEmDashCollection("posts", {
+	locale: "fr",
+	status: "published",
+});
+
+// Usa el idioma actual de la solicitud
+const { entries: localizedPosts } = await getEmDashCollection("posts", {
+	locale: Astro.currentLocale,
+	status: "published",
+});
+```
+
+Para entradas individuales, pasa `locale` como tercer argumento:
+
+```ts
+const { entry: post } = await getEmDashEntry("posts", "my-post", {
+	locale: Astro.currentLocale,
+});
+```
+
+Cuando se omite `locale`, por defecto se usa el idioma actual de la solicitud. Si no existe una traducción para el idioma solicitado, se sigue la [cadena de respaldo](/es/guides/internationalization/#fallback-chain).
+
+### Filtrar por Estado
+
+Recupera solo contenido publicado o borrador:
+
+```ts
+// Solo entradas publicadas
+const { entries: published } = await getEmDashCollection("posts", {
+	status: "published",
+});
+
+// Solo borradores
+const { entries: drafts } = await getEmDashCollection("posts", {
+	status: "draft",
+});
+```
+
+<Aside type="tip">
+	Siempre filtra por `status: "published"` para páginas públicas. El contenido en borrador solo debería ser
+	accesible en el administrador o modo de vista previa.
+</Aside>
+
+### Limitar Resultados
+
+Restringe el número de entradas devueltas:
+
+```ts
+// Obtener las 5 entradas más recientes
+const { entries: recentPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	limit: 5,
+});
+```
+
+### Filtrar por Taxonomía
+
+Filtra entradas por categoría, etiqueta o términos de taxonomía personalizados:
+
+```ts
+// Entradas de la categoría "news"
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: "news" },
+});
+
+// Publicaciones con la etiqueta "javascript"
+const { entries: jsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { tag: "javascript" },
+});
+
+// Publicaciones que coinciden con cualquiera de múltiples términos
+const { entries: featuredNews } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: ["news", "featured"] },
+});
+```
+
+El filtro `where` usa lógica OR cuando se proporcionan múltiples valores para una sola taxonomía.
+
+### Manejo de errores
+
+Siempre verifica si hay errores cuando la fiabilidad es importante:
+
+```ts
+const { entries: posts, error } = await getEmDashCollection("posts");
+
+if (error) {
+	// Registrar y manejar con gracia
+	console.error("Error al cargar las publicaciones:", error);
+	return new Response("Error del servidor", { status: 500 });
+}
+```
+
+## Obtener una entrada única
+
+Usa `getEmDashEntry` para recuperar una entrada por su ID o slug:
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Error del servidor", { status: 500 });
+}
+
+if (!post) {
+  return Astro.redirect("/404");
+}
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+  <PortableText value={post.data.content} />
+</article>
+```
+
+### Tipo de retorno de la entrada
+
+`getEmDashEntry` devuelve un objeto de resultado:
+
+```ts
+interface EntryResult<T> {
+	entry: ContentEntry<T> | null; // null if not found
+	error?: Error; // Only set for actual errors (not "not found")
+	isPreview: boolean; // true if viewing preview/draft content
+}
+
+interface ContentEntry<T> {
+	id: string;
+	data: T;
+	edit: EditProxy; // Visual editing annotations
+}
+```
+
+El objeto `data` dentro de `entry` contiene todos los campos definidos para el tipo de contenido. El proxy `edit` proporciona anotaciones para edición visual (ver más abajo).
+
+## Modo de vista previa
+
+EmDash maneja la vista previa automáticamente a través de middleware. Cuando una URL contiene un token `_preview` válido, el middleware lo verifica y configura el contexto de la solicitud. Tus funciones de consulta luego sirven contenido en borrador sin ningún parámetro especial:
+
+```astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+
+// No se necesita manejo especial de vista previa — el middleware lo hace automáticamente
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Error del servidor", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+{isPreview && (
+  <div class="preview-banner">
+    Estás viendo una vista previa. Este contenido aún no está publicado.
+  </div>
+)}
+
+<article>
+  <h1>{entry.data.title}</h1>
+  <PortableText value={entry.data.content} />
+</article>
+```
+
+<Aside>
+	Configura `EMDASH_PREVIEW_SECRET` en tus variables de entorno. El administrador genera URLs de vista previa
+	que incluyen un token `_preview` firmado con HMAC.
+</Aside>
+
+## Edición visual
+
+Cada entrada devuelta por las funciones de consulta incluye un proxy `edit` para anotar tus plantillas. Extiéndelo en los elementos para habilitar la edición en línea para editores autenticados:
+
+```astro
+<article {...entry.edit}>
+  <h1 {...entry.edit.title}>{entry.data.title}</h1>
+  <div {...entry.edit.content}>
+    <PortableText value={entry.data.content} />
+  </div>
+</article>
+```
+
+En modo de edición, `{...entry.edit.title}` produce un atributo `data-emdash-ref` que la barra de herramientas de edición visual usa para habilitar la edición en línea. En producción, la extensión del proxy no produce salida — costo de ejecución cero.
+
+<Aside type="tip">
+	Para campos de texto y cadenas, la edición en línea usa `contenteditable`. Para campos Portable Text, inyecta
+	un editor TipTap. Para campos de imagen, abre un cuadro emergente de la biblioteca multimedia.
+</Aside>
+
+## Ordenar resultados
+
+`getEmDashCollection` no garantiza un orden. Ordena los resultados en tu plantilla:
+
+```ts
+const { entries: posts } = await getEmDashCollection("posts", {
+	status: "published",
+});
+
+// Ordenar por fecha de publicación, los más nuevos primero
+const sorted = posts.sort(
+	(a, b) => (b.data.publishedAt?.getTime() ?? 0) - (a.data.publishedAt?.getTime() ?? 0),
+);
+```
+
+### Patrones de orden habituales
+
+```ts
+// Orden alfabético por título
+posts.sort((a, b) => a.data.title.localeCompare(b.data.title));
+
+// Por campo de orden personalizado
+posts.sort((a, b) => (a.data.order ?? 0) - (b.data.order ?? 0));
+
+// Orden aleatorio
+posts.sort(() => Math.random() - 0.5);
+```
+
+## Tipos de TypeScript
+
+Genera tipos de TypeScript para tus colecciones:
+
+```bash
+npx emdash types
+```
+
+Esto crea `.emdash/types.ts` con interfaces para cada colección. Úsalas para seguridad de tipos:
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+import type { Post } from "../../.emdash/types";
+
+// Consulta de colección con seguridad de tipos
+const { entries: posts } = await getEmDashCollection<Post>("posts");
+// posts es ContentEntry<Post>[]
+
+// Consulta de entrada con seguridad de tipos
+const { entry: post } = await getEmDashEntry<Post>("posts", "my-post");
+// post es ContentEntry<Post> | null
+```
+
+## Renderizado estático vs. en el servidor
+
+El contenido de EmDash funciona tanto con páginas estáticas como renderizadas en el servidor.
+
+### Estático (Pre-renderizado)
+
+Para páginas estáticas, usa `getStaticPaths` para generar rutas en tiempo de compilación:
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+export async function getStaticPaths() {
+  const { entries: posts } = await getEmDashCollection("posts", {
+    status: "published",
+  });
+
+  return posts.map((post) => ({
+    params: { slug: post.data.slug },
+  }));
+}
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+---
+```
+
+### Renderizado en el servidor
+
+Para páginas renderizadas en el servidor, consulta el contenido directamente:
+
+```astro title="src/pages/posts/[slug].astro"
+---
+export const prerender = false;
+
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Error del servidor", { status: 500 });
+}
+
+if (!post) {
+  return new Response(null, { status: 404 });
+}
+---
+```
+
+<Aside type="tip">
+	El renderizado en el servidor muestra los cambios de contenido inmediatamente sin necesidad de reconstruir. Úsalo para contenido que se actualiza con frecuencia.
+</Aside>
+
+## Consideraciones de Rendimiento
+
+### Almacenamiento en Caché
+
+EmDash utiliza las colecciones de contenido en vivo de Astro, que manejan el almacenamiento en caché automáticamente. Para páginas renderizadas en el servidor, considera agregar encabezados de caché HTTP:
+
+```astro
+---
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+});
+
+// Cachear durante 5 minutos
+Astro.response.headers.set("Cache-Control", "public, max-age=300");
+---
+```
+
+### Evitar Consultas Redundantes
+
+Consulta una vez y pasa los datos a los componentes:
+
+```astro title="src/pages/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import PostList from "../../components/PostList.astro";
+import Sidebar from "../../components/Sidebar.astro";
+
+// Consultar una vez
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+});
+
+const featured = posts.filter((p) => p.data.featured);
+const recent = posts.slice(0, 5);
+---
+
+<PostList posts={featured} />
+<Sidebar posts={recent} />
+```
+
+## Próximos Pasos
+
+- [Crear un Blog](/es/guides/create-a-blog/) - Construye un blog completo
+- [Taxonomías](/es/guides/taxonomies/) - Filtrar por categorías y etiquetas
+- [Trabajar con Contenido](/es/guides/working-with-content/) - Operaciones CRUD de administración
+- [Internacionalización](/es/guides/internationalization/) - Contenido multilingüe y traducciones

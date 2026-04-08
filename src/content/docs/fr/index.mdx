@@ -1,0 +1,68 @@
+---
+title: HiEmdash Docs
+description: Un site de documentation tiers pour EmDash créé par un passionné, avec des guides adaptés aux débutants, des FAQ pratiques et des traductions multilingues.
+lastUpdated: 2026-04-07
+template: splash
+hero:
+  tagline: Un centre de documentation EmDash construit par la communauté, avec des guides adaptés aux débutants, des FAQ pratiques et des traductions multilingues au-delà de la documentation officielle.
+  actions:
+    - text: Commencer
+      link: /fr/getting-started/
+      icon: right-arrow
+    - text: Voir sur GitHub
+      link: https://github.com/emdash-cms/emdash
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## Pourquoi HiEmdash Docs ?
+
+<CardGrid stagger>
+	<Card title="Plus Accessible pour les Débutants" icon="document">
+		Au-delà de la documentation officielle, ce site ajoute des conseils d'intégration et un contexte supplémentaire pour les
+		utilisateurs d'EmDash pour la première fois.
+	</Card>
+	<Card title="Multilingue" icon="puzzle">
+		L'anglais reste la source de vérité, avec des traductions en chinois simplifié et un flux de travail de traduction
+		prêt pour d'autres langues ultérieurement.
+	</Card>
+	<Card title="Notes de la Communauté" icon="setting">
+		Il collecte également des questions fréquentes, des mises en garde pratiques et des conseils de configuration faciles à manquer lorsque
+		vous débutez.
+	</Card>
+</CardGrid>
+
+## Ce Que Vous Trouverez Ici
+
+- **Guides de Démarrage** — Instructions de configuration claires pour les nouveaux utilisateurs d'EmDash
+- **FAQ Pratiques** — Réponses supplémentaires recueillies à partir de discussions publiques sur les projets et des points de difficulté courants
+- **Documentation Multilingue** — Contenu source en anglais avec des traductions localisées pour un accès plus large
+- **Notes de Migration** — Contexte utile pour les personnes venant de WordPress ou de flux de travail uniquement Astro
+
+## Lectures Populaires
+
+- [Qu'est-ce qu'EmDash ?](/fr/what-is-emdash/) pour un aperçu en langage simple du projet
+- [Meilleur CMS Astro](/fr/best-astro-cms/) pour évaluer EmDash par rapport aux exigences courantes des CMS Astro
+- [EmDash vs WordPress](/fr/emdash-vs-wordpress/) pour une comparaison directe de l'édition, du déploiement et de l'architecture
+- [WordPress vers Astro avec EmDash](/fr/wordpress-to-astro-with-emdash/) pour un aperçu orienté migration
+
+## Démarrage Rapide
+
+```bash
+# Create a new EmDash site
+npm create astro@latest -- --template @emdash-cms/template-blog
+
+# Démarrer le serveur de développement
+npm run dev
+
+# Visitez l'administration à http://localhost:4321/_emdash/admin
+```
+
+## À Propos d'EmDash
+
+- **CMS Natif Astro** — Construit pour Astro au lieu d'y être adapté ultérieurement
+- **Contenu typé** — Modèles de contenu structurés et support TypeScript généré
+- **Architecture extensible** — Plugins, hooks, extensions de l'interface d'administration et flexibilité de déploiement
+- **Concepts compatibles WordPress** — Menus, widgets, taxonomies et flux de travail orientés migration

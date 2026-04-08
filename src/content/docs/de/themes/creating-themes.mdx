@@ -1,0 +1,769 @@
+---
+title: Themes erstellen
+description: Erstellen und verteilen Sie Ihre eigenen EmDash-Themes.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Ein EmDash-Theme ist eine vollständige Astro-Site – Seiten, Layouts, Komponenten, Styles – die auch eine Seed-Datei enthält, um das Inhaltsmodell zu initialisieren. Erstelle eines, um dein Design mit anderen zu teilen oder um die Site-Erstellung für deine Agentur zu standardisieren.
+
+## Schlüsselkonzepte
+
+- **Ein Theme ist ein funktionierendes Astro-Projekt.** Es gibt keine Theme-API oder Abstraktionsschicht. Du baust eine Site und lieferst sie als Vorlage. Die Seed-Datei teilt EmDash lediglich mit, welche Collections, Felder, Menüs, Weiterleitungen und Taxonomien beim ersten Lauf erstellt werden sollen.
+- **EmDash gibt dir mehr Kontrolle über das Inhaltsmodell als WordPress.** Themes nutzen dies aus – die Seed-Datei deklariert genau, welche Felder jede Collection benötigt. Baue auf den Standard-Collections **posts** und **pages** auf und füge Felder und Taxonomien hinzu, wie dein Design es erfordert, anstatt völlig neue Inhaltstypen zu erfinden.
+- **Inhaltsseiten eines Themes müssen serverseitig gerendert werden.** In einem Theme ändern sich Inhalte zur Laufzeit über die Admin-Oberfläche, daher dürfen Seiten, die EmDash-Inhalte anzeigen, nicht vorgerendert werden. Verwende `getStaticPaths()` nicht in Theme-Inhaltsrouten. (Statische Site-Builds, die EmDash als Build-Zeit-Datenquelle nutzen, *können* `getStaticPaths` verwenden, aber Themes sind immer SSR.)
+- **Keine hartkodierten Inhalte.** Site-Titel, Slogan, Navigation und andere dynamische Inhalte stammen über API-Aufrufe aus dem CMS – nicht aus Template-Strings.
+
+## Projektstruktur
+
+Erstelle ein Theme mit dieser Struktur:
+
+```
+my-emdash-theme/
+├── package.json              # Theme-Metadaten
+├── astro.config.mjs          # Konfiguration für Astro und EmDash
+├── src/
+│   ├── live.config.ts        # Konfiguration der Live-Collections
+│   ├── pages/
+│   │   ├── index.astro       # Startseite
+│   │   ├── [...slug].astro   # Seiten (Catch-all)
+│   │   ├── posts/
+│   │   │   ├── index.astro   # Beitragsarchiv
+│   │   │   └── [slug].astro  # Einzelner Beitrag
+│   │   ├── categories/
+│   │   │   └── [slug].astro  # Kategoriearchiv
+│   │   ├── tags/
+│   │   │   └── [slug].astro  # Schlagwortarchiv
+│   │   ├── search.astro      # Suchseite
+│   │   └── 404.astro         # Nicht gefunden
+│   ├── layouts/
+│   │   └── Base.astro        # Basislayout
+│   └── components/           # Eigene Komponenten
+├── .emdash/
+│   ├── seed.json             # Schema und Beispielinhalte
+│   └── uploads/              # Optionale lokale Mediendateien
+└── public/                   # Statische Assets
+```
+
+Seiten liegen als Catch-All-Route (`[...slug].astro`) im Root, sodass eine Seite mit dem Slug `about` unter `/about` gerendert wird. Beiträge, Kategorien und Tags erhalten eigene Verzeichnisse. Das Verzeichnis `.emdash/` enthält die Seed-Datei und alle lokalen Mediendateien, die in Beispielinhalten verwendet werden.
+
+## Konfiguration von package.json
+
+Füge das Feld `emdash` zu deiner `package.json` hinzu:
+
+```
+json title="package.json"
+{
+	"name": "@your-org/emdash-theme-blog",
+	"version": "1.0.0",
+	"description": "Minimalistisches Blog-Theme für EmDash",
+	"keywords": ["astro-template", "emdash", "blog"],
+	"emdash": {
+		"label": "Minimaler Blog",
+		"description": "Ein klares, minimalistisches Blog mit Beiträgen, Seiten und Kategorien",
+		"seed": ".emdash/seed.json",
+		"preview": "https://your-theme-demo.pages.dev"
+	}
+}
+```
+
+| Feld                  | Beschreibung                         |
+| ---------------------- | ----------------------------------- |
+| `emdash.label`       | Anzeigename in Theme-Auswahlmenüs |
+| `emdash.description` | Kurzbeschreibung des Themes      |
+| `emdash.seed`        | Pfad zur Seed-Datei               |
+| `emdash.preview`     | URL zu einer Live-Demo (optional)       |
+
+## Das Standard-Inhaltsmodell
+
+Die meisten Themes benötigen zwei Collection-Typen: **posts** und **pages**. Beiträge sind zeitgestempelte Einträge mit Auszügen und Hauptbildern, die in Feeds und Archiven erscheinen. Seiten sind eigenständige Inhalte auf Top-Level-URLs.
+
+Dies ist der empfohlene Ausgangspunkt. Füge weitere Collections, Taxonomien oder Felder hinzu, wie dein Theme sie benötigt, aber beginne hier.
+
+### Seed-Datei
+
+Die Seed-Datei teilt EmDash mit, was beim ersten Lauf erstellt werden soll. Erstelle `.emdash/seed.json`:
+
+```
+json title=".emdash/seed.json"
+{
+	"$schema": "https://emdashcms.com/seed.schema.json",
+	"version": "1",
+	"meta": {
+		"name": "Minimaler Blog",
+		"description": "Ein klares Blog mit Beiträgen und Seiten",
+		"author": "Dein Name"
+	},
+	"settings": {
+		"title": "Mein Blog",
+		"tagline": "Gedanken und Ideen",
+		"postsPerPage": 10
+	},
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Beiträge",
+			"labelSingular": "Beitrag",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{ "slug": "title", "label": "Titel", "type": "string", "required": true },
+				{ "slug": "content", "label": "Inhalt", "type": "portableText" },
+				{ "slug": "excerpt", "label": "Auszug", "type": "text" },
+				{ "slug": "featured_image", "label": "Beitragsbild", "type": "image" }
+			]
+		},
+		{
+			"slug": "pages",
+			"label": "Seiten",
+			"labelSingular": "Seite",
+			"supports": ["drafts", "revisions"],
+			"fields": [
+				{ "slug": "title", "label": "Titel", "type": "string", "required": true },
+				{ "slug": "content", "label": "Inhalt", "type": "portableText" }
+			]
+		}
+	],
+	"taxonomies": [
+		{
+			"name": "category",
+			"label": "Kategorien",
+			"labelSingular": "Kategorie",
+			"hierarchical": true,
+			"collections": ["posts"],
+			"terms": [
+				{ "slug": "news", "label": "Neuigkeiten" },
+				{ "slug": "tutorials", "label": "Tutorials" }
+			]
+		}
+	],
+	"menus": [
+		{
+			"name": "primary",
+			"label": "Hauptnavigation",
+			"items": [
+				{ "type": "custom", "label": "Start", "url": "/" },
+				{ "type": "custom", "label": "Blog", "url": "/posts" }
+			]
+		}
+	],
+	"redirects": [
+		{ "source": "/category/news", "destination": "/categories/news" },
+		{ "source": "/old-about", "destination": "/about" }
+	]
+}
+```
+
+Beiträge erhalten `excerpt` und `featured_image`, weil sie in Listen und Feeds erscheinen. Seiten benötigen sie nicht – sie sind eigenständige Inhalte. Füge Felder zu beiden Collections hinzu, wie dein Theme es erfordert.
+
+Siehe [Seed-Datei-Format](/de/themes/seed-files/) für die vollständige Spezifikation, einschließlich Abschnitten, Widget-Bereichen und Medienreferenzen.
+
+## Seiten erstellen
+
+Alle Seiten, die EmDash-Inhalte anzeigen, werden serverseitig gerendert. Verwende `Astro.params`, um den Slug aus der URL zu erhalten und Inhalte zur Laufzeit der Anfrage abzufragen.
+
+<Aside type="caution">
+	Verwende in Themes niemals `getStaticPaths()` oder `export const prerender = true` für Seiten, die
+	EmDash-Inhalte anzeigen. Themes bedienen Inhalte zur Laufzeit über die Admin-Oberfläche, daher müssen diese Seiten
+	serverseitig gerendert werden.
+</Aside>
+
+### Startseite
+
+```
+astro title="src/pages/index.astro"
+---
+import { getEmDashCollection, getSiteSettings } from "emdash";
+import Base from "../../layouts/Base.astro";
+
+const settings = await getSiteSettings();
+const { entries: posts } = await getEmDashCollection("posts", {
+  where: { status: "published" },
+  orderBy: { publishedAt: "desc" },
+  limit: settings.postsPerPage ?? 10,
+});
+---
+
+<Base title="Startseite">
+  <h1>Neueste Beiträge</h1>
+  {posts.map((post) => (
+    <article>
+      <h2><a href={`/posts/${post.slug}`}>{post.data.title}</a>
+</h2>
+      <p>{post.data.excerpt}</p>
+    </article>
+  ))}
+</Base>
+```
+
+### Einzelner Beitrag
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry, getEntryTerms } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../../layouts/Base.astro";
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug!);
+
+if (!post) {
+  return Astro.redirect("/404");
+}
+
+const categories = await getEntryTerms("posts", post.id, "categories");
+---
+
+<Base title={post.data.title}>
+  <article>
+    <h1>{post.data.title}</h1>
+    <PortableText value={post.data.content} />
+    <div class="post-meta">
+      {categories.map((cat) => (
+        <a href={`/categories/${cat.slug}`}>{cat.label}</a>
+      ))}
+    </div>
+  </article>
+</Base>
+```
+
+### Seiten
+
+Seiten verwenden eine Catch-All-Route im Root, sodass ihre Slugs direkt auf Top-Level-URLs abgebildet werden – eine Seite mit dem Slug `about` wird unter `/about` gerendert:
+
+```
+astro title="src/pages/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../layouts/Base.astro";
+
+const { slug } = Astro.params;
+const { entry: page } = await getEmDashEntry("pages", slug!);
+
+if (!page) {
+  return Astro.redirect("/404");
+}
+---
+
+<Base title={page.data.title}>
+  <article>
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+```
+
+Da dies eine Catch-All-Route ist, matcht sie nur URLs, die keine spezifischere Route haben. `/posts/hello-world` trifft immer noch auf `posts/[slug].astro`, nicht auf diese Datei.
+
+### Kategorie-Archiv
+
+```
+astro title="src/pages/categories/[slug].astro"
+---
+import { getTerm, getEntriesByTerm } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+const { slug } = Astro.params;
+const category = await getTerm("categories", slug!);
+const posts = await getEntriesByTerm("posts", "categories", slug!);
+
+if (!category) {
+  return Astro.redirect("/404");
+}
+---
+
+<Base title={category.label}>
+  <h1>{category.label}</h1>
+  {posts.map((post) => (
+    <article>
+      <h2><a href={`/posts/${post.slug}`}>{post.data.title}</a>
+</h2>
+    </article>
+  ))}
+</Base>
+```
+
+## Bilder verwenden
+
+Bildfelder sind Objekte mit `src`- und `alt`-Eigenschaften, keine Strings. Verwende die `Image`-Komponente aus `emdash/ui` für optimiertes Bild-Rendering:
+
+```
+astro title="src/components/PostCard.astro"
+---
+import { Image } from "emdash/ui";
+
+const { post } = Astro.props;
+---
+
+<article>
+  {post.data.featured_image?.src && (
+    <Image
+      image={post.data.featured_image}
+      alt={post.data.featured_image.alt || post.data.title}
+      width={800}
+      height={450}
+    />
+  )}
+  <h2><a href={`/posts/${post.slug}`}>{post.data.title}</a>
+</h2>
+  <p>{post.data.excerpt}</p>
+</article>
+```
+
+<Aside type="caution">
+	Ein häufiger Fehler ist, Bildfelder als Strings zu behandeln. `post.data.featured_image` ist ein Objekt
+	mit `src` und `alt` – `<img src={post.data.featured_image} />` rendert `[object Object]`.
+</Aside>
+
+## Menüs verwenden
+
+Abfragen Sie von Administratoren definierte Menüs in Ihren Layouts. Verzichten Sie auf hartcodierte Navigationslinks:
+
+```
+astro title="src/layouts/Base.astro"
+---
+import { getMenu, getSiteSettings } from "emdash";
+
+const settings = await getSiteSettings();
+const primaryMenu = await getMenu("primary");
+---
+
+<html>
+  <head>
+    <title>{Astro.props.title} | {settings.title}</title>
+  </head>
+  <body>
+    <header>
+      {settings.logo ? (
+        <img src={settings.logo.url} alt={settings.title} />
+      ) : (
+        <span>{settings.title}</span>
+      )}
+      <nav>
+        {primaryMenu?.items.map((item) => (
+          <a href={item.url}>{item.label}</a>
+        ))}
+      </nav>
+    </header>
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>
+```
+
+## Seitenvorlagen
+
+Themes benötigen oft mehrere Seitenlayouts – ein Standardlayout, ein Layout ohne Seitenleiste, ein Landing-Page-Layout. In EmDash fügen Sie der Seitenkollektion ein `template`-Auswahlfeld hinzu und ordnen es Layout-Komponenten in Ihrer Catch-All-Route zu.
+
+Fügen Sie das Feld Ihrer Seitenkollektion in der Seed-Datei hinzu:
+
+```json
+{
+	"slug": "template",
+	"label": "Page Template",
+	"type": "string",
+	"widget": "select",
+	"options": {
+		"choices": [
+			{ "value": "default", "label": "Default" },
+			{ "value": "full-width", "label": "Full Width" },
+			{ "value": "landing", "label": "Landing Page" }
+		]
+	},
+	"defaultValue": "default"
+}
+```
+
+Ordnen Sie dann den Wert den Layout-Komponenten in der Catch-All-Route zu:
+
+```
+astro title="src/pages/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import PageDefault from "../../layouts/PageDefault.astro";
+import PageFullWidth from "../../layouts/PageFullWidth.astro";
+import PageLanding from "../../layouts/PageLanding.astro";
+
+const { slug } = Astro.params;
+const { entry: page } = await getEmDashEntry("pages", slug!);
+
+if (!page) {
+  return Astro.redirect("/404");
+}
+
+const layouts = {
+  "default": PageDefault,
+  "full-width": PageFullWidth,
+  "landing": PageLanding,
+};
+const Layout = layouts[page.data.template as keyof typeof layouts] ?? PageDefault;
+---
+
+<Layout page={page} />
+```
+
+Redakteure wählen die Vorlage über ein Dropdown-Menü in der Admin-Oberfläche beim Bearbeiten einer Seite aus.
+
+## Abschnitte hinzufügen
+
+Abschnitte sind wiederverwendbare Inhaltsblöcke, die Redakteure mit dem `/section`-Slash-Befehl in jedes Portable-Text-Feld einfügen können. Wenn Ihr Theme gängige Inhaltsmuster (Hero-Banner, CTAs, Feature-Grids) enthält, definieren Sie diese als Abschnitte in der Seed-Datei:
+
+```
+json title=".emdash/seed.json"
+{
+	"sections": [
+		{
+			"slug": "hero-centered",
+			"title": "Centered Hero",
+			"description": "Full-width hero with centered heading and CTA",
+			"keywords": ["hero", "banner", "header", "landing"],
+			"content": [
+				{
+					"_type": "block",
+					"style": "h1",
+					"children": [{ "_type": "span", "text": "Willkommen auf unserer Website" }]
+				},
+				{
+					"_type": "block",
+					"children": [
+						{ "_type": "span", "text": "Your compelling tagline goes here." }
+					]
+				}
+			]
+		},
+		{
+			"slug": "newsletter-cta",
+			"title": "Newsletter Signup",
+			"keywords": ["newsletter", "subscribe", "email"],
+			"content": [
+				{
+					"_type": "block",
+					"style": "h3",
+					"children": [{ "_type": "span", "text": "Subscribe to our newsletter" }]
+				},
+				{
+					"_type": "block",
+					"children": [
+						{
+							"_type": "span",
+							"text": "Get the latest updates delivered to your inbox."
+						}
+					]
+				}
+			]
+		}
+	]
+}
+```
+
+Aus der Seed-Datei erstellte Abschnitte sind mit `source: "theme"` gekennzeichnet. Redakteure können auch eigene Abschnitte erstellen (gekennzeichnet mit `source: "user"`), aber vom Theme bereitgestellte Abschnitte können nicht aus der Admin-Oberfläche gelöscht werden.
+
+## Beispielinhalt hinzufügen
+
+Fügen Sie der Seed-Datei Beispielinhalte hinzu, um das Design Ihres Themes zu demonstrieren:
+
+```
+json title=".emdash/seed.json"
+{
+	"content": {
+		"posts": [
+			{
+				"id": "hello-world",
+				"slug": "hello-world",
+				"status": "published",
+				"data": {
+					"title": "Hallo Welt",
+					"content": [
+						{
+							"_type": "block",
+							"style": "normal",
+							"children": [{ "_type": "span", "text": "Welcome to your new blog!" }]
+						}
+					],
+					"excerpt": "Your first post on EmDash."
+				},
+				"taxonomies": {
+					"category": ["news"]
+				}
+			}
+		]
+	}
+}
+```
+
+<Aside type="tip">
+	Beispielinhalt ist während des Setups optional. Benutzer können im Setup-
+	Assistenten "Beispielinhalt einbeziehen" deaktivieren, wenn sie mit einer leeren Installation starten möchten.
+</Aside>
+
+## Medien einbinden
+
+Verweisen Sie in Beispielinhalten mit der `$media`-Syntax auf Bilder.
+
+Für entfernte Bilder:
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"url": "https://images.unsplash.com/photo-xxx",
+				"alt": "A descriptive alt text",
+				"filename": "hero.jpg"
+			}
+		}
+	}
+}
+```
+
+Für lokale Bilder platzieren Sie Dateien in `.emdash/uploads/` und verweisen darauf:
+
+```json
+{
+	"data": {
+		"featured_image": {
+			"$media": {
+				"file": "hero.jpg",
+				"alt": "A descriptive alt text"
+			}
+		}
+	}
+}
+```
+
+Während des Seedings werden Mediendateien heruntergeladen (oder lokal gelesen) und in den Speicher hochgeladen.
+
+## Suche
+
+Wenn Ihr Theme eine Suchseite enthält, verwenden Sie die `LiveSearch`-Komponente für sofortige Ergebnisse:
+
+```
+astro title="src/pages/search.astro"
+---
+import LiveSearch from "emdash/ui/search";
+import Base from "../../layouts/Base.astro";
+---
+
+<Base title="Search">
+  <h1>Suche</h1>
+  <LiveSearch
+    placeholder="Beiträge und Seiten durchsuchen..."
+    collections={["posts", "pages"]}
+  />
+</Base>
+```
+
+`LiveSearch` bietet verzögerte Sofortsuche mit Präfix-Matching, Porter-Stemming und hervorgehobenen Ergebnisausschnitten. Die Suche muss pro Kollektion in der Admin-Oberfläche aktiviert werden (Inhaltstypen > Bearbeiten > Funktionen > Suche).
+
+## Ihr Theme testen
+
+1. Erstellen Sie ein Testprojekt aus Ihrem Theme:
+
+   ```bash
+   npm create astro@latest -- --template ./path/to/my-theme
+   ```
+
+2. Installieren Sie Abhängigkeiten und starten Sie den Dev-Server:
+
+   ```bash
+   cd test-site
+   npm install
+   npm run dev
+   ```
+
+3. Schließen Sie den Setup-Assistenten unter `http://localhost:4321/_emdash/admin`
+
+4. Überprüfen Sie, ob Kollektionen, Menüs, Weiterleitungen und Inhalte korrekt erstellt wurden
+
+5. Testen Sie, ob alle Seitenvorlagen korrekt gerendert werden
+
+6. Erstellen Sie neue Inhalte über die Admin-Oberfläche, um alle Felder zu überprüfen
+
+## Ihr Theme veröffentlichen
+
+Veröffentlichen Sie auf npm zur Verteilung:
+
+```bash
+npm publish --access public
+```
+
+Benutzer können Ihr Theme dann installieren:
+
+```bash
+npm create astro@latest -- --template @your-org/emdash-theme-blog
+```
+
+Für GitHub-gehostete Themes:
+
+```bash
+npm create astro@latest -- --template github:your-org/emdash-theme-blog
+```
+
+## Benutzerdefinierte Portable-Text-Blöcke
+
+Themes können benutzerdefinierte Portable-Text-Blocktypen für spezialisierte Inhalte definieren. Dies ist nützlich für Marketingseiten, Landing Pages oder Inhalte, die strukturierte Komponenten über Standard-Text hinaus benötigen.
+
+### Benutzerdefinierte Blöcke in Seed-Inhalten definieren
+
+Verwenden Sie einen namensraum-basierten `_type` in den Portable-Text-Inhalten Ihrer Seed-Datei:
+
+```
+json title=".emdash/seed.json"
+{
+	"content": {
+		"pages": [
+			{
+				"id": "home",
+				"slug": "home",
+				"status": "published",
+				"data": {
+						"title": "Startseite",
+					"content": [
+						{
+							"_type": "marketing.hero",
+							"headline": "Build something amazing",
+							"subheadline": "The all-in-one platform for modern teams.",
+							"primaryCta": { "label": "Get Started", "url": "/signup" }
+						},
+						{
+							"_type": "marketing.features",
+							"_key": "features",
+							"headline": "Everything you need",
+							"features": [
+								{
+									"icon": "zap",
+									"title": "Lightning fast",
+									"description": "Built for speed."
+								}
+							]
+						}
+					]
+				}
+			}
+		]
+	}
+}
+```
+
+### Block-Komponenten erstellen
+
+Erstellen Sie Astro-Komponenten für jeden benutzerdefinierten Blocktyp:
+
+```
+astro title="src/components/blocks/Hero.astro"
+---
+interface Props {
+  value: {
+    headline: string;
+    subheadline?: string;
+    primaryCta?: { label: string; url: string };
+  };
+}
+
+const { value } = Astro.props;
+---
+
+<section class="hero">
+  <h1>{value.headline}</h1>
+  {value.subheadline && <p>{value.subheadline}</p>
+}
+  {value.primaryCta && (
+    <a href={value.primaryCta.url} class="btn">
+      {value.primaryCta.label}
+    </a>
+  )}
+</section>
+```
+
+### Benutzerdefinierte Blöcke rendern
+
+Übergeben Sie Ihre benutzerdefinierten Block-Komponenten an die `PortableText`-Komponente:
+
+```
+astro title="src/components/MarketingBlocks.astro"
+---
+import { PortableText } from "emdash/ui";
+import Hero from "../../themes/blocks/Hero.astro";
+import Features from "../../themes/blocks/Features.astro";
+
+interface Props {
+  value: unknown[];
+}
+
+const { value } = Astro.props;
+
+const marketingTypes = {
+  "marketing.hero": Hero,
+  "marketing.features": Features,
+};
+---
+
+<PortableText value={value} components={{ types: marketingTypes }} />
+```
+
+Verwenden Sie sie dann in Ihren Seiten:
+
+```
+astro title="src/pages/index.astro"
+---
+import { getEmDashEntry } from "emdash";
+import MarketingBlocks from "../../components/MarketingBlocks.astro";
+
+const { entry: page } = await getEmDashEntry("pages", "home");
+---
+
+<MarketingBlocks value={page.data.content} />
+```
+
+<Aside>
+  Benutzerdefinierte Blocktypen haben standardmäßig keine Admin-Oberflächen-Editoren. Benutzer können die gesäten Inhalte
+  über den Standard-Portable-Text-Editor bearbeiten oder das JSON direkt ändern. Für eine vollständige Bearbeitungserfahrung
+  in der Admin-Oberfläche sollten Sie ein Plugin mit benutzerdefinierten Editor-Komponenten erstellen.
+</Aside>
+
+### Anker-IDs für Navigation
+
+Fügen Sie `_key` zu Blöcken hinzu, die verlinkbar sein sollen:
+
+```json
+{
+	"_type": "marketing.features",
+	"_key": "features",
+	"headline": "Features"
+}
+```
+
+Verwenden Sie es dann als Anker in Ihrer Komponente:
+
+```astro
+<section id={value._key}>
+  <!-- content -->
+</section>
+```
+
+Dies ermöglicht Navigationslinks wie `/#features`.
+
+## Theme-Checkliste
+
+Überprüfen Sie vor der Veröffentlichung, ob Ihr Theme Folgendes enthält:
+
+- [ ] `package.json` mit `emdash`-Feld (Label, Beschreibung, Seed-Pfad)
+- [ ] `.emdash/seed.json` mit gültigem Schema
+- [ ] Alle in Seiten referenzierten Kollektionen existieren im Seed
+- [ ] In Layouts verwendete Menüs sind im Seed definiert
+- [ ] Beispielinhalt demonstriert das Design des Themes
+- [ ] `astro.config.mjs` mit Datenbank- und Speicherkonfiguration
+- [ ] `src/live.config.ts` mit EmDash-Loader
+- [ ] Keine `getStaticPaths()` auf Inhaltsseiten
+- [ ] Kein hartcodierter Seitentitel, Slogan oder Navigation
+- [ ] Bildfelder werden als Objekte (`image.src`) und nicht als Strings abgerufen
+- [ ] README mit Setup-Anweisungen
+- [ ] Benutzerdefinierte Block-Komponenten für alle nicht-standardmäßigen Portable-Text-Typen
+
+## Nächste Schritte
+
+- **[Seed-Dateiformat](/de/themes/seed-files/)** – Vollständige Referenz für Seed-Dateien
+- **[Themes-Übersicht](/de/themes/overview/)** – Wie Themes in EmDash funktionieren
+- **[WordPress-Themes portieren](/de/themes/porting-wp-themes/)** – Bestehende WordPress-Themes konvertieren

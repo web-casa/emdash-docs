@@ -1,0 +1,463 @@
+---
+title: 분류 체계
+description: 카테고리, 태그 및 사용자 정의 분류 체계로 콘텐츠를 구성하세요.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+분류체계는 콘텐츠를 조직화하기 위한 분류 시스템입니다. EmDash는 기본 제공되는 카테고리와 태그를 포함하며, 특수한 분류 요구를 위한 사용자 정의 분류체계를 지원합니다.
+
+## 기본 제공 분류체계
+
+EmDash는 두 가지 기본 분류체계를 제공합니다:
+
+| 분류체계       | 유형         | 설명                                           |
+| -------------- | ------------ | ----------------------------------------------------- |
+| **카테고리** | 계층적 | 부모-자식 관계를 가진 중첩 분류 |
+| **태그**       | 평면형         | 계층 구조 없이 단순한 라벨                       |
+
+둘 다 기본적으로 게시물 컬렉션에 사용 가능합니다.
+
+## 용어 관리
+
+### 용어 생성
+
+<Tabs>
+  <TabItem label="관리자 대시보드">
+
+1. 분류체계 페이지로 이동합니다 (예: `/_emdash/admin/taxonomies/category`)
+
+2. **새로 추가** 양식에 용어 이름을 입력합니다
+
+3. 선택적으로 설정합니다:
+   - **슬러그** - URL 식별자 (이름에서 자동 생성됨)
+   - **상위** - 계층적 분류체계용
+   - **설명** - 용어 설명
+
+4. **추가**를 클릭합니다
+
+  </TabItem>
+  <TabItem label="콘텐츠 편집기">
+
+5. 편집기에서 콘텐츠 항목을 엽니다
+
+6. 사이드바에서 분류체계 패널을 찾습니다
+
+7. 카테고리: 적용 가능한 용어의 체크박스를 선택하거나 **+ 새로 추가**를 클릭합니다
+
+8. 태그: 쉼표로 구분된 태그 이름을 입력합니다
+
+9. 콘텐츠를 저장합니다
+
+  </TabItem>
+  <TabItem label="API">
+
+```bash
+POST /_emdash/api/taxonomies/category/terms
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "slug": "tutorials",
+  "label": "튜토리얼",
+  "parentId": "term_abc",
+  "description": "실전 가이드와 튜토리얼"
+}
+```
+
+  </TabItem>
+</Tabs>
+
+### 용어 편집
+
+1. 분류체계 용어 페이지로 이동합니다
+
+2. 용어 옆의 **편집**을 클릭합니다
+
+3. 이름, 슬러그, 상위 또는 설명을 업데이트합니다
+
+4. **저장**을 클릭합니다
+
+### 용어 삭제
+
+1. 분류체계 용어 페이지로 이동합니다
+
+2. 용어 옆의 **삭제**를 클릭합니다
+
+3. 삭제를 확인합니다
+
+<Aside type="caution">
+	용어를 삭제하면 연결된 모든 콘텐츠에서 제거됩니다. 콘텐츠는 삭제되지 않고, 용어 할당만 제거됩니다.
+</Aside>
+
+## 분류체계 쿼리
+
+EmDash는 분류체계 용어를 쿼리하고 용어별로 콘텐츠를 필터링하는 기능을 제공합니다.
+
+### 모든 용어 가져오기
+
+분류체계의 모든 용어를 검색합니다:
+
+```ts
+import { getTaxonomyTerms } from "emdash";
+
+// 모든 카테고리 가져오기 (트리 구조 반환)
+const categories = await getTaxonomyTerms("category");
+
+// 모든 태그 가져오기 (평면 목록 반환)
+const tags = await getTaxonomyTerms("tag");
+```
+
+계층적 분류체계의 경우, 용어는 `children` 배열을 포함합니다:
+
+```ts
+interface TaxonomyTerm {
+	id: string;
+	name: string; // Taxonomy name ("category")
+	slug: string; // Term slug ("news")
+	label: string; // Display label ("News")
+	parentId?: string;
+	description?: string;
+	children: TaxonomyTerm[];
+	count?: number; // Number of entries with this term
+}
+```
+
+### 단일 용어 가져오기
+
+```ts
+import { getTerm } from "emdash";
+
+const category = await getTerm("category", "news");
+// TaxonomyTerm 또는 null 반환
+```
+
+### 항목에 대한 용어 가져오기
+
+```ts
+import { getEntryTerms } from "emdash";
+
+// 게시물의 모든 카테고리 가져오기
+const categories = await getEntryTerms("posts", "post-123", "category");
+
+// 게시물의 모든 태그 가져오기
+const tags = await getEntryTerms("posts", "post-123", "tag");
+```
+
+### 용어별 콘텐츠 필터링
+
+`where` 필터와 함께 `getEmDashCollection`을 사용합니다:
+
+```ts
+import { getEmDashCollection } from "emdash";
+
+// "news" 카테고리의 게시물
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: "news" },
+});
+
+// "javascript" 태그가 있는 게시물
+const { entries: jsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { tag: "javascript" },
+});
+```
+
+또는 편의 함수를 사용합니다:
+
+```ts
+import { getEntriesByTerm } from "emdash";
+
+const newsPosts = await getEntriesByTerm("posts", "category", "news");
+```
+
+## 분류체계 페이지 구축
+
+### 카테고리 아카이브
+
+카테고리 내 게시물을 나열하는 페이지를 생성합니다:
+
+```
+astro title="src/pages/category/[slug].astro"
+---
+import { getTaxonomyTerms, getTerm, getEmDashCollection } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const categories = await getTaxonomyTerms("category");
+
+  // 라우팅을 위한 계층적 트리 평면화
+  function flatten(terms) {
+    return terms.flatMap((term) => [term, ...flatten(term.children)]);
+  }
+
+  return flatten(categories).map((cat) => ({
+    params: { slug: cat.slug },
+    props: { category: cat },
+  }));
+}
+
+const { category } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  where: { category: category.slug },
+});
+---
+
+<Base title={category.label}>
+  <h1>{category.label}</h1>
+  {category.description && <p>{category.description}</p>
+}
+  <p>{category.count} posts</p>
+
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+### 태그 아카이브
+
+태그가 지정된 게시물을 나열하는 페이지를 생성합니다:
+
+```
+astro title="src/pages/tag/[slug].astro"
+---
+import { getTaxonomyTerms, getEmDashCollection } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const tags = await getTaxonomyTerms("tag");
+
+  return tags.map((tag) => ({
+    params: { slug: tag.slug },
+    props: { tag },
+  }));
+}
+
+const { tag } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  where: { tag: tag.slug },
+});
+---
+
+<Base title={`Posts tagged "${tag.label}"`}>
+  <h1>#{tag.label}</h1>
+
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+### 카테고리 목록 위젯
+
+게시물 수와 함께 카테고리 목록을 표시합니다:
+
+```
+astro title="src/components/CategoryList.astro"
+---
+import { getTaxonomyTerms } from "emdash";
+
+const categories = await getTaxonomyTerms("category");
+---
+
+<nav class="category-list">
+  <h3>Categories</h3>
+  <ul>
+    {categories.map((cat) => (
+      <li>
+        <a href={`/category/${cat.slug}`}>
+          {cat.label} ({cat.count})
+        </a>
+        {cat.children.length > 0 && (
+          <ul>
+            {cat.children.map((child) => (
+              <li>
+                <a href={`/category/${child.slug}`}>
+                  {child.label} ({child.count})
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+
+### 태그 클라우드
+
+사용량에 따라 크기가 다른 태그를 표시합니다:
+
+```
+astro title="src/components/TagCloud.astro"
+---
+import { getTaxonomyTerms } from "emdash";
+
+const tags = await getTaxonomyTerms("tag");
+
+// 개수에 따른 글꼴 크기 계산
+const counts = tags.map((t) => t.count ?? 0);
+const maxCount = Math.max(...counts, 1);
+const minSize = 0.8;
+const maxSize = 2;
+
+function getSize(count: number) {
+  const ratio = count / maxCount;
+  return minSize + ratio * (maxSize - minSize);
+}
+---
+
+<div class="tag-cloud">
+  {tags.map((tag) => (
+    <a
+      href={`/tag/${tag.slug}`}
+      style={`font-size: ${getSize(tag.count ?? 0)}rem`}
+    >
+      {tag.label}
+    </a>
+  ))}
+</div>
+```
+
+## 콘텐츠에 용어 표시
+
+게시물에 카테고리와 태그를 표시합니다:
+
+```
+astro title="src/components/PostTerms.astro"
+---
+import { getEntryTerms } from "emdash";
+
+interface Props {
+  collection: string;
+  entryId: string;
+}
+
+const { collection, entryId } = Astro.props;
+
+const categories = await getEntryTerms(collection, entryId, "category");
+const tags = await getEntryTerms(collection, entryId, "tag");
+---
+
+<div class="post-terms">
+  {categories.length > 0 && (
+    <div class="categories">
+      <span>게시된 카테고리:</span>
+      {categories.map((cat, i) => (
+        <>
+          {i > 0 && ", "}
+          <a href={`/category/${cat.slug}`}>{cat.label}</a>
+        </>
+      ))}
+    </div>
+  )}
+
+  {tags.length > 0 && (
+    <div class="tags">
+      {tags.map((tag) => (
+        <a href={`/tag/${tag.slug}`} class="tag">
+          #{tag.label}
+        </a>
+      ))}
+    </div>
+  )}
+</div>
+```
+
+## 사용자 정의 분류 체계
+
+카테고리와 태그를 넘어 특수한 요구사항을 위한 분류 체계를 생성하세요.
+
+### 사용자 정의 분류 체계 생성
+
+관리자 API를 사용하여 분류 체계를 생성하세요:
+
+```bash
+POST /_emdash/api/taxonomies
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "name": "genre",
+  "label": "Genres",
+  "labelSingular": "Genre",
+  "hierarchical": true,
+  "collections": ["books", "movies"]
+}
+```
+
+### 사용자 정의 분류 체계 사용
+
+내장된 분류 체계와 동일한 방식으로 사용자 정의 분류 체계를 쿼리하고 표시하세요:
+
+```ts
+import { getTaxonomyTerms, getEmDashCollection } from "emdash";
+
+// 모든 장르 가져오기
+const genres = await getTaxonomyTerms("genre");
+
+// 특정 장르의 책 가져오기
+const { entries: sciFiBooks } = await getEmDashCollection("books", {
+	where: { genre: "science-fiction" },
+});
+```
+
+### 컬렉션에 할당
+
+분류 체계는 적용할 컬렉션을 지정합니다:
+
+```ts
+{
+  "name": "difficulty",
+  "label": "Difficulty Levels",
+  "hierarchical": false,
+  "collections": ["recipes", "tutorials"]
+}
+```
+
+## 분류 체계 API 참조
+
+### REST 엔드포인트
+
+| 엔드포인트                                      | 메서드 | 설명               |
+| --------------------------------------------- | ------ | ------------------------- |
+| `/_emdash/api/taxonomies`                   | GET    | 분류 체계 정의 목록 조회 |
+| `/_emdash/api/taxonomies`                   | POST   | 분류 체계 생성           |
+| `/_emdash/api/taxonomies/:name/terms`       | GET    | 용어 목록 조회                |
+| `/_emdash/api/taxonomies/:name/terms`       | POST   | 용어 생성               |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | GET    | 용어 조회                  |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | PUT    | 용어 업데이트               |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | DELETE | 용어 삭제               |
+
+### 콘텐츠에 용어 할당
+
+```bash
+POST /_emdash/api/content/posts/post-123/terms/category
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "termIds": ["term_news", "term_featured"]
+}
+```
+
+## 다음 단계
+
+- [블로그 생성하기](/ko/guides/create-a-blog/) - 블로그에서 카테고리와 태그 사용하기
+- [콘텐츠 쿼리하기](/ko/guides/querying-content/) - 분류 체계 용어로 필터링하기
+- [콘텐츠 작업하기](/ko/guides/working-with-content/) - 편집기에서 용어 할당하기

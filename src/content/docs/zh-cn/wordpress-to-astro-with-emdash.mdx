@@ -1,0 +1,48 @@
+---
+title: 如何从 WordPress 迁移到 Astro + EmDash
+description: 从整体上理解 WordPress 到 Astro 的迁移路径，包括为什么团队会考虑 EmDash、哪些部分会变化，以及如何更稳妥地推进。
+lastUpdated: 2026-04-07
+sidebar:
+  label: WordPress 到 Astro
+---
+
+从 WordPress 迁移到 Astro，通常会同时带来两个问题：
+
+1. 前端该怎么现代化？
+2. 编辑团队还能不能继续拥有一个好用的 CMS？
+
+EmDash 的吸引力就在于，它能同时回答这两个问题。Astro 成为前端和渲染层，EmDash 则提供了接近 WordPress 心智模型的内容管理工作流。
+
+## 为什么团队会考虑这条路线
+
+- 想获得更现代的前端架构控制力
+- 想把开发体验迁移到 TypeScript 和 Astro
+- 不希望在迁移后失去编辑团队熟悉的发布方式
+- 希望避免“前端一套、CMS 一套”的分裂架构
+
+## 迁移后通常会发生哪些变化
+
+- 主题会变成 Astro 布局和组件
+- `WP_Query` 会变成 EmDash 的内容查询函数
+- WordPress 的文章类型与分类法会映射到 EmDash 的集合和分类结构
+- 内容导入会通过 EmDash 的迁移工具完成，而不是人工复制
+
+## 哪些内容会继续保持熟悉
+
+- 编辑人员依然使用 CMS 后台
+- 文章、页面、分类法、媒体和导航仍然是熟悉的概念
+- 迁移计划依旧围绕内容、重定向、媒体和分类结构完整性来展开
+
+## 建议的迁移顺序
+
+1. 先用一个小型 Astro 项目评估 EmDash
+2. 阅读 [EmDash 与 WordPress 对比](/zh-cn/emdash-vs-wordpress/) 和 [什么是 EmDash？](/zh-cn/what-is-emdash/)
+3. 用一份有代表性的 WordPress 导出文件测试导入流程
+4. 验证重定向、媒体处理和自定义字段映射
+5. 先迁移一个较小的站点或内容区块，再决定是否全面切换
+
+## 下一步阅读
+
+- [从 WordPress 迁移到 EmDash](/zh-cn/migration/from-wordpress/)
+- [WordPress 开发者如何理解 EmDash](/zh-cn/coming-from/wordpress/)
+- [常见问题](/zh-cn/faq/)

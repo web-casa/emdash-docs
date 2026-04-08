@@ -1,0 +1,471 @@
+---
+title: WordPressテーマの移植
+description: 構造化されたアプローチを使用してWordPressテーマをEmDashテーマに変換する
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+WordPressテーマは体系的にEmDashに変換できます。視覚デザイン、コンテンツ構造、動的機能はすべて、3段階のアプローチを使用して移行されます。
+
+<Aside type="tip" title="AI支援による移植">
+	AIコーディングエージェントは、テンプレート移植のような機械的な変換に優れています。エージェントにWordPressテーマファイルとこのガイドの概念マッピングテーブルを入力すると、Astroコンポーネントの堅実な最初の草案を生成できます。出力をレビューして改良してください。エージェントが退屈な部分を処理し、あなたは品質に集中できます。
+</Aside>
+
+## 3段階のアプローチ
+
+<Steps>
+
+1. **デザイン抽出**
+
+   WordPressテーマからCSS変数、フォント、色、レイアウトパターンを抽出します。ライブサイトを分析して、計算済みスタイルとレスポンシブブレークポイントをキャプチャします。
+
+2. **テンプレート変換**
+
+   PHPテンプレートをAstroコンポーネントに変換します。WordPressテンプレート階層をAstroルートにマッピングし、テンプレートタグをEmDash API呼び出しに変換します。
+
+3. **動的機能**
+
+   ナビゲーションメニュー、ウィジェットエリア、タクソノミー、サイト設定をそれぞれのEmDash相当のものに移植します。完全なコンテンツモデルをキャプチャするシードファイルを作成します。
+
+</Steps>
+
+## フェーズ1: デザイン抽出
+
+### CSSとデザイントークンの特定
+
+| ファイル          | 目的                                    |
+| ------------- | ------------------------------------------ |
+| `style.css`   | テーマヘッダーを含むメインスタイルシート          |
+| `assets/css/` | 追加のスタイルシート                     |
+| `theme.json`  | ブロックテーマ（WP 5.9+） - 構造化されたトークン |
+
+### デザイントークンの抽出
+
+| WordPressパターン | EmDash変数  |
+| ----------------- | ------------------ |
+| 本文フォントファミリー  | `--font-body`      |
+| 見出しフォント      | `--font-heading`   |
+| プライマリカラー     | `--color-primary`  |
+| 背景        | `--color-base`     |
+| テキストカラー        | `--color-contrast` |
+| コンテンツ幅     | `--content-width`  |
+
+### ベースレイアウトの作成
+
+抽出したCSS変数、ヘッダー/フッター構造、フォント読み込み、レスポンシブブレークポイントを含む `src/layouts/Base.astro` を作成します:
+
+```astro title="src/layouts/Base.astro"
+---
+import { getSiteSettings, getMenu } from "emdash";
+import "../styles/global.css";
+
+const { title, description } = Astro.props;
+const settings = await getSiteSettings();
+const primaryMenu = await getMenu("primary");
+const pageTitle = title ? `${title} | ${settings.title}` : settings.title;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <header>
+      {settings.logo ? (
+        <img src={settings.logo.url} alt={settings.title} />
+      ) : (
+        <span>{settings.title}</span>
+      )}
+      <nav>
+        {primaryMenu?.items.map((item) => (
+          <a href={item.url}>{item.label}</a>
+        ))}
+      </nav>
+    </header>
+    <main><slot /></main>
+  </body>
+</html>
+```
+
+## フェーズ2: テンプレート変換
+
+### テンプレート階層のマッピング
+
+| WordPressテンプレート          | Astroルート                         |
+| --------------------------- | ----------------------------------- |
+| `index.php`                 | `src/pages/index.astro`             |
+| `single.php`                | `src/pages/posts/[slug].astro`      |
+| `single-{post_type}.php`    | `src/pages/{type}/[slug].astro`     |
+| `page.php`                  | `src/pages/[...slug].astro`         |
+| `archive.php`               | `src/pages/posts/index.astro`       |
+| `category.php`              | `src/pages/categories/[slug].astro` |
+| `tag.php`                   | `src/pages/tags/[slug].astro`       |
+| `search.php`                | `src/pages/search.astro`            |
+| `404.php`                   | `src/pages/404.astro`               |
+| `header.php` / `footer.php` | `src/layouts/Base.astro`の一部    |
+| `sidebar.php`               | `src/components/Sidebar.astro`      |
+
+### テンプレートタグのマッピング
+
+| WordPress関数            | EmDash相当                          |
+| ----------------------------- | -------------------------------------------- |
+| `have_posts()` / `the_post()` | `getEmDashCollection()`                    |
+| `get_post()`                  | `getEmDashEntry()`                         |
+| `the_title()`                 | `post.data.title`                            |
+| `the_content()`               | `<PortableText value={post.data.content} />` |
+| `the_excerpt()`               | `post.data.excerpt`                          |
+| `the_permalink()`             | `/posts/${post.slug}`                        |
+| `the_post_thumbnail()`        | `post.data.featured_image`                   |
+| `get_the_date()`              | `post.data.publishedAt`                      |
+| `get_the_category()`          | `getEntryTerms(coll, id, "categories")`      |
+| `get_the_tags()`              | `getEntryTerms(coll, id, "tags")`            |
+
+### ループの変換
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php title="archive.php"
+<?php while (have_posts()) : the_post(); ?>
+  <article>
+    <h2><a href="<?php the_permalink(); ?>"><?php the_title(); ?></a>
+</h2>
+    <?php the_excerpt(); ?>
+  </article>
+<?php endwhile; ?>
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+astro title="src/pages/posts/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+where: { status: "published" },
+orderBy: { publishedAt: "desc" },
+});
+
+---
+
+<Base title="Blog">
+  {posts.map((post) => (
+    <article>
+      <h2><a href={`/posts/${post.slug}`}>{post.data.title}</a>
+</h2>
+      <p>{post.data.excerpt}</p>
+    </article>
+  ))}
+</Base>
+```
+</TabItem>
+</Tabs>
+
+### シングルテンプレートの変換
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php title="single.php"
+<?php get_header(); ?>
+<article>
+  <h1><?php the_title(); ?></h1>
+  <?php the_content(); ?>
+  <div class="post-meta">
+    Posted in: <?php the_category(', '); ?>
+  </div>
+</article>
+<?php get_footer(); ?>
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEntryTerms } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+	const { entries: posts } = await getEmDashCollection("posts");
+	return posts.map((post) => ({
+		params: { slug: post.slug },
+		props: { post },
+	}));
+}
+
+const { post } = Astro.props;
+const categories = await getEntryTerms("posts", post.id, "categories");
+
+---
+
+<Base title={post.data.title}>
+  <article>
+    <h1>{post.data.title}</h1>
+    <PortableText value={post.data.content} />
+    <div class="post-meta">
+      投稿カテゴリ: {categories.map((cat) => (
+        <a href={`/categories/${cat.slug}`}>{cat.label}</a>
+      ))}
+    </div>
+  </article>
+</Base>
+```
+</TabItem>
+</Tabs>
+
+### テンプレートパーツの変換
+
+WordPressの `get_template_part()` 呼び出しは、Astroコンポーネントのインポートになります。 `template-parts/content-post.php` パーシャルは、ループ内でインポートしてレンダリングする `PostCard.astro` コンポーネントになります。
+
+## フェーズ3: 動的機能
+
+### ナビゲーションメニュー
+
+`functions.php` 内のメニューを特定し、対応するEmDashメニューを作成します:
+
+```
+astro title="src/components/PrimaryNav.astro"
+---
+import { getMenu } from "emdash";
+
+const menu = await getMenu("primary");
+---
+
+{menu && (
+  <nav class="primary-nav">
+    <ul>
+      {menu.items.map((item) => (
+        <li>
+          <a href={item.url} aria-current={Astro.url.pathname === item.url ? "page" : undefined}>
+            {item.label}
+          </a>
+          {item.children.length > 0 && (
+            <ul class="submenu">
+              {item.children.map((child) => (
+                <li><a href={child.url}>{child.label}</a>
+</li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+### ウィジェットエリア（サイドバー）
+
+テーマ内のウィジェットエリアを特定し、レンダリングします：
+
+```
+astro title="src/components/Sidebar.astro"
+---
+import { getWidgetArea, getMenu } from "emdash";
+import { PortableText } from "emdash/ui";
+import RecentPosts from "../../themes/widgets/RecentPosts.astro";
+
+const sidebar = await getWidgetArea("sidebar");
+const widgetComponents = { "core:recent-posts": RecentPosts };
+---
+
+{sidebar && sidebar.widgets.length > 0 && (
+  <aside class="sidebar">
+    {sidebar.widgets.map(async (widget) => (
+      <div class="widget">
+        {widget.title && <h3>{widget.title}</h3>
+}
+        {widget.type === "content" && <PortableText value={widget.content} />}
+        {widget.type === "menu" && (
+          <nav>
+            {await getMenu(widget.menuName).then((m) =>
+              m?.items.map((item) => <a href={item.url}>{item.label}</a>
+)
+            )}
+          </nav>
+        )}
+        {widget.type === "component" && widgetComponents[widget.componentId] && (
+          <Fragment>
+            {(() => {
+              const Component = widgetComponents[widget.componentId];
+              return <Component {...widget.componentProps} />;
+            })()}
+          </Fragment>
+        )}
+      </div>
+    ))}
+  </aside>
+)}
+```
+
+### ウィジェットタイプマッピング
+
+| WordPress ウィジェット | EmDash ウィジェットタイプ             |
+| ---------------- | -------------------------------- |
+| テキスト/カスタムHTML | `type: "content"`                |
+| カスタムメニュー      | `type: "menu"`                   |
+| 最近の投稿     | `component: "core:recent-posts"` |
+| カテゴリー       | `component: "core:categories"`   |
+| タグクラウド        | `component: "core:tag-cloud"`    |
+| 検索           | `component: "core:search"`       |
+
+### タクソノミー
+
+テーマに登録されたタクソノミーをクエリします：
+
+```
+astro title="src/pages/genres/[slug].astro"
+---
+import { getTaxonomyTerms, getEntriesByTerm } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const genres = await getTaxonomyTerms("genre");
+  return genres.map((genre) => ({
+    params: { slug: genre.slug },
+    props: { genre },
+  }));
+}
+
+const { genre } = Astro.props;
+const books = await getEntriesByTerm("books", "genre", genre.slug);
+---
+
+<Base title={genre.label}>
+  <h1>{genre.label}</h1>
+  {books.map((book) => (
+    <article>
+      <h2><a href={`/books/${book.slug}`}>{book.data.title}</a>
+</h2>
+    </article>
+  ))}
+</Base>
+```
+
+### サイト設定マッピング
+
+| WordPress カスタマイザー | EmDash 設定 |
+| -------------------- | ---------------- |
+| サイトタイトル           | `title`          |
+| キャッチフレーズ              | `tagline`        |
+| サイトアイコン            | `favicon`        |
+| カスタムロゴ          | `logo`           |
+| 1ページあたりの投稿数       | `postsPerPage`   |
+
+## ショートコードから Portable Text へ
+
+WordPress ショートコードは Portable Text カスタムブロックになります：
+
+<Tabs>
+<TabItem label="WordPress">
+```
+php title="functions.php"
+add_shortcode('gallery', function($atts) {
+  $ids = explode(',', $atts['ids']);
+  return '<div class="gallery">...</div>
+';
+});
+```
+</TabItem>
+<TabItem label="EmDash">
+```
+astro title="src/components/blocks/Gallery.astro"
+---
+const { images } = Astro.props;
+---
+
+<div class="gallery">
+	{images.map((img) => (
+		<img src={img.url} alt={img.alt || ""} loading="lazy" />
+	))}
+</div>
+```
+
+PortableText に登録します：
+
+```astro
+<PortableText value={content} components={{ gallery: Gallery }} />
+```
+
+</TabItem>
+</Tabs>
+
+## シードファイル構造
+
+シードファイルに完全なコンテンツモデルをキャプチャします。設定、タクソノミー、メニュー、ウィジェットエリアを含めます：
+
+```
+json title=".emdash/seed.json"
+{
+	"$schema": "https://emdashcms.com/seed.schema.json",
+	"version": "1",
+		"meta": { "name": "移植したテーマ" },
+		"settings": { "title": "私のサイト", "tagline": "ようこそ", "postsPerPage": 10 },
+	"taxonomies": [
+		{
+			"name": "category",
+				"label": "カテゴリー",
+			"hierarchical": true,
+			"collections": ["posts"]
+		}
+	],
+	"menus": [
+		{
+			"name": "primary",
+				"label": "メインナビゲーション",
+				"items": [
+					{ "type": "custom", "label": "ホーム", "url": "/" },
+					{ "type": "custom", "label": "Blog", "url": "/posts" }
+			]
+		}
+	],
+	"widgetAreas": [
+		{
+			"name": "sidebar",
+				"label": "メインサイドバー",
+			"widgets": [
+				{
+					"type": "component",
+					"componentId": "core:recent-posts",
+					"props": { "count": 5 }
+				}
+			]
+		}
+	]
+}
+```
+
+完全な仕様については [シードファイル形式](/ja/themes/seed-files/) を参照してください。
+
+## 移植チェックリスト
+
+**フェーズ1（デザイン）：** CSS変数を抽出、フォントの読み込み、カラースキームの一致、レスポンシブブレークポイントが機能。
+
+**フェーズ2（テンプレート）：** ホームページ、個別投稿、アーカイブ、404ページがすべて正しくレンダリング。
+
+**フェーズ3（動的）：** サイト設定が構成済み、メニューが機能、タクソノミーがクエリ可能、ウィジェットエリアがレンダリング、シードファイルが完成。
+
+## エッジケース
+
+### 子テーマ
+
+テーマに親テーマがある場合（`style.css` の `Template:` を確認）、まず親テーマを分析し、その後子テーマのオーバーライドを適用します。
+
+### ブロックテーマ（FSE）
+
+WordPress 5.9+ のブロックテーマは、デザイントークンに `theme.json` を、ブロックマークアップに `templates/*.html` を使用します。ブロックマークアップを Astro コンポーネントに変換し、`theme.json` からトークンを抽出します。
+
+### ページビルダー
+
+Elementor、Divi などで構築されたコンテンツは、テーマファイルではなく投稿メタに保存されます。このコンテンツはテーマ移植ではなく WXR 経由でインポートされます。テーマ移植ではシェルに焦点を当て、ページビルダーコンテンツはインポート後に Portable Text を通じてレンダリングされます。
+
+## 次のステップ
+
+- **[テーマの作成](/ja/themes/creating-themes/)** — 配布可能な EmDash テーマを構築
+- **[シードファイル形式](/ja/themes/seed-files/)** — 完全なシードファイル仕様
+- **[WordPress からの移行](/ja/migration/from-wordpress/)** — WordPress コンテンツをインポート

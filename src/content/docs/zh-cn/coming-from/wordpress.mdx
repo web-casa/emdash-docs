@@ -1,0 +1,395 @@
+---
+title: WordPress 开发者如何理解 EmDash
+description: 面向 WordPress 开发者的 EmDash 指南，帮助你把文章类型、分类法、菜单、小部件和 WP_Query 映射到 Astro 与 TypeScript。
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 将熟悉的 WordPress 概念——文章、页面、分类法、菜单、小工具和媒体库——带入了现代化的 Astro 技术栈。您的内容管理知识可以直接迁移过来。
+
+如果你还在比较方案，建议先阅读 [EmDash 与 WordPress 对比](/zh-cn/emdash-vs-wordpress/) 和 [如何从 WordPress 迁移到 Astro + EmDash](/zh-cn/wordpress-to-astro-with-emdash/)。
+
+## 保持不变的部分
+
+您在 WordPress 中熟知的概念，在 EmDash 中同样是一等公民：
+
+- **集合** 类似于自定义文章类型——定义您的内容结构，在模板中查询它
+- **分类法** 工作方式相同——层级式（如分类）和扁平式（如标签）
+- **菜单** 支持拖拽排序和嵌套项目
+- **小工具区域** 用于侧边栏和动态内容区域
+- **媒体库** 支持上传、组织和图片管理
+- **管理界面** 内容编辑者无需接触代码即可使用
+
+<Aside type="tip">
+	您不需要了解 React 或任何特定的 JavaScript 框架。Astro 组件使用 HTML 和简单的模板表达式——更接近 PHP 模板，而非 React。
+</Aside>
+
+## 有何不同
+
+实现方式改变了，但心智模型保持不变：
+
+<CardGrid>
+	<Card title="使用 TypeScript 而非 PHP" icon="seti:typescript">
+		模板是 Astro 组件。语法更简洁，但概念相同：都是输出 HTML 的服务端代码。
+	</Card>
+	<Card title="内容 API 替代 WP_Query" icon="document">
+		查询函数如 `getEmDashCollection()` 替代了 `WP_Query`。无需 SQL，只需函数调用。
+	</Card>
+	<Card title="基于文件的路由" icon="puzzle">
+		`src/pages/` 目录中的文件成为 URL。无需记忆重写规则或模板层级。
+	</Card>
+	<Card title="组件替代模板部件" icon="rocket">
+		导入并使用组件。与 `get_template_part()` 理念相同，但组织方式更好。
+	</Card>
+</CardGrid>
+
+## 快速参考
+
+| WordPress              | EmDash                             | 说明                             |
+| ---------------------- | ------------------------------------ | --------------------------------- |
+| 自定义文章类型         | 集合                                 | 通过管理界面或 API 定义           |
+| `WP_Query`             | `getEmDashCollection()`            | 过滤器、限制、分类法查询          |
+| `get_post()`           | `getEmDashEntry()`                 | 返回条目或 null                   |
+| 分类/标签              | 分类法                               | 保留层级支持                      |
+| `register_nav_menus()` | `getMenu()`                          | 一流的菜单支持                    |
+| `register_sidebar()`   | `getWidgetArea()`                    | 一流的小工具区域支持              |
+| `bloginfo('name')`     | `getSiteSetting("title")`            | 站点设置 API                      |
+| `the_content()`        | `<PortableText />`                   | 结构化内容渲染                    |
+| 短代码                 | Portable Text 块                     | 自定义组件                        |
+| `add_action/filter()`  | 插件钩子                             | `content:beforeSave` 等           |
+| `wp_options`           | `ctx.kv`                             | 键值存储                          |
+| 主题目录               | `src/` 目录                          | 组件、布局、页面                  |
+| `functions.php`        | `astro.config.mjs` + EmDash 配置     | 构建时和运行时配置                |
+
+## 内容 API
+
+### 查询集合
+
+WordPress 查询使用 `WP_Query` 或辅助函数。EmDash 使用类型化的查询函数。
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="archive.php"
+<?php
+$posts = new WP_Query([
+  'post_type' => 'post',
+  'posts_per_page' => 10,
+  'post_status' => 'publish',
+  'category_name' => 'news',
+]);
+
+while ($posts->have_posts()) :
+$posts->the_post();
+?>
+
+  <h2><?php the_title(); ?></h2>
+  <?php the_excerpt(); ?>
+<?php endwhile; ?>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```astro title="src/pages/posts/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+status: "published",
+limit: 10,
+where: { category: "news" },
+});
+
+---
+
+{posts.map((post) => (
+
+  <article>
+    <h2>{post.data.title}</h2>
+    <p>{post.data.excerpt}</p>
+  </article>
+))}
+```
+	</TabItem>
+</Tabs>
+
+### 获取单个条目
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="single.php"
+<?php
+$post = get_post($id);
+?>
+<article>
+  <h1><?php echo $post->post_title; ?></h1>
+  <?php echo apply_filters('the_content', $post->post_content); ?>
+</article>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+
+## if (!post) return Astro.redirect("/404");
+
+<article>
+  <h1>{post.data.title}</h1>
+  <PortableText value={post.data.content} />
+</article>
+```
+	</TabItem>
+</Tabs>
+
+## 模板层级
+
+WordPress 使用模板层级来选择渲染页面的文件。Astro 使用显式的基于文件的路由。
+
+| WordPress 模板          | EmDash 等效路径                 |
+| --------------------------- | ----------------------------------- |
+| `index.php`                 | `src/pages/index.astro`             |
+| `single.php`                | `src/pages/posts/[slug].astro`      |
+| `single-{type}.php`         | `src/pages/{type}/[slug].astro`     |
+| `page.php`                  | `src/pages/pages/[slug].astro`      |
+| `archive.php`               | `src/pages/posts/index.astro`       |
+| `archive-{type}.php`        | `src/pages/{type}/index.astro`      |
+| `category.php`              | `src/pages/categories/[slug].astro` |
+| `tag.php`                   | `src/pages/tags/[slug].astro`       |
+| `search.php`                | `src/pages/search.astro`            |
+| `404.php`                   | `src/pages/404.astro`               |
+| `header.php` / `footer.php` | `src/layouts/Base.astro`            |
+| `sidebar.php`               | `src/components/Sidebar.astro`      |
+
+<Aside type="tip">
+	Astro 的路由比 WordPress 的层级更明确。每个路由对应一个文件。动态段使用 `[param]` 语法。
+</Aside>
+
+## 模板部件 → 组件
+
+WordPress 的模板部件变成了 Astro 组件：
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="functions.php / template"
+// In template:
+get_template_part('template-parts/content', 'post');
+
+// template-parts/content-post.php:
+
+<article class="post">
+  <h2><?php the_title(); ?></h2>
+  <?php the_excerpt(); ?>
+</article>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```astro title="src/components/PostCard.astro"
+---
+const { post } = Astro.props;
+---
+
+<article class="post">
+	<h2>{post.data.title}</h2>
+	<p>{post.data.excerpt}</p>
+</article>
+```
+
+```astro title="src/pages/index.astro"
+---
+import PostCard from "../components/PostCard.astro";
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts");
+---
+
+{posts.map((post) => <PostCard {post} />)}
+```
+
+    </TabItem>
+
+</Tabs>
+
+## 菜单
+
+EmDash 提供一流的菜单支持，并自动解析 URL：
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="header.php"
+<?php
+wp_nav_menu([
+  'theme_location' => 'primary',
+  'container' => 'nav',
+]);
+?>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```astro title="src/components/Header.astro"
+---
+import { getMenu } from "emdash";
+
+## const menu = await getMenu("primary");
+
+<nav>
+  <ul>
+    {menu?.items.map((item) => (
+      <li>
+        <a href={item.url}>{item.label}</a>
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+	</TabItem>
+</Tabs>
+
+菜单可以通过管理界面、种子文件或 WordPress 导入来创建。
+
+## 小工具区域
+
+小工具区域的工作方式类似于 WordPress 中的侧边栏：
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="sidebar.php"
+<?php if (is_active_sidebar('sidebar-1')) : ?>
+  <aside>
+    <?php dynamic_sidebar('sidebar-1'); ?>
+  </aside>
+<?php endif; ?>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```astro title="src/components/Sidebar.astro"
+---
+import { getWidgetArea } from "emdash";
+import { PortableText } from "emdash/ui";
+
+## const sidebar = await getWidgetArea("sidebar");
+
+{sidebar && (
+
+  <aside>
+    {sidebar.widgets.map((widget) => {
+      if (widget.type === "content") {
+        return <PortableText value={widget.content} />;
+      }
+      // Handle other widget types
+    })}
+  </aside>
+)}
+```
+	</TabItem>
+</Tabs>
+
+## 站点设置
+
+站点选项和自定义器设置映射到 `getSiteSetting()`：
+
+| WordPress                   | EmDash                       |
+| --------------------------- | ------------------------------ |
+| `bloginfo('name')`          | `getSiteSetting("title")`      |
+| `bloginfo('description')`   | `getSiteSetting("tagline")`    |
+| `get_custom_logo()`         | `getSiteSetting("logo")`       |
+| `get_option('date_format')` | `getSiteSetting("dateFormat")` |
+| `home_url()`                | `Astro.site`                   |
+
+```ts
+import { getSiteSetting } from "emdash";
+
+const title = await getSiteSetting("title");
+const logo = await getSiteSetting("logo"); // Returns { mediaId, alt, url }
+```
+
+## 分类法
+
+分类法在概念上工作方式相同——层级式（如分类）或扁平式（如标签）：
+
+```ts
+import { getTaxonomyTerms, getEntryTerms, getTerm } from "emdash";
+
+// Get all categories
+const categories = await getTaxonomyTerms("categories");
+
+// Get a specific term
+const news = await getTerm("categories", "news");
+
+// Get terms for a post
+const postCategories = await getEntryTerms("posts", postId, "categories");
+```
+
+## 钩子 → 插件系统
+
+WordPress 钩子 (`add_action`, `add_filter`) 变为 EmDash 插件钩子：
+
+| WordPress 钩子  | EmDash 钩子           | 用途                      |
+| --------------- | ----------------------- | ---------------------------- |
+| `save_post`     | `content:beforeSave`    | 保存前修改内容               |
+| `the_content`   | PortableText 组件       | 转换渲染后的内容             |
+| `pre_get_posts` | 查询选项                | 过滤查询                     |
+| `wp_head`       | 布局的 `<head>`         | 添加头部内容                 |
+| `wp_footer`     | 布局的 `</body>` 前     | 添加页脚内容                 |
+
+## EmDash 的优势
+
+<CardGrid>
+	<Card title="类型安全" icon="seti:typescript">
+		全面使用 TypeScript。集合、查询和组件都是完全类型化的。无需再猜测字段名或返回类型。
+	</Card>
+	<Card title="性能" icon="rocket">
+		没有 PHP 开销。默认静态生成。需要时进行服务端渲染。支持边缘部署。
+	</Card>
+	<Card title="现代化的开发体验" icon="laptop">
+		热模块替换。基于组件的架构。现代化工具链（Vite、TypeScript、ESLint）。
+	</Card>
+	<Card title="基于 Git 的部署" icon="github">
+		代码和模板在 git 中。内容在数据库中。无需 FTP，无需文件权限，没有被黑的网站。
+	</Card>
+</CardGrid>
+
+### 预览链接
+
+EmDash 生成带有 HMAC 签名令牌的安全预览 URL。内容编辑者无需登录生产环境即可预览草稿——分享链接，而非凭据。
+
+### 无插件冲突
+
+WordPress 插件冲突不复存在。EmDash 插件在具有明确 API 的隔离上下文中运行。没有全局状态污染。
+
+## 内容编辑者体验
+
+内容编辑者使用 EmDash 管理面板，类似于 wp-admin：
+
+- **仪表盘** 显示最近活动
+- **集合列表** 支持搜索、过滤和批量操作
+- **富文本编辑器** 用于内容编辑（Portable Text，而非 Gutenberg）
+- **媒体库** 支持拖拽上传
+- **菜单构建器** 支持拖拽排序
+- **小工具区域编辑器** 用于侧边栏内容
+
+编辑体验是熟悉的。底层技术是现代化的。
+
+## 迁移路径
+
+EmDash 可以直接导入 WordPress 内容：
+
+1. 从 WordPress 导出（工具 → 导出）
+2. 在 EmDash 管理界面中上传 `.xml` 文件
+3. 将文章类型映射到集合
+4. 导入内容和媒体
+
+文章、页面、分类法、菜单和媒体都会迁移。Gutenberg 块会转换为 Portable Text。自定义字段会被分析并映射。
+
+完整说明请参阅 [WordPress 迁移指南](/zh-cn/migration/from-wordpress/)。
+
+## 后续步骤
+
+- **[入门指南](/zh-cn/getting-started/)** — 设置您的第一个 EmDash 站点
+- **[查询内容](/zh-cn/guides/querying-content/)** — 深入探讨内容 API
+- **[分类法](/zh-cn/guides/taxonomies/)** — 分类、标签和自定义分类法
+- **[菜单](/zh-cn/guides/menus/)** — 导航菜单
+- **[从 WordPress 迁移](/zh-cn/migration/from-wordpress/)** — 导入现有内容

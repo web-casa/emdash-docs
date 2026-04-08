@@ -1,0 +1,411 @@
+---
+title: コンテンツのクエリ
+description: テンプレート内でコンテンツを取得するには、getEmDashCollection と getEmDashEntry を使用します。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDashは、Astroのページやコンポーネントでコンテンツを取得するためのクエリ関数を提供します。これらの関数はAstroの[ライブコンテンツコレクション](https://docs.astro.build/en/reference/experimental-flags/live-content-collections/)パターンに従い、エラーハンドリングを含む構造化された結果を返します。
+
+## クエリ関数
+
+EmDashは主に2つのクエリ関数をエクスポートします：
+
+| 関数                | 目的                                | 戻り値                       |
+| ----------------------- | -------------------------------------- | ----------------------------- |
+| `getEmDashCollection` | コンテンツタイプの全エントリーを取得 | `{ entries, error }`          |
+| `getEmDashEntry`      | IDまたはスラッグで単一エントリーを取得  | `{ entry, error, isPreview }` |
+
+これらを`emdash`からインポートします：
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+```
+
+## 全エントリーの取得
+
+コンテンツタイプの全エントリーを取得するには`getEmDashCollection`を使用します：
+
+```
+astro title="src/pages/posts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts, error } = await getEmDashCollection("posts");
+
+if (error) {
+  console.error("Failed to load posts:", error);
+}
+---
+
+<ul>
+  {posts.map((post) => (
+    <li>{post.data.title}</li>
+  ))}
+</ul>
+```
+
+<Aside>
+  分割代入構文`{ entries: posts }`は、`entries`を`posts`にリネームしてコードをクリーンにします。`{ entries }`を直接使用することも可能です。
+</Aside>
+
+### ロケールによるフィルタリング
+
+[i18nが有効な場合](/ja/guides/internationalization/)、特定の言語のコンテンツを取得するためにロケールでフィルタリングします：
+
+```ts
+// French posts
+const { entries: frenchPosts } = await getEmDashCollection("posts", {
+	locale: "fr",
+	status: "published",
+});
+
+// 現在のリクエストロケールを使用
+const { entries: localizedPosts } = await getEmDashCollection("posts", {
+	locale: Astro.currentLocale,
+	status: "published",
+});
+```
+
+単一エントリーの場合は、`locale`を第3引数として渡します：
+
+```ts
+const { entry: post } = await getEmDashEntry("posts", "my-post", {
+	locale: Astro.currentLocale,
+});
+```
+
+`locale`が省略された場合、リクエストの現在のロケールがデフォルトになります。要求されたロケールの翻訳が存在しない場合、[フォールバックチェーン](/ja/guides/internationalization/#fallback-chain)が適用されます。
+
+### ステータスによるフィルタリング
+
+公開済みまたは下書きのコンテンツのみを取得します：
+
+```ts
+// Only published posts
+const { entries: published } = await getEmDashCollection("posts", {
+	status: "published",
+});
+
+// 下書きのみ
+const { entries: drafts } = await getEmDashCollection("posts", {
+	status: "draft",
+});
+```
+
+<Aside type="tip">
+	公開ページでは常に`status: "published"`でフィルタリングしてください。下書きコンテンツは管理者またはプレビューモードでのみアクセス可能であるべきです。
+</Aside>
+
+### 結果数の制限
+
+返されるエントリー数を制限します：
+
+```ts
+// Get the 5 most recent posts
+const { entries: recentPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	limit: 5,
+});
+```
+
+### タクソノミーによるフィルタリング
+
+カテゴリ、タグ、またはカスタムタクソノミータームでエントリーをフィルタリングします：
+
+```ts
+// Posts in the "news" category
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: "news" },
+});
+
+// "javascript"タグを持つ投稿
+const { entries: jsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { tag: "javascript" },
+});
+
+// 複数タームのいずれかに一致する投稿
+const { entries: featuredNews } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: ["news", "featured"] },
+});
+```
+
+`where`フィルターは、単一のタクソノミーに対して複数の値が提供された場合、ORロジックを使用します。
+
+### エラーハンドリング
+
+信頼性が重要な場合は常にエラーをチェックしてください：
+
+```ts
+const { entries: posts, error } = await getEmDashCollection("posts");
+
+if (error) {
+	// ログ出力と適切な処理
+	console.error("投稿の読み込みに失敗しました：", error);
+	return new Response("サーバーエラー", { status: 500 });
+}
+```
+
+## 単一エントリーの取得
+
+IDまたはスラッグで1つのエントリーを取得するには`getEmDashEntry`を使用します：
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("サーバーエラー", { status: 500 });
+}
+
+if (!post) {
+  return Astro.redirect("/404");
+}
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+  <PortableText value={post.data.content} />
+</article>
+```
+
+### エントリーの戻り値の型
+
+`getEmDashEntry`は結果オブジェクトを返します：
+
+```ts
+interface EntryResult<T> {
+	entry: ContentEntry<T> | null; // null if not found
+	error?: Error; // Only set for actual errors (not "not found")
+	isPreview: boolean; // true if viewing preview/draft content
+}
+
+interface ContentEntry<T> {
+	id: string;
+	data: T;
+	edit: EditProxy; // Visual editing annotations
+}
+```
+
+`entry`内の`data`オブジェクトには、コンテンツタイプに対して定義されたすべてのフィールドが含まれます。`edit`プロキシはビジュアル編集のアノテーションを提供します（以下を参照）。
+
+## プレビューモード
+
+EmDashはミドルウェアを介してプレビューを自動的に処理します。URLに有効な`_preview`トークンが含まれている場合、ミドルウェアはそれを検証し、リクエストコンテキストを設定します。その後、クエリ関数は特別なパラメータなしで下書きコンテンツを提供します：
+
+```
+astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+
+// 特別なプレビュー処理は不要 — ミドルウェアが自動的に処理します
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("サーバーエラー", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+{isPreview && (
+  <div class="preview-banner">
+    Viewing preview. This content is not published.
+  </div>
+)}
+
+<article>
+  <h1>{entry.data.title}</h1>
+  <PortableText value={entry.data.content} />
+</article>
+```
+
+<Aside>
+	環境変数に`EMDASH_PREVIEW_SECRET`を設定してください。管理者はHMAC署名付きの`_preview`トークンを含むプレビューURLを生成します。
+</Aside>
+
+## ビジュアル編集
+
+クエリ関数によって返されるすべてのエントリーには、テンプレートにアノテーションを付けるための`edit`プロキシが含まれています。これを要素にスプレッドして、認証済み編集者のインライン編集を有効にします：
+
+```astro
+<article {...entry.edit}>
+  <h1 {...entry.edit.title}>{entry.data.title}</h1>
+  <div {...entry.edit.content}>
+    <PortableText value={entry.data.content} />
+  </div>
+</article>
+```
+
+編集モードでは、`{...entry.edit.title}`はビジュアル編集ツールバーがインライン編集を有効にするために使用する`data-emdash-ref`属性を生成します。本番環境では、プロキシのスプレッドは何も出力しません — ランタイムコストはゼロです。
+
+<Aside type="tip">
+	文字列およびテキストフィールドの場合、インライン編集は`contenteditable`を使用します。Portable Textフィールドの場合、TipTapエディターを注入します。画像フィールドの場合、メディアライブラリのポップオーバーを開きます。
+</Aside>
+
+## 結果のソート
+
+`getEmDashCollection`はソート順を保証しません。テンプレート内で結果をソートしてください：
+
+```ts
+const { entries: posts } = await getEmDashCollection("posts", {
+	status: "published",
+});
+
+// 公開日でソート、新しい順
+const sorted = posts.sort(
+	(a, b) => (b.data.publishedAt?.getTime() ?? 0) - (a.data.publishedAt?.getTime() ?? 0),
+);
+```
+
+### 一般的なソートパターン
+
+```ts
+// Alphabetical by title
+posts.sort((a, b) => a.data.title.localeCompare(b.data.title));
+
+// カスタム順序フィールドで
+posts.sort((a, b) => (a.data.order ?? 0) - (b.data.order ?? 0));
+
+// ランダム順序
+posts.sort(() => Math.random() - 0.5);
+```
+
+## TypeScript型
+
+コレクションのTypeScript型を生成します：
+
+```bash
+npx emdash types
+```
+
+これにより、各コレクションのインターフェースを含む`.emdash/types.ts`が作成されます。型安全性のために使用します：
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+import type { Post } from "../../.emdash/types";
+
+// 型安全なコレクションクエリ
+const { entries: posts } = await getEmDashCollection<Post>("posts");
+// postsはContentEntry<Post>[]
+
+// 型安全なエントリークエリ
+const { entry: post } = await getEmDashEntry<Post>("posts", "my-post");
+// postはContentEntry<Post> | null
+```
+
+## 静的レンダリングとサーバーレンダリング
+
+EmDashコンテンツは、静的ページとサーバーレンダリングページの両方で動作します。
+
+### 静的（事前レンダリング）
+
+静的ページでは、ビルド時にルートを生成するために`getStaticPaths`を使用します：
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+export async function getStaticPaths() {
+  const { entries: posts } = await getEmDashCollection("posts", {
+    status: "published",
+  });
+
+  return posts.map((post) => ({
+    params: { slug: post.data.slug },
+  }));
+}
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+---
+```
+
+### サーバーレンダリング
+
+サーバーレンダリングページでは、コンテンツを直接クエリします：
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+export const prerender = false;
+
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!post) {
+  return new Response(null, { status: 404 });
+}
+---
+```
+
+<Aside type="tip">
+	サーバーレンダリングでは、リビルドなしでコンテンツの変更が即座に反映されます。頻繁に更新されるコンテンツに使用してください。
+</Aside>
+
+## パフォーマンスに関する考慮事項
+
+### キャッシュ
+
+EmDashはAstroのライブコンテンツコレクションを使用しており、キャッシュは自動的に処理されます。サーバーレンダリングされたページでは、HTTPキャッシュヘッダーの追加を検討してください：
+
+```astro
+---
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+});
+
+// 5分間キャッシュ
+Astro.response.headers.set("Cache-Control", "public, max-age=300");
+---
+```
+
+### 冗長なクエリを避ける
+
+一度クエリを実行し、データをコンポーネントに渡します：
+
+```
+astro title="src/pages/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import PostList from "../../components/PostList.astro";
+import Sidebar from "../../components/Sidebar.astro";
+
+// 一度だけクエリ
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+});
+
+const featured = posts.filter((p) => p.data.featured);
+const recent = posts.slice(0, 5);
+---
+
+<PostList posts={featured} />
+<Sidebar posts={recent} />
+```
+
+## 次のステップ
+
+- [ブログを作成する](/ja/guides/create-a-blog/) - 完全なブログを構築する
+- [タクソノミー](/ja/guides/taxonomies/) - カテゴリーとタグでフィルタリングする
+- [コンテンツの操作](/ja/guides/working-with-content/) - 管理者CRUD操作
+- [国際化](/ja/guides/internationalization/) - 多言語コンテンツと翻訳

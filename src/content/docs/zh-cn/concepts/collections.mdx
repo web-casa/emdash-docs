@@ -1,0 +1,379 @@
+---
+title: 集合与字段
+description: 通过集合和字段定义内容类型——支持的字段类型、验证和关系。
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+import contentTypesImg from "../../../../assets/screenshots/admin-content-types.png";
+
+集合是 EmDash 内容模型的基础。每个集合代表一种内容类型（如文章、页面、产品），并包含用于确定数据结构的字段定义。
+
+## 创建集合
+
+通过管理面板的 **内容类型** 部分创建集合。每个集合包含：
+
+<img src={contentTypesImg.src} alt="EmDash 内容类型展示页面、文章和自定义集合及其功能" />
+
+| 属性            | 描述                                          |
+| --------------- | ---------------------------------------------------- |
+| `slug`          | URL 安全标识符（例如 `posts`、`products`）      |
+| `label`         | 显示名称（例如 "博客文章"）                    |
+| `labelSingular` | 单数形式（例如 "文章"）                         |
+| `description`   | 面向编辑者的可选描述                     |
+| `icon`          | 管理侧边栏使用的 Lucide 图标名称               |
+| `supports`      | 支持的功能，如草稿、修订、预览、定时发布、搜索、SEO |
+
+<Aside type="note">
+	部分集合 slug 是保留的：`content`、`media`、`users`、`revisions`、`taxonomies`、`options`、`audit_logs`。
+</Aside>
+
+## 集合功能
+
+创建集合时，启用你需要的功能：
+
+| 功能      | 描述                                    |
+| ------------ | ---------------------------------------------- |
+| `drafts`     | 启用草稿/已发布工作流                |
+| `revisions`  | 通过版本快照跟踪内容历史   |
+| `preview`    | 为草稿内容生成带签名的预览 URL |
+| `scheduling` | 安排内容在未来日期发布   |
+
+```ts
+// Example collection with all features enabled
+{
+  slug: "posts",
+  label: "Blog Posts",
+  labelSingular: "Post",
+  supports: ["drafts", "revisions", "preview", "scheduling"]
+}
+```
+
+## 字段类型
+
+EmDash 支持 15 种字段类型，它们映射到 SQLite 列类型：
+
+### 文本字段
+
+<Tabs>
+  <TabItem label="string">
+    短文本输入。映射到 `TEXT` 列。
+    
+    ```ts
+    { slug: "title", type: "string", label: "Title" }
+    ```
+  </TabItem>
+  <TabItem label="text">
+    多行文本区域。映射到 `TEXT` 列。
+    
+    ```ts
+    { slug: "excerpt", type: "text", label: "Excerpt" }
+    ```
+  </TabItem>
+  <TabItem label="slug">
+    URL 安全的 slug 字段。映射到 `TEXT` 列。
+    
+    ```ts
+    { slug: "handle", type: "slug", label: "URL Handle" }
+    ```
+  </TabItem>
+</Tabs>
+
+### 富内容
+
+<Tabs>
+  <TabItem label="portableText">
+    富文本编辑器（TipTap/ProseMirror）。以 JSON 格式存储。
+    
+    ```ts
+    { slug: "content", type: "portableText", label: "Content" }
+    ```
+    
+    Portable Text 是一种基于块的格式，无需嵌入 HTML 即可保留结构。
+  </TabItem>
+  <TabItem label="json">
+    任意 JSON 数据。以 JSON 格式存储。
+    
+    ```ts
+    { slug: "metadata", type: "json", label: "Custom Metadata" }
+    ```
+  </TabItem>
+</Tabs>
+
+### 数字
+
+<Tabs>
+  <TabItem label="number">
+    十进制数字。映射到 `REAL` 列。
+    
+    ```ts
+    { slug: "price", type: "number", label: "Price" }
+    ```
+  </TabItem>
+  <TabItem label="integer">
+    整数。映射到 `INTEGER` 列。
+    
+    ```ts
+    { slug: "quantity", type: "integer", label: "Stock Quantity" }
+    ```
+  </TabItem>
+</Tabs>
+
+### 布尔值与日期
+
+<Tabs>
+  <TabItem label="boolean">
+    真/假切换。映射到 `INTEGER`（0/1）。
+    
+    ```ts
+    { slug: "featured", type: "boolean", label: "Featured Post" }
+    ```
+  </TabItem>
+  <TabItem label="datetime">
+    日期和时间选择器。以 ISO 8601 字符串格式存储。
+    
+    ```ts
+    { slug: "eventDate", type: "datetime", label: "Event Date" }
+    ```
+  </TabItem>
+</Tabs>
+
+### 选择
+
+<Tabs>
+  <TabItem label="select">
+    从列表中选择单个选项。映射到 `TEXT` 列。
+    
+    ```ts
+    {
+      slug: "status",
+      type: "select",
+      label: "Product Status",
+      validation: {
+        options: ["active", "discontinued", "coming_soon"]
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="multiSelect">
+    从列表中选择多个选项。以 JSON 数组格式存储。
+    
+    ```ts
+    {
+      slug: "features",
+      type: "multiSelect",
+      label: "Product Features",
+      validation: {
+        options: ["wireless", "waterproof", "eco-friendly"]
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+### 媒体与引用
+
+<Tabs>
+  <TabItem label="image">
+    从媒体库中选择图片。将媒体 ID 存储为 `TEXT`。
+    
+    ```ts
+    { slug: "featuredImage", type: "image", label: "Featured Image" }
+    ```
+  </TabItem>
+  <TabItem label="file">
+    从媒体库中选择文件。将媒体 ID 存储为 `TEXT`。
+    
+    ```ts
+    { slug: "attachment", type: "file", label: "PDF Attachment" }
+    ```
+  </TabItem>
+  <TabItem label="reference">
+    引用另一个集合的条目。将条目 ID 存储为 `TEXT`。
+    
+    ```ts
+    {
+      slug: "author",
+      type: "reference",
+      label: "Author",
+      options: {
+        collection: "authors"
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+## 字段属性
+
+每个字段都支持以下属性：
+
+| 属性       | 类型        | 描述                                  |
+| -------------- | ----------- | -------------------------------------------- |
+| `slug`         | `string`    | 数据库中的列名                  |
+| `label`        | `string`    | 管理界面中的显示标签                    |
+| `type`         | `FieldType` | 15 种字段类型之一                    |
+| `required`     | `boolean`   | 字段是否必须具有值          |
+| `unique`       | `boolean`   | 值在条目间是否必须唯一 |
+| `defaultValue` | `unknown`   | 新条目的默认值                |
+| `validation`   | `object`    | 特定于类型的验证规则               |
+| `widget`       | `string`    | 自定义小部件标识符                     |
+| `options`      | `object`    | 小部件特定配置                |
+| `sortOrder`    | `number`    | 编辑器中的显示顺序                  |
+
+<Aside type="caution">
+	部分字段 slug 是保留的，不能使用：`id`、`slug`、`status`、`author_id`、`primary_byline_id`、`created_at`、`updated_at`、`published_at`、`scheduled_at`、`deleted_at`、`version`、`live_revision_id`、`draft_revision_id`。
+</Aside>
+
+## 验证规则
+
+`validation` 对象因字段类型而异：
+
+```ts
+interface FieldValidation {
+	required?: boolean; // All types
+	min?: number; // number, integer
+	max?: number; // number, integer
+	minLength?: number; // string, text
+	maxLength?: number; // string, text
+	pattern?: string; // string (regex)
+	options?: string[]; // select, multiSelect
+}
+```
+
+带验证的示例：
+
+```ts
+{
+  slug: "email",
+  type: "string",
+  label: "Email Address",
+  required: true,
+  unique: true,
+  validation: {
+    pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+  }
+}
+```
+
+## 小部件选项
+
+`options` 对象用于配置特定于字段的 UI 行为：
+
+```ts
+interface FieldWidgetOptions {
+	rows?: number; // text (textarea rows)
+	showPreview?: boolean; // image, file
+	collection?: string; // reference (target collection)
+	allowMultiple?: boolean; // reference (multiple refs)
+	[key: string]: unknown; // Custom widget options
+}
+```
+
+引用字段示例：
+
+```ts
+{
+  slug: "relatedProducts",
+  type: "reference",
+  label: "Related Products",
+  options: {
+    collection: "products",
+    allowMultiple: true
+  }
+}
+```
+
+## 查询集合
+
+使用提供的查询函数来获取内容。这些函数遵循 Astro 的实时集合模式，返回结构化结果：
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+// Get all entries - returns { entries, error }
+const { entries: posts } = await getEmDashCollection("posts");
+
+// Filter by status
+const { entries: drafts } = await getEmDashCollection("posts", {
+	status: "draft",
+});
+
+// Limit results
+const { entries: recent } = await getEmDashCollection("posts", {
+	limit: 5,
+});
+
+// Filter by taxonomy
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	where: { category: "news" },
+});
+
+// Get a single entry by slug - returns { entry, error, isPreview }
+const { entry: post } = await getEmDashEntry("posts", "my-post-slug");
+
+// Handle errors
+const { entries, error } = await getEmDashCollection("posts");
+if (error) {
+	console.error("Failed to load posts:", error);
+}
+```
+
+## 类型生成
+
+运行 `npx emdash types` 以根据你的模式生成 TypeScript 类型：
+
+```ts
+// .emdash/types.ts (generated)
+export interface Post {
+	title: string;
+	content: PortableTextBlock[];
+	excerpt?: string;
+	featuredImage?: string;
+	author: string; // reference ID
+}
+
+export interface Product {
+	title: string;
+	price: number;
+	description: PortableTextBlock[];
+}
+```
+
+<Aside type="tip">
+	在管理面板中修改集合后，重新运行 `emdash types` 以保持类型同步。
+</Aside>
+
+## 数据库映射
+
+字段类型映射到 SQLite 列类型：
+
+| 字段类型     | SQLite 类型 | 备注                 |
+| -------------- | ----------- | --------------------- |
+| `string`       | `TEXT`      |                       |
+| `text`         | `TEXT`      |                       |
+| `slug`         | `TEXT`      |                       |
+| `number`       | `REAL`      | 64 位浮点数 |
+| `integer`      | `INTEGER`   | 64 位有符号整数 |
+| `boolean`      | `INTEGER`   | 0 或 1                |
+| `datetime`     | `TEXT`      | ISO 8601 格式       |
+| `select`       | `TEXT`      |                       |
+| `multiSelect`  | `JSON`      | 字符串数组      |
+| `portableText` | `JSON`      | 块数组           |
+| `image`        | `TEXT`      | 媒体 ID              |
+| `file`         | `TEXT`      | 媒体 ID              |
+| `reference`    | `TEXT`      | 条目 ID              |
+| `json`         | `JSON`      | 任意 JSON        |
+
+## 后续步骤
+
+<CardGrid>
+	<Card title="内容模型" icon="open-book">
+		了解 [数据库优先方法](/zh-cn/concepts/content-model/)。
+	</Card>
+	<Card title="分类法" icon="list-format">
+		使用 [分类和标签](/zh-cn/guides/taxonomies/) 组织内容。
+	</Card>
+	<Card title="媒体库" icon="seti:image">
+		管理 [图片和文件](/zh-cn/guides/media-library/)。
+	</Card>
+</CardGrid>

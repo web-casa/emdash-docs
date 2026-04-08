@@ -1,0 +1,68 @@
+---
+title: HiEmdash Docs
+description: Eine inoffizielle EmDash-Dokumentationsseite, erstellt von einem Enthusiasten, mit anfängerfreundlichen Anleitungen, praktischen FAQs und mehrsprachigen Übersetzungen.
+lastUpdated: 2026-04-07
+template: splash
+hero:
+  tagline: Eine Community-Dokumentationsseite für EmDash mit anfängerfreundlichen Anleitungen, praktischen FAQs und mehrsprachigen Übersetzungen als Ergänzung zur offiziellen Dokumentation.
+  actions:
+    - text: Loslegen
+      link: /de/getting-started/
+      icon: right-arrow
+    - text: Auf GitHub ansehen
+      link: https://github.com/emdash-cms/emdash
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## Warum HiEmdash Docs?
+
+<CardGrid stagger>
+	<Card title="Leichterer Einstieg" icon="document">
+		Neben der offiziellen Dokumentation bietet diese Seite Einführungen und zusätzlichen Kontext für Teams, die
+		EmDash zum ersten Mal einsetzen.
+	</Card>
+	<Card title="Mehrsprachig" icon="puzzle">
+		Englisch bleibt die maßgebliche Quelle, aber es gibt bereits Übersetzungen ins vereinfachte Chinesisch und
+		eine Grundlage für weitere Sprachen.
+	</Card>
+	<Card title="Community-Notizen" icon="setting">
+		Außerdem sammelt die Seite häufige Fragen, praktische Stolperfallen und Einrichtungstipps, die beim Einstieg
+		leicht untergehen.
+	</Card>
+</CardGrid>
+
+## Was Sie hier finden
+
+- **Erste-Schritte-Anleitungen** — Klare Einrichtungsanweisungen für neue EmDash-Nutzer
+- **Praktische FAQs** — Zusätzliche Antworten aus öffentlichen Projekt-Diskussionen und häufigen Problemstellen
+- **Mehrsprachige Dokumentation** — Englische Quellinhalte mit lokalisierten Übersetzungen für einen breiteren Zugang
+- **Migrationshinweise** — Hilfreicher Kontext für Personen, die von WordPress oder reinen Astro-Workflows kommen
+
+## Beliebte Lektüre
+
+- [Was ist EmDash?](/de/what-is-emdash/) für einen Überblick über das Projekt in einfacher Sprache
+- [Bestes Astro CMS](/de/best-astro-cms/) zur Bewertung von EmDash gegenüber gängigen Astro-CMS-Anforderungen
+- [EmDash vs WordPress](/de/emdash-vs-wordpress/) für einen direkten Vergleich von Bearbeitung, Bereitstellung und Architektur
+- [WordPress zu Astro mit EmDash](/de/wordpress-to-astro-with-emdash/) für einen migrationsorientierten Überblick
+
+## Schnellstart
+
+```bash
+# Neue EmDash-Website erstellen
+npm create astro@latest -- --template @emdash-cms/template-blog
+
+# Starten Sie den Dev-Server
+npm run dev
+
+# Öffnen Sie die Admin-Oberfläche unter http://localhost:4321/_emdash/admin
+```
+
+## Über EmDash
+
+- **Astro-natives CMS** — Für Astro entwickelt, statt später daran angepasst
+- **Typsichere Inhalte** — Strukturierte Inhaltsmodelle und generierte TypeScript-Unterstützung
+- **Erweiterbare Architektur** — Plugins, Hooks, Admin-UI-Erweiterungen und Bereitstellungsflexibilität
+- **WordPress-freundliche Konzepte** — Menüs, Widgets, Taxonomien und migrationsorientierte Workflows

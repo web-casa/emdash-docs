@@ -1,0 +1,201 @@
+---
+title: Sandbox de plugins
+description: Cómo EmDash aísla complementos no confiables en Cloudflare Workers frente a implementaciones en Node.js.
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDash admite la ejecución de plugins en dos modos: **confiable** y **aislado**. Esta página explica cómo funciona cada uno, qué protecciones ofrece y qué implicaciones de seguridad tiene según el entorno de despliegue.
+
+## Modos de Ejecución
+
+| | Confiable | Aislado |
+|---|---|---|
+| **Se ejecuta en** | Proceso principal | Aislado de V8 (Dynamic Worker Loader) |
+| **Capacidades** | Informativas (no se aplican) | Aplicadas en tiempo de ejecución |
+| **Límites de recursos** | Ninguno | CPU, memoria, sub-solicitudes, tiempo de reloj |
+| **Acceso a red** | Sin restricciones | Bloqueado; solo a través de `ctx.http` con lista de hosts permitidos |
+| **Acceso a datos** | Acceso completo a la base de datos | Limitado a capacidades declaradas a través del puente RPC |
+| **Disponible en** | Todas las plataformas | Solo Cloudflare Workers |
+
+## Modo confiable
+
+Los plugins confiables se ejecutan en el mismo proceso que tu sitio Astro. Se cargan desde paquetes npm o archivos locales y se configuran en `astro.config.mjs`:
+
+```typescript title="astro.config.mjs"
+import myPlugin from "@emdash-cms/plugin-analytics";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			plugins: [myPlugin()],
+		}),
+	],
+});
+```
+
+En el modo confiable:
+
+- **Las capacidades son documentación, no una restricción real.** Un plugin que declara `["read:content"]` aun así puede acceder a cualquier recurso del proceso. El campo `capabilities` solo les indica a los administradores lo que el plugin *pretende* usar.
+- **Sin límites de recursos.** El uso de CPU, memoria y red es ilimitado. Un complemento que se comporta mal puede bloquear toda la solicitud.
+- **Acceso completo al proceso.** Los plugins comparten el entorno de ejecución de Node.js o Workers con tu sitio Astro. Pueden importar cualquier módulo, acceder a variables de entorno y leer o escribir en el sistema de archivos en Node.js.
+
+<Aside type="caution" title="Implicación de seguridad">
+		Instala solo plugins confiables procedentes de fuentes que hayas revisado, como paquetes npm auditados o código propio. En modo confiable, un plugin malicioso tiene el mismo nivel de acceso que tu aplicación.
+</Aside>
+
+## Modo Aislado (Cloudflare Workers)
+
+Los plugins aislados se ejecutan en aislados de V8 proporcionados por la API [Dynamic Worker Loader](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/) de Cloudflare. Cada plugin obtiene su propio entorno con límites aplicados.
+
+Para habilitar el aislamiento, configura el ejecutor de aislamiento en tu configuración de Astro:
+
+```typescript title="astro.config.mjs"
+export default defineConfig({
+	integrations: [
+		emdash({
+			sandboxRunner: "@emdash-cms/cloudflare/sandbox",
+			sandboxed: [
+				{
+					manifest: seoPluginManifest,
+					code: seoPluginCode,
+				},
+			],
+		}),
+	],
+});
+```
+
+### Qué aplica el aislamiento
+
+<Steps>
+
+1. **Aplicación de capacidades**
+
+   Si un plugin declara `capabilities: ["read:content"]`, solo puede llamar a `ctx.content.get()` y `ctx.content.list()`. Si intenta usar `ctx.content.create()`, recibirá un error de permisos. Esto lo aplica el puente RPC, y el plugin no puede saltárselo porque no tiene acceso directo a la base de datos.
+
+2. **Límites de recursos**
+
+   Cada invocación (hook o llamada de ruta) se ejecuta con:
+
+   | Recurso | Por defecto | Forzado por |
+   |---|---|---|
+   | Tiempo de CPU | 50ms | Worker Loader (aislamiento V8) |
+   | Sub-solicitudes | 10 por invocación | Worker Loader (aislamiento V8) |
+   | Tiempo total | 30 segundos | Runner de EmDash (`Promise.race`) |
+   | Memoria | ~128MB | Límite de plataforma V8 (no configurable por complemento) |
+
+   Si se superan los límites de CPU o de subsolicitudes, Worker Loader aborta el aislado y lanza una excepción. Si se supera el tiempo total, EmDash rechaza la promesa de la invocación. La memoria queda limitada por la plataforma V8 y no puede configurarse por plugin.
+
+   Estos son los valores predeterminados integrados. Se pueden definir límites personalizados mediante un `SandboxRunnerFactory` propio que pase otros valores en `SandboxOptions.limits`. La configuración por sitio a través de la integración de EmDash todavía no está implementada.
+
+3. **Aislamiento de red**
+
+   Los plugins aislados tienen `globalOutbound: null`, por lo que las llamadas directas a `fetch()` quedan bloqueadas a nivel de V8. Deben usar `ctx.http.fetch()`, que pasa por el puente. El puente valida el host de destino contra la lista `allowedHosts` del plugin.
+
+4. **Alcance del almacenamiento**
+
+   Todas las operaciones de almacenamiento, como KV y colecciones, quedan limitadas al ID del plugin. Un plugin no puede leer los datos de otro. El acceso a contenido y medios pasa por el puente, que comprueba las capacidades en cada llamada.
+
+5. **Restricciones de características**
+
+   Algunas funciones solo están disponibles en modo confiable:
+
+   - **Rutas API** — Los endpoints REST personalizados (`routes`) no están disponibles. Los plugins aislados interactúan con los usuarios a través de páginas de administración de Block Kit y hooks.
+   - **Tipos de bloque de Portable Text** — Los bloques de PT requieren componentes Astro para renderizarse en el sitio (`componentsEntry`), cargados desde npm durante la compilación. Los plugins aislados se instalan en tiempo de ejecución y no pueden incluir componentes.
+   - **Páginas de administración React personalizadas** — Los plugins aislados usan Block Kit para la interfaz de administración en lugar de incluir componentes React.
+
+   El comando `emdash plugin bundle` advierte si un plugin declara estas funciones.
+
+</Steps>
+
+### Arquitectura
+
+Los plugins aislados se comunican con EmDash a través de un puente RPC:
+
+```
+┌─────────────────────┐     RPC      ┌──────────────────────┐
+│  Plugin Isolate     │ ◄──────────► │  PluginBridge        │
+│  (Worker Loader)    │   (binding)  │  (WorkerEntrypoint)  │
+│                     │              │                      │
+│  ctx.kv.get(k)      │──────────────│► kvGet(k)            │
+│  ctx.content.list() │──────────────│► contentList()       │
+│  ctx.http.fetch(u)  │──────────────│► httpFetch(u)        │
+└─────────────────────┘              └──────────────────────┘
+                                            │
+                                            ▼
+                                     ┌──────────────┐
+                                     │  D1 / R2     │
+                                     └──────────────┘
+```
+
+El código del plugin se ejecuta dentro de un aislado de V8. Recibe un objeto `ctx` en el que cada método actúa como proxy hacia el puente. El puente se ejecuta en el worker principal de EmDash y realiza las operaciones reales de base de datos y almacenamiento después de validar las capacidades.
+
+### Configuración de Wrangler
+
+El aislamiento requiere Dynamic Worker Loader. Añade a tu `wrangler.jsonc`:
+
+```jsonc
+{
+	"worker_loaders": [{ "binding": "LOADER" }],
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "emdash-media" }],
+	"d1_databases": [{ "binding": "DB", "database_name": "emdash" }]
+}
+```
+
+## Despliegues en Node.js
+
+<Aside type="danger" title="Sin aislamiento en Node.js">
+	Node.js no admite el aislamiento de plugins. Todos los plugins se ejecutan en modo confiable independientemente de la configuración. No hay aislados de V8, no hay límites de recursos y no hay aplicación de capacidades en tiempo de ejecución.
+</Aside>
+
+Al desplegar en Node.js (o cualquier plataforma que no sea Cloudflare):
+
+- Se usa `NoopSandboxRunner`. Devuelve `isAvailable() === false`.
+- Intentar cargar plugins aislados lanza `SandboxNotAvailableError`.
+- Todos los plugins deben registrarse como plugins confiables en el array `plugins`.
+- Las declaraciones de capacidades son solo informativas; no se aplican.
+
+### Qué Significa Esto para la Seguridad
+
+| Amenaza | Cloudflare (aislado) | Node.js (solo confiable) |
+|---|---|---|
+| El plugin lee datos que no debería | Bloqueado por las comprobaciones de capacidades del puente | **No se evita** — el plugin tiene acceso completo a la base de datos |
+| El plugin realiza llamadas de red no autorizadas | Bloqueado por `globalOutbound: null` y la lista de hosts permitidos | **No se evita** — el plugin puede llamar a `fetch()` directamente |
+| El plugin consume toda la CPU | El aislado es abortado por Worker Loader | **No se evita** — bloquea el event loop |
+| El plugin agota la memoria | El aislado es terminado por Worker Loader | **No se evita** — puede bloquear el proceso |
+| El plugin accede a variables de entorno | Sin acceso (contexto V8 aislado) | **No se evita** — comparte `process.env` |
+| El plugin accede al sistema de archivos | No hay sistema de archivos en Workers | **No se evita** — acceso completo a `fs` |
+
+### Recomendaciones para Despliegues en Node.js
+
+1. **Instala solo plugins de fuentes confiables.** Revisa el código fuente de cualquier plugin antes de instalarlo. Da preferencia a los publicados por mantenedores conocidos.
+2. **Usa las declaraciones de capacidades como lista de verificación.** Aunque las capacidades no se apliquen, documentan el alcance previsto del plugin. Un plugin que declara `["network:fetch"]` pero no necesita acceso de red merece revisión.
+3. **Monitorea el uso de recursos.** Usa monitoreo a nivel de proceso (por ejemplo, `--max-old-space-size`, comprobaciones de salud) para detectar plugins descontrolados.
+4. **Considera Cloudflare para plugins no confiables.** Si necesitas ejecutar plugins de fuentes desconocidas, por ejemplo desde un marketplace, despliega en Cloudflare Workers, donde el aislamiento sí está disponible.
+
+## Misma API, Diferentes Garantías
+
+El código de un plugin es idéntico independientemente del modo de ejecución. La API `definePlugin()`, la forma del contexto, los hooks, las rutas y el almacenamiento funcionan igual. Lo que cambia es la **aplicación real de las restricciones**:
+
+```typescript
+// Este plugin funciona tanto en modo confiable como en modo aislado
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+	capabilities: ["read:content", "network:fetch"],
+	allowedHosts: ["api.analytics.example.com"],
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			// En modo confiable, ctx.http siempre está presente porque las capacidades no se aplican
+			// En modo aislado, ctx.http está disponible porque se declaró "network:fetch"
+			await ctx.http.fetch("https://api.analytics.example.com/track", {
+				method: "POST",
+				body: JSON.stringify({ contentId: event.content.id }),
+			});
+		},
+	},
+});
+```
+
+El objetivo es permitir que quienes crean plugins desarrollen localmente en modo confiable, con iteración más rápida y depuración más simple, y luego los desplieguen en producción en modo aislado sin cambiar el código.

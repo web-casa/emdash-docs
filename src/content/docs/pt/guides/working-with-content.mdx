@@ -1,0 +1,284 @@
+---
+title: Trabalhando com Conteúdo
+description: Crie, edite e gerencie conteúdo no painel administrativo do EmDash.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Este guia aborda como criar, editar e gerenciar conteúdo usando o painel administrativo do EmDash.
+
+## Acessando o Admin
+
+Abra seu navegador em `/_emdash/admin` no seu site. Faça login com as credenciais criadas durante a configuração.
+
+O painel exibe:
+
+- **Barra lateral** - Navegação para coleções, mídia e configurações
+- **Lista de conteúdo** - Entradas na coleção selecionada
+- **Ações rápidas** - Criar novo conteúdo, operações em massa
+
+## Criando Conteúdo
+
+1. Clique no nome de uma coleção na barra lateral (ex.: **Posts**)
+
+2. Clique em **Novo Post** (ou o equivalente para sua coleção)
+
+3. Preencha os campos obrigatórios:
+   - **Título** - O nome de exibição do conteúdo
+   - **Slug** - Identificador da URL (gerado automaticamente a partir do título, editável)
+
+4. Adicione conteúdo usando o editor de texto rico
+
+5. Defina metadados na barra lateral:
+   - **Status** - Rascunho, Publicado ou Arquivado
+   - **Data de publicação** - Quando publicar
+   - **Categorias e tags** - Atribuições de taxonomia
+
+6. Clique em **Salvar**
+
+<Aside>
+	Rascunhos são visíveis apenas no admin. Altere o status para **Publicado** para tornar o conteúdo visível no
+	seu site.
+</Aside>
+
+## Status do Conteúdo
+
+Cada entrada possui um de três status:
+
+| Status        | Visibilidade | Caso de uso         |
+| ------------- | ---------- | ---------------- |
+| **Rascunho**  | Apenas Admin | Trabalho em progresso |
+| **Publicado** | Público     | Conteúdo ao vivo     |
+| **Arquivado** | Apenas Admin | Conteúdo aposentado  |
+
+Altere o status usando o menu suspenso na barra lateral do editor.
+
+## O Editor de Texto Rico
+
+O editor do EmDash suporta:
+
+- **Cabeçalhos** - H2 até H6
+- **Formatação** - Negrito, itálico, sublinhado, tachado
+- **Listas** - Ordenadas e não ordenadas
+- **Links** - Internos e externos
+- **Imagens** - Inserir da biblioteca de mídia
+- **Blocos de código** - Com realce de sintaxe
+- **Embeds** - YouTube, Vimeo, Twitter
+- **Seções** - Blocos de conteúdo reutilizáveis via comando `/section`
+
+### Comandos de Barra
+
+Digite `/` para acessar comandos de inserção rápida:
+
+| Comando                      | Ação                              |
+| ---------------------------- | ----------------------------------- |
+| `/section`                   | Inserir uma seção reutilizável      |
+| `/image`                     | Inserir uma imagem da biblioteca de mídia |
+| `/code`                      | Inserir um bloco de código          |
+
+### Atalhos de Teclado
+
+| Ação | Atalho               |
+| ------ | ---------------------- |
+| Negrito   | `Ctrl/Cmd + B`         |
+| Itálico | `Ctrl/Cmd + I`         |
+| Link   | `Ctrl/Cmd + K`         |
+| Desfazer   | `Ctrl/Cmd + Z`         |
+| Refazer   | `Ctrl/Cmd + Shift + Z` |
+| Salvar   | `Ctrl/Cmd + S`         |
+
+### Inserindo Imagens
+
+1. Clique no botão de imagem na barra de ferramentas
+
+2. Selecione uma imagem existente da biblioteca de mídia, ou faça upload de uma nova
+
+3. Adicione texto alternativo (obrigatório para acessibilidade)
+
+4. Ajuste as opções de alinhamento e tamanho
+
+5. Clique em **Inserir**
+
+## Editando Conteúdo
+
+1. Navegue até a coleção que contém o conteúdo
+
+2. Clique na entrada que deseja editar
+
+3. Faça suas alterações
+
+4. Clique em **Salvar**
+
+Alterações em conteúdo publicado aparecem imediatamente no seu site. Nenhuma reconstrução é necessária.
+
+### Histórico de Revisões
+
+O EmDash rastreia alterações no conteúdo. Acesse o histórico de revisões na barra lateral do editor:
+
+1. Clique em **Revisões** na barra lateral do editor
+
+2. Veja a lista de versões anteriores com carimbos de data/hora
+
+3. Clique em uma revisão para visualizá-la
+
+4. Clique em **Restaurar** para reverter para essa versão
+
+<Aside type="caution">
+	Restaurar uma revisão cria uma nova revisão com o conteúdo restaurado. O histórico de revisões
+	original é preservado.
+</Aside>
+
+## Operações em Massa
+
+Execute ações em múltiplas entradas de uma vez:
+
+1. Use as caixas de seleção para escolher entradas na lista de conteúdo
+
+2. Clique no menu suspenso **Ações em Massa**
+
+3. Selecione uma ação:
+   - **Publicar** - Definir todas as selecionadas como publicadas
+   - **Arquivar** - Definir todas as selecionadas como arquivadas
+   - **Excluir** - Remover permanentemente as selecionadas
+
+4. Confirme a ação
+
+## Buscando e Filtrando
+
+### Busca
+
+Use a caixa de busca para encontrar conteúdo por título ou conteúdo. A busca não diferencia maiúsculas/minúsculas e corresponde a palavras parciais.
+
+### Filtros
+
+Filtre a lista de conteúdo por:
+
+- **Status** - Rascunho, Publicado, Arquivado
+- **Intervalo de datas** - Datas de criação ou modificação
+- **Autor** - Quem criou o conteúdo
+- **Taxonomia** - Atribuições de categoria ou tag
+
+Clique em **Limpar Filtros** para redefinir.
+
+## Agendando Conteúdo
+
+Agende conteúdo para ser publicado em uma data futura:
+
+1. Crie ou edite conteúdo
+
+2. Defina o status como **Rascunho**
+
+3. Defina a **Data de publicação** para uma data e hora futuras
+
+4. Clique em **Salvar**
+
+Quando a data de publicação chegar, o conteúdo automaticamente se torna publicado.
+
+<Aside type="tip">
+	A publicação agendada requer que seu site seja renderizado no servidor ou tenha uma tarefa agendada que verifique
+	publicações pendentes.
+</Aside>
+
+## Excluindo Conteúdo
+
+Exclua conteúdo da tela de edição ou da lista de conteúdo:
+
+### Do Editor
+
+1. Abra o conteúdo que deseja excluir
+
+2. Clique em **Excluir** na barra de ferramentas
+
+3. Confirme a exclusão
+
+### Da Lista
+
+1. Selecione entradas usando as caixas de seleção
+
+2. Clique em **Ações em Massa** > **Excluir**
+
+3. Confirme a exclusão
+
+<Aside type="caution">
+	Conteúdo excluído é removido permanentemente e não pode ser recuperado. Considere arquivar em vez disso se você
+	puder precisar do conteúdo mais tarde.
+</Aside>
+
+## API de Conteúdo
+
+Para acesso programático, use a API administrativa do EmDash:
+
+### Criar Conteúdo
+
+```bash
+POST /_emdash/api/content/posts
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "title": "My New Post",
+  "slug": "my-new-post",
+  "content": "<p>Post content here</p>
+",
+  "status": "draft"
+}
+```
+
+### Atualizar Conteúdo
+
+```bash
+PUT /_emdash/api/content/posts/my-new-post
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "title": "Updated Title",
+  "status": "published"
+}
+```
+
+### Excluir Conteúdo
+
+```bash
+DELETE /_emdash/api/content/posts/my-new-post
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+## Traduzindo Conteúdo
+
+Quando [i18n está habilitado](/pt/guides/internationalization/), você pode criar traduções de qualquer entrada de conteúdo.
+
+### Criando uma tradução
+
+1. Abra a entrada de conteúdo que deseja traduzir
+
+2. Na barra lateral do editor, encontre o painel **Traduções**
+
+3. Clique em **Traduzir** ao lado do local de destino
+
+4. Edite o conteúdo pré-preenchido — ajuste o título, slug e corpo para o novo idioma
+
+5. Clique em **Salvar**
+
+A nova tradução está vinculada à entrada original e começa como um rascunho. Publique-a independentemente quando a tradução estiver pronta.
+
+### Alternando entre traduções
+
+O painel Traduções mostra todos os locais configurados. Clique em **Editar** ao lado de qualquer tradução existente para navegar até ela diretamente. O local atual é marcado com uma marca de seleção.
+
+### Filtro de local
+
+Na lista de conteúdo, use o menu suspenso de idioma na barra de ferramentas para filtrar as entradas por idioma. Cada entrada mostra seu idioma em uma coluna dedicada.
+
+<Aside type="tip">
+  Cada tradução possui seu próprio slug, status e histórico de revisões. Publique, agende e gerencie traduções de forma independente.
+</Aside>
+
+Consulte o [guia de Internacionalização](/pt/guides/internationalization/) para obter detalhes completos sobre configuração, consulta e o seletor de idioma.
+
+## Próximos Passos
+
+- [Consultando Conteúdo](/pt/guides/querying-content/) - Recupere conteúdo em seus modelos
+- [Biblioteca de Mídia](/pt/guides/media-library/) - Faça upload e gerencie arquivos
+- [Taxonomias](/pt/guides/taxonomies/) - Organize conteúdo com categorias e tags
+- [Internacionalização](/pt/guides/internationalization/) - Conteúdo multilíngue e traduções

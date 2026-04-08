@@ -1,0 +1,147 @@
+---
+title: Mises en page
+description: Permettez aux éditeurs de choisir différentes mises en page pour des pages individuelles en utilisant un champ de modèle.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+WordPress propose des « modèles de page » — un menu déroulant dans l'éditeur permettant de choisir une mise en page par page (par ex. Par défaut, Pleine largeur, Page de destination). EmDash prend en charge le même modèle en utilisant un champ de type `select`.
+
+## Fonctionnement
+
+1. Ajoutez un champ `select` nommé `template` à votre collection de pages
+2. Créez des composants de mise en page pour chaque option
+3. Associez la valeur du champ à une mise en page dans votre route de page
+
+Aucun système spécial n'est nécessaire — cela utilise le champ select existant d'EmDash et le modèle de composant d'Astro.
+
+## Ajouter le champ
+
+Dans l'interface d'administration, ajoutez un champ select à votre collection de pages avec le slug `template` et vos options de mise en page (par ex. « Par défaut », « Pleine largeur »). Ou incluez-le dans vos données d'initialisation :
+
+```json title=".emdash/seed.json"
+{
+  "slug": "template",
+  "label": "Template",
+  "type": "select",
+  "validation": {
+    "options": ["Default", "Full Width"]
+  },
+  "defaultValue": "Default"
+}
+```
+
+## Créer les composants de mise en page
+
+Chaque mise en page encapsule le contenu dans votre mise en page de base avec un style différent :
+
+```
+astro title="src/layouts/PageDefault.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../guides/Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-default">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-default {
+    max-width: var(--content-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+```
+astro title="src/layouts/PageFullWidth.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../guides/Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-wide">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-wide {
+    max-width: var(--wide-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+## Connecter la route
+
+Dans votre route de page, importez chaque mise en page et associez la valeur du modèle :
+
+```
+astro title="src/pages/pages/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import PageDefault from "../../../layouts/PageDefault.astro";
+import PageFullWidth from "../../../layouts/PageFullWidth.astro";
+
+const { slug } = Astro.params;
+
+if (!slug) {
+  return Astro.redirect("/404");
+}
+
+const { entry: page } = await getEmDashEntry("pages", slug);
+
+if (!page) {
+  return Astro.redirect("/404");
+}
+
+const layouts = {
+  "Default": PageDefault,
+  "Full Width": PageFullWidth,
+};
+
+const Layout = layouts[page.data.template as keyof typeof layouts] ?? PageDefault;
+---
+
+<Layout page={page} />
+```
+
+La route reste simple. Chaque composant de mise en page possède son propre balisage et son style. Ajouter une mise en page consiste à : créer un composant, ajouter l'option au champ select, ajouter une ligne à la correspondance.
+
+<Aside type="tip">
+Utilisez des noms d'option lisibles comme « Pleine largeur » plutôt que des slugs comme « full-width ». La valeur est à la fois la valeur stockée et le libellé du menu déroulant dans l'admin.
+</Aside>
+
+## Ajouter plus de mises en page
+
+Choix courants des thèmes WordPress :
+
+- **Par défaut** — colonne de contenu étroite, idéale pour la lecture
+- **Pleine largeur** — zone de contenu plus large, sans barre latérale
+- **Page de destination** — pas d'en-tête/pied de page, sections héro
+- **Barre latérale** — contenu avec une zone de widgets latérale
+
+Chacune est simplement un autre composant Astro dans votre répertoire `src/layouts/` et une autre entrée dans la correspondance des mises en page de la route.

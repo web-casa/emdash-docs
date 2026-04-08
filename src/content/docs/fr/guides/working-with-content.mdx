@@ -1,0 +1,284 @@
+---
+title: Travailler avec le contenu
+description: Créez, modifiez et gérez le contenu dans le tableau de bord d'administration d'EmDash.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Ce guide explique comment créer, modifier et gérer du contenu en utilisant le tableau de bord d'administration d'EmDash.
+
+## Accéder à l'administration
+
+Ouvrez votre navigateur à l'adresse `/_emdash/admin` sur votre site. Connectez-vous avec les identifiants créés lors de l'installation.
+
+Le tableau de bord affiche :
+
+- **Barre latérale** - Navigation vers les collections, les médias et les paramètres
+- **Liste de contenu** - Entrées dans la collection sélectionnée
+- **Actions rapides** - Créer un nouveau contenu, opérations groupées
+
+## Créer du contenu
+
+1. Cliquez sur un nom de collection dans la barre latérale (par ex. **Articles**)
+
+2. Cliquez sur **Nouvel article** (ou l'équivalent pour votre collection)
+
+3. Remplissez les champs obligatoires :
+   - **Titre** - Le nom d'affichage du contenu
+   - **Slug** - Identifiant d'URL (généré automatiquement à partir du titre, modifiable)
+
+4. Ajoutez du contenu en utilisant l'éditeur de texte enrichi
+
+5. Définissez les métadonnées dans la barre latérale :
+   - **Statut** - Brouillon, Publié ou Archivé
+   - **Date de publication** - Quand publier
+   - **Catégories et étiquettes** - Assignations taxonomiques
+
+6. Cliquez sur **Enregistrer**
+
+<Aside>
+	Les brouillons ne sont visibles que dans l'administration. Changez le statut en **Publié** pour rendre le contenu visible sur
+	votre site.
+</Aside>
+
+## Statuts du contenu
+
+Chaque entrée a l'un des trois statuts suivants :
+
+| Statut         | Visibilité   | Cas d'utilisation      |
+| -------------- | ------------ | ---------------------- |
+| **Brouillon**  | Admin uniquement | Travail en cours       |
+| **Publié**     | Public       | Contenu en ligne       |
+| **Archivé**    | Admin uniquement | Contenu retiré         |
+
+Changez le statut en utilisant le menu déroulant dans la barre latérale de l'éditeur.
+
+## L'éditeur de texte enrichi
+
+L'éditeur d'EmDash prend en charge :
+
+- **Titres** - H2 à H6
+- **Mise en forme** - Gras, italique, souligné, barré
+- **Listes** - Ordonnées et non ordonnées
+- **Liens** - Internes et externes
+- **Images** - Insérer depuis la bibliothèque multimédia
+- **Blocs de code** - Avec coloration syntaxique
+- **Intégrations** - YouTube, Vimeo, Twitter
+- **Sections** - Blocs de contenu réutilisables via la commande `/section`
+
+### Commandes Slash
+
+Tapez `/` pour accéder aux commandes d'insertion rapide :
+
+| Commande                      | Action                              |
+| ---------------------------- | ----------------------------------- |
+| `/section`                   | Insérer une section réutilisable    |
+| `/image`                     | Insérer une image depuis la bibliothèque multimédia |
+| `/code`                      | Insérer un bloc de code             |
+
+### Raccourcis clavier
+
+| Action | Raccourci               |
+| ------ | ---------------------- |
+| Gras   | `Ctrl/Cmd + B`         |
+| Italique | `Ctrl/Cmd + I`         |
+| Lien   | `Ctrl/Cmd + K`         |
+| Annuler | `Ctrl/Cmd + Z`         |
+| Rétablir | `Ctrl/Cmd + Shift + Z` |
+| Enregistrer | `Ctrl/Cmd + S`         |
+
+### Insérer des images
+
+1. Cliquez sur le bouton image dans la barre d'outils
+
+2. Sélectionnez une image existante dans la bibliothèque multimédia, ou téléversez-en une nouvelle
+
+3. Ajoutez un texte alternatif (obligatoire pour l'accessibilité)
+
+4. Ajustez les options d'alignement et de taille
+
+5. Cliquez sur **Insérer**
+
+## Modifier du contenu
+
+1. Naviguez vers la collection contenant le contenu
+
+2. Cliquez sur l'entrée que vous souhaitez modifier
+
+3. Effectuez vos modifications
+
+4. Cliquez sur **Enregistrer**
+
+Les modifications apportées au contenu publié apparaissent immédiatement sur votre site. Aucune reconstruction n'est nécessaire.
+
+### Historique des révisions
+
+EmDash suit les modifications du contenu. Accédez à l'historique des révisions depuis la barre latérale de l'éditeur :
+
+1. Cliquez sur **Révisions** dans la barre latérale de l'éditeur
+
+2. Consultez la liste des versions précédentes avec leurs horodatages
+
+3. Cliquez sur une révision pour la prévisualiser
+
+4. Cliquez sur **Restaurer** pour revenir à cette version
+
+<Aside type="caution">
+	Restaurer une révision crée une nouvelle révision avec le contenu restauré. L'historique des révisions
+	original est préservé.
+</Aside>
+
+## Opérations groupées
+
+Effectuez des actions sur plusieurs entrées à la fois :
+
+1. Utilisez les cases à cocher pour sélectionner des entrées dans la liste de contenu
+
+2. Cliquez sur le menu déroulant **Actions groupées**
+
+3. Sélectionnez une action :
+   - **Publier** - Définir toutes les sélectionnées comme publiées
+   - **Archiver** - Définir toutes les sélectionnées comme archivées
+   - **Supprimer** - Supprimer définitivement les sélectionnées
+
+4. Confirmez l'action
+
+## Recherche et filtrage
+
+### Recherche
+
+Utilisez la boîte de recherche pour trouver du contenu par titre ou contenu. La recherche ne tient pas compte de la casse et correspond aux mots partiels.
+
+### Filtres
+
+Filtrez la liste de contenu par :
+
+- **Statut** - Brouillon, Publié, Archivé
+- **Plage de dates** - Dates de création ou de modification
+- **Auteur** - Qui a créé le contenu
+- **Taxonomie** - Assignations de catégorie ou d'étiquette
+
+Cliquez sur **Effacer les filtres** pour réinitialiser.
+
+## Planifier du contenu
+
+Planifiez du contenu pour publication à une date future :
+
+1. Créez ou modifiez du contenu
+
+2. Définissez le statut sur **Brouillon**
+
+3. Définissez la **Date de publication** sur une date et heure futures
+
+4. Cliquez sur **Enregistrer**
+
+Lorsque la date de publication arrive, le contenu devient automatiquement publié.
+
+<Aside type="tip">
+	La publication planifiée nécessite que votre site soit rendu côté serveur ou ait une tâche planifiée qui vérifie
+	les publications en attente.
+</Aside>
+
+## Supprimer du contenu
+
+Supprimez du contenu depuis l'écran d'édition ou la liste de contenu :
+
+### Depuis l'éditeur
+
+1. Ouvrez le contenu que vous souhaitez supprimer
+
+2. Cliquez sur **Supprimer** dans la barre d'outils
+
+3. Confirmez la suppression
+
+### Depuis la liste
+
+1. Sélectionnez les entrées à l'aide des cases à cocher
+
+2. Cliquez sur **Actions groupées** > **Supprimer**
+
+3. Confirmez la suppression
+
+<Aside type="caution">
+	Le contenu supprimé est définitivement retiré et ne peut pas être récupéré. Envisagez plutôt l'archivage si vous
+	pourriez avoir besoin du contenu plus tard.
+</Aside>
+
+## API de contenu
+
+Pour un accès programmatique, utilisez l'API d'administration d'EmDash :
+
+### Créer du contenu
+
+```bash
+POST /_emdash/api/content/posts
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "title": "My New Post",
+  "slug": "my-new-post",
+  "content": "<p>Post content here</p>
+",
+  "status": "draft"
+}
+```
+
+### Mettre à jour du contenu
+
+```bash
+PUT /_emdash/api/content/posts/my-new-post
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "title": "Updated Title",
+  "status": "published"
+}
+```
+
+### Supprimer du contenu
+
+```bash
+DELETE /_emdash/api/content/posts/my-new-post
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+## Traduire du contenu
+
+Lorsque [l'i18n est activé](/fr/guides/internationalization/), vous pouvez créer des traductions de toute entrée de contenu.
+
+### Créer une traduction
+
+1. Ouvrez l'entrée de contenu que vous souhaitez traduire
+
+2. Dans la barre latérale de l'éditeur, trouvez le panneau **Traductions**
+
+3. Cliquez sur **Traduire** à côté de la locale cible
+
+4. Modifiez le contenu pré-rempli — ajustez le titre, le slug et le corps pour la nouvelle langue
+
+5. Cliquez sur **Enregistrer**
+
+La nouvelle traduction est liée à l'entrée originale et commence comme un brouillon. Publiez-la indépendamment lorsque la traduction est prête.
+
+### Basculer entre les traductions
+
+Le panneau Traductions affiche toutes les locales configurées. Cliquez sur **Modifier** à côté de toute traduction existante pour y naviguer directement. La locale actuelle est marquée d'une coche.
+
+### Filtre de locale
+
+Dans la liste de contenu, utilisez le menu déroulant de langue dans la barre d'outils pour filtrer les entrées par langue. Chaque entrée affiche sa locale dans une colonne dédiée.
+
+<Aside type="tip">
+  Chaque traduction possède son propre slug, statut et historique de révisions. Publiez, planifiez et gérez les traductions indépendamment.
+</Aside>
+
+Consultez le [guide d'internationalisation](/fr/guides/internationalization/) pour tous les détails sur la configuration, l'interrogation et le sélecteur de langue.
+
+## Prochaines étapes
+
+- [Interrogation du contenu](/fr/guides/querying-content/) - Récupérer du contenu dans vos modèles
+- [Bibliothèque multimédia](/fr/guides/media-library/) - Télécharger et gérer des fichiers
+- [Taxonomies](/fr/guides/taxonomies/) - Organiser le contenu avec catégories et étiquettes
+- [Internationalisation](/fr/guides/internationalization/) - Contenu multilingue et traductions

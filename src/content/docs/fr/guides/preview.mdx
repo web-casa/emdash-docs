@@ -1,0 +1,337 @@
+---
+title: Mode Aperçu
+description: Activez des aperçus sécurisés du contenu en cours de rédaction avant publication.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Le système de prévisualisation d'EmDash permet aux éditeurs de visualiser du contenu non publié via des URL sécurisées et à durée limitée. Les liens de prévisualisation utilisent des jetons signés HMAC-SHA256 que vous pouvez partager avec des relecteurs sans exposer l'intégralité de votre contenu en brouillon.
+
+## Fonctionnement
+
+1. L'administrateur génère une URL de prévisualisation pour un article en brouillon
+2. L'URL contient un paramètre de requête `_preview` signé avec une heure d'expiration
+3. Le middleware d'EmDash vérifie automatiquement le jeton et configure le contexte de la requête
+4. Votre code de template appelle `getEmDashEntry()` normalement — le contenu en brouillon est servi automatiquement
+
+La prévisualisation est **implicite**. Votre code de template n'a pas besoin de gérer les jetons ou de passer des options de prévisualisation — le middleware et les fonctions de requête gèrent tout via `AsyncLocalStorage`.
+
+## Configuration de la prévisualisation
+
+Ajoutez un secret de prévisualisation à votre environnement :
+
+```bash title=".env"
+EMDASH_PREVIEW_SECRET="your-random-secret-key-here"
+```
+
+Générez une chaîne aléatoire sécurisée. Ce secret signe et vérifie les jetons de prévisualisation.
+
+C'est tout. Vos templates existants fonctionnent automatiquement avec la prévisualisation :
+
+```
+astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+
+// Aucune gestion spéciale de prévisualisation nécessaire — le middleware
+// détecte les jetons _preview et sert automatiquement le contenu en brouillon
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+{isPreview && (
+  <div class="preview-banner">
+    You are viewing a preview. This content is not published.
+  </div>
+)}
+
+<article>
+  <h1>{entry.data.title}</h1>
+</article>
+```
+
+Le drapeau `isPreview` est `true` lorsque du contenu en brouillon est servi via un jeton de prévisualisation valide.
+
+## Génération d'URLs de prévisualisation
+
+Utilisez `getPreviewUrl()` pour créer des liens de prévisualisation :
+
+```ts
+import { getPreviewUrl } from "emdash";
+
+const previewUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	expiresIn: "1h",
+});
+// Retourne : /posts/my-draft-post?_preview=eyJjaWQ...
+```
+
+Avec une URL de base pour des liens absolus :
+
+```ts
+const fullUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	baseUrl: "https://example.com",
+});
+// Returns: https://example.com/posts/my-draft-post?_preview=eyJjaWQ...
+```
+
+Avec un modèle de chemin personnalisé :
+
+```ts
+const blogUrl = await getPreviewUrl({
+	collection: "posts",
+	id: "my-draft-post",
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+	pathPattern: "/blog/{id}",
+});
+// Returns: /blog/my-draft-post?_preview=eyJjaWQ...
+```
+
+## Expiration des jetons
+
+Contrôlez la durée de validité des liens de prévisualisation :
+
+```ts
+// Valid for 1 hour (default)
+await getPreviewUrl({ ..., expiresIn: "1h" });
+
+// Valide pendant 30 minutes
+await getPreviewUrl({ ..., expiresIn: "30m" });
+
+// Valide pendant 1 jour
+await getPreviewUrl({ ..., expiresIn: "1d" });
+
+// Valide pendant 2 semaines
+await getPreviewUrl(@@X_TOKEN_0@@);
+
+// Valide pendant 3600 secondes
+await getPreviewUrl({ ..., expiresIn: 3600 });
+```
+
+Unités supportées : `s` (secondes), `m` (minutes), `h` (heures), `d` (jours), `w` (semaines).
+
+## Vérification des jetons
+
+Utilisez `verifyPreviewToken()` pour valider les requêtes de prévisualisation entrantes :
+
+```ts
+import { verifyPreviewToken } from "emdash";
+
+// Depuis une URL (extrait le paramètre de requête _preview)
+const result = await verifyPreviewToken({
+	url: Astro.url,
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+});
+
+// Ou avec un jeton directement
+const result = await verifyPreviewToken({
+	token: someTokenString,
+	secret: import.meta.env.EMDASH_PREVIEW_SECRET,
+});
+```
+
+Le résultat indique si le jeton est valide :
+
+```ts
+if (result.valid) {
+	// Token is valid
+	console.log(result.payload.cid); // "posts:my-draft-post"
+	console.log(result.payload.exp); // Expiry timestamp
+	console.log(result.payload.iat); // Issued-at timestamp
+} else {
+	// Token is invalid
+	console.log(result.error);
+	// "none" - no token present
+	// "malformed" - token structure is invalid
+	// "invalid" - signature verification failed
+	// "expired" - token has expired
+}
+```
+
+## Indicateur de prévisualisation
+
+Vous pouvez afficher un indicateur visuel lorsque le contenu est en prévisualisation. Le drapeau `isPreview` retourné par `getEmDashEntry` vous indique quand du contenu en brouillon est servi :
+
+```astro
+{isPreview && (
+  <div class="preview-banner" role="alert">
+    <strong>Preview</strong>
+ — You are viewing unpublished content.
+    <a href={Astro.url.pathname}>Exit preview</a>
+  </div>
+)}
+```
+
+<Aside type="tip">
+	Pour les éditeurs authentifiés utilisant l'édition visuelle, EmDash injecte automatiquement une barre d'outils flottante
+	qui indique le mode édition/prévisualisation. Vous n'avez besoin d'une bannière de prévisualisation personnalisée que pour les liens de prévisualisation partagés.
+</Aside>
+
+## Fonctions d'aide
+
+### `isPreviewRequest(url)`
+
+Vérifie si une URL contient un jeton de prévisualisation :
+
+```ts
+import { isPreviewRequest } from "emdash";
+
+if (isPreviewRequest(Astro.url)) {
+	// Handle preview request
+}
+```
+
+### `getPreviewToken(url)`
+
+Extrait la chaîne du jeton d'une URL :
+
+```ts
+import { getPreviewToken } from "emdash";
+
+const token = getPreviewToken(Astro.url);
+// Retourne la chaîne du jeton ou null
+```
+
+### `parseContentId(contentId)`
+
+Analyse un identifiant de contenu en collection et ID :
+
+```ts
+import { parseContentId } from "emdash";
+
+const { collection, id } = parseContentId("posts:my-draft-post");
+// { collection: "posts", id: "my-draft-post" }
+```
+
+## Format du jeton
+
+Les jetons de prévisualisation utilisent un format compact : `base64url(payload).base64url(signature)`
+
+Le payload contient :
+
+- `cid` — Identifiant de contenu au format `collection:id`
+- `exp` — Horodatage d'expiration (secondes depuis l'époque)
+- `iat` — Horodatage d'émission (secondes depuis l'époque)
+
+Les jetons sont signés avec HMAC-SHA256 en utilisant votre secret de prévisualisation.
+
+<Aside type="caution">
+	Gardez votre `EMDASH_PREVIEW_SECRET` sécurisé. Toute personne possédant ce secret peut générer des jetons de prévisualisation valides pour
+	n'importe quel contenu.
+</Aside>
+
+## Exemple complet
+
+Une page d'article de blog complète avec support de prévisualisation et d'édition visuelle :
+
+```
+astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import BaseLayout from "../../../layouts/Base.astro";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+
+// La prévisualisation est automatique — le middleware gère la vérification du jeton
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+<BaseLayout title={entry.data.title}>
+  {isPreview && (
+    <div class="preview-banner" role="alert">
+      <strong>Preview</strong>
+ — This content is not published.
+    </div>
+  )}
+
+  <article {...entry.edit}>
+    <header>
+      <h1 {...entry.edit.title}>{entry.data.title}</h1>
+      {entry.data.publishedAt && (
+        <time datetime={entry.data.publishedAt.toISOString()}>
+          {entry.data.publishedAt.toLocaleDateString()}
+        </time>
+      )}
+      {isPreview && !entry.data.publishedAt && (
+        <span class="draft-indicator">Draft</span>
+      )}
+    </header>
+
+    <div class="content" {...entry.edit.content}>
+      <PortableText value={entry.data.content} />
+    </div>
+  </article>
+</BaseLayout>
+```
+
+Notez les spreads `{...entry.edit}` et `{...entry.edit.title}` — ceux-ci ajoutent des attributs `data-emdash-ref` qui activent l'édition visuelle pour les éditeurs authentifiés. En production, ils ne produisent aucune sortie.
+
+## Référence API
+
+### `getPreviewUrl(options)`
+
+Génère une URL de prévisualisation avec un jeton signé.
+
+**Options :**
+
+- `collection` — Slug de la collection (chaîne)
+- `id` — Identifiant ou slug du contenu (chaîne)
+- `secret` — Secret de signature (chaîne)
+- `expiresIn` — Durée de validité du jeton (par défaut : `"1h"`)
+- `baseUrl` — URL de base optionnelle pour des liens absolus
+- `pathPattern` — Modèle d'URL avec les espaces réservés `{collection}` et `{id}` (par défaut : `"/{collection}/{id}"`)
+
+**Retourne :** `Promise<string>`
+
+### `verifyPreviewToken(options)`
+
+Vérifie un jeton de prévisualisation.
+
+**Options :**
+
+- `secret` — Secret de vérification (chaîne)
+- `url` — URL pour extraire le jeton, OU
+- `token` — Chaîne du jeton directement
+
+**Retourne :** `Promise<VerifyPreviewTokenResult>`
+
+```ts
+type VerifyPreviewTokenResult =
+	| { valid: true; payload: PreviewTokenPayload }
+	| { valid: false; error: "invalid" | "expired" | "malformed" | "none" };
+```
+
+### `generatePreviewToken(options)`
+
+Génère un jeton sans construire d'URL.
+
+**Options :**
+
+- `contentId` — Identifiant de contenu au format `collection:id`
+- `expiresIn` — Durée de validité du jeton (par défaut : `"1h"`)
+- `secret` — Secret de signature
+
+**Retourne :** `Promise<string>`

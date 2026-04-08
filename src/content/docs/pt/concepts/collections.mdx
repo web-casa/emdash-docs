@@ -1,0 +1,382 @@
+---
+title: Coleções e Campos
+description: Defina tipos de conteúdo com coleções e campos—tipos de campo suportados, validação e relacionamentos.
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+import contentTypesImg from "../../../../assets/screenshots/admin-content-types.png";
+
+As coleções são a base do modelo de conteúdo do EmDash. Cada coleção representa um tipo de conteúdo (posts, páginas, produtos) e contém definições de campos que determinam a estrutura dos seus dados.
+
+## Criando Coleções
+
+Crie coleções através do painel administrativo em **Tipos de Conteúdo**. Cada coleção possui:
+
+<img src={contentTypesImg.src} alt="EmDash content types showing Pages, Posts, and custom collections with their features" />
+
+| Propriedade    | Descrição                                          |
+| --------------- | ---------------------------------------------------- |
+| `slug`          | Identificador seguro para URL (ex.: `posts`, `products`) |
+| `label`         | Nome de exibição (ex.: "Blog Posts")                 |
+| `labelSingular` | Forma singular (ex.: "Post")                         |
+| `description`   | Descrição opcional para editores                     |
+| `icon`          | Nome do ícone Lucide para a barra lateral administrativa |
+| `supports`      | Recursos como rascunhos, revisões, pré-visualização, agendamento, busca, seo |
+
+<Aside type="note">
+	Alguns slugs de coleção são reservados: `content`, `media`, `users`, `revisions`, `taxonomies`,
+	`options`, `audit_logs`.
+</Aside>
+
+## Recursos das Coleções
+
+Ao criar uma coleção, habilite os recursos que você precisa:
+
+| Recurso     | Descrição                                    |
+| ------------ | ---------------------------------------------- |
+| `drafts`     | Habilita o fluxo de trabalho rascunho/publicado |
+| `revisions`  | Rastreia o histórico de conteúdo com snapshots de versão |
+| `preview`    | Gera URLs de pré-visualização assinadas para conteúdo em rascunho |
+| `scheduling` | Agenda conteúdo para publicação em uma data futura |
+
+```ts
+// Example collection with all features enabled
+{
+  slug: "posts",
+  label: "Blog Posts",
+  labelSingular: "Post",
+  supports: ["drafts", "revisions", "preview", "scheduling"]
+}
+```
+
+## Tipos de Campo
+
+O EmDash suporta 15 tipos de campo que mapeiam para tipos de coluna SQLite:
+
+### Campos de Texto
+
+<Tabs>
+  <TabItem label="string">
+    Entrada de texto curto. Mapeia para coluna `TEXT`.
+    
+    ```ts
+    { slug: "title", type: "string", label: "Title" }
+    ```
+  </TabItem>
+  <TabItem label="text">
+    Área de texto multi-linha. Mapeia para coluna `TEXT`.
+    
+    ```ts
+    { slug: "excerpt", type: "text", label: "Excerpt" }
+    ```
+  </TabItem>
+  <TabItem label="slug">
+    Campo de slug seguro para URL. Mapeia para coluna `TEXT`.
+    
+    ```ts
+    { slug: "handle", type: "slug", label: "URL Handle" }
+    ```
+  </TabItem>
+</Tabs>
+
+### Conteúdo Rico
+
+<Tabs>
+  <TabItem label="portableText">
+    Editor de texto rico (TipTap/ProseMirror). Armazenado como JSON.
+    
+    ```ts
+    { slug: "content", type: "portableText", label: "Content" }
+    ```
+    
+    Portable Text é um formato baseado em blocos que preserva a estrutura sem incorporar HTML.
+  </TabItem>
+  <TabItem label="json">
+    Dados JSON arbitrários. Armazenado como JSON.
+    
+    ```ts
+    { slug: "metadata", type: "json", label: "Custom Metadata" }
+    ```
+  </TabItem>
+</Tabs>
+
+### Números
+
+<Tabs>
+  <TabItem label="number">
+    Números decimais. Mapeia para coluna `REAL`.
+    
+    ```ts
+    { slug: "price", type: "number", label: "Price" }
+    ```
+  </TabItem>
+  <TabItem label="integer">
+    Números inteiros. Mapeia para coluna `INTEGER`.
+    
+    ```ts
+    { slug: "quantity", type: "integer", label: "Stock Quantity" }
+    ```
+  </TabItem>
+</Tabs>
+
+### Booleanos e Datas
+
+<Tabs>
+  <TabItem label="boolean">
+    Alternador verdadeiro/falso. Mapeia para `INTEGER` (0/1).
+    
+    ```ts
+    { slug: "featured", type: "boolean", label: "Featured Post" }
+    ```
+  </TabItem>
+  <TabItem label="datetime">
+    Seletor de data e hora. Armazenado como string ISO 8601.
+    
+    ```ts
+    { slug: "eventDate", type: "datetime", label: "Event Date" }
+    ```
+  </TabItem>
+</Tabs>
+
+### Seleção
+
+<Tabs>
+  <TabItem label="select">
+    Opção única de uma lista. Mapeia para coluna `TEXT`.
+    
+    ```ts
+    {
+      slug: "status",
+      type: "select",
+      label: "Product Status",
+      validation: {
+        options: ["active", "discontinued", "coming_soon"]
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="multiSelect">
+    Múltiplas opções de uma lista. Armazenado como array JSON.
+    
+    ```ts
+    {
+      slug: "features",
+      type: "multiSelect",
+      label: "Product Features",
+      validation: {
+        options: ["wireless", "waterproof", "eco-friendly"]
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+### Mídia e Referências
+
+<Tabs>
+  <TabItem label="image">
+    Seletor de imagem da biblioteca de mídia. Armazena ID da mídia como `TEXT`.
+    
+    ```ts
+    { slug: "featuredImage", type: "image", label: "Featured Image" }
+    ```
+  </TabItem>
+  <TabItem label="file">
+    Seletor de arquivo da biblioteca de mídia. Armazena ID da mídia como `TEXT`.
+    
+    ```ts
+    { slug: "attachment", type: "file", label: "PDF Attachment" }
+    ```
+  </TabItem>
+  <TabItem label="reference">
+    Referência a uma entrada de outra coleção. Armazena ID da entrada como `TEXT`.
+    
+    ```ts
+    {
+      slug: "author",
+      type: "reference",
+      label: "Author",
+      options: {
+        collection: "authors"
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+## Propriedades dos Campos
+
+Cada campo suporta estas propriedades:
+
+| Propriedade   | Tipo        | Descrição                                  |
+| -------------- | ----------- | -------------------------------------------- |
+| `slug`         | `string`    | Nome da coluna no banco de dados             |
+| `label`        | `string`    | Rótulo de exibição na interface administrativa |
+| `type`         | `FieldType` | Um dos 15 tipos de campo                     |
+| `required`     | `boolean`   | Se o campo deve ter um valor                 |
+| `unique`       | `boolean`   | Se os valores devem ser únicos entre as entradas |
+| `defaultValue` | `unknown`   | Valor padrão para novas entradas             |
+| `validation`   | `object`    | Regras de validação específicas do tipo      |
+| `widget`       | `string`    | Identificador de widget personalizado        |
+| `options`      | `object`    | Configuração específica do widget            |
+| `sortOrder`    | `number`    | Ordem de exibição no editor                  |
+
+<Aside type="caution">
+	Alguns slugs de campo são reservados e não podem ser usados: `id`, `slug`, `status`, `author_id`,
+	`primary_byline_id`, `created_at`, `updated_at`, `published_at`, `scheduled_at`, `deleted_at`,
+	`version`, `live_revision_id`, `draft_revision_id`.
+</Aside>
+
+## Regras de Validação
+
+O objeto `validation` varia de acordo com o tipo de campo:
+
+```ts
+interface FieldValidation {
+	required?: boolean; // All types
+	min?: number; // number, integer
+	max?: number; // number, integer
+	minLength?: number; // string, text
+	maxLength?: number; // string, text
+	pattern?: string; // string (regex)
+	options?: string[]; // select, multiSelect
+}
+```
+
+Exemplo com validação:
+
+```ts
+{
+  slug: "email",
+  type: "string",
+  label: "Email Address",
+  required: true,
+  unique: true,
+  validation: {
+    pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+  }
+}
+```
+
+## Opções de Widget
+
+O objeto `options` configura o comportamento específico da interface do campo:
+
+```ts
+interface FieldWidgetOptions {
+	rows?: number; // text (textarea rows)
+	showPreview?: boolean; // image, file
+	collection?: string; // reference (target collection)
+	allowMultiple?: boolean; // reference (multiple refs)
+	[key: string]: unknown; // Custom widget options
+}
+```
+
+Exemplo de campo de referência:
+
+```ts
+{
+  slug: "relatedProducts",
+  type: "reference",
+  label: "Related Products",
+  options: {
+    collection: "products",
+    allowMultiple: true
+  }
+}
+```
+
+## Consultando Coleções
+
+Use as funções de consulta fornecidas para buscar conteúdo. Elas seguem o padrão de coleções ao vivo do Astro, retornando resultados estruturados:
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+// Obtém todas as entradas - retorna { entries, error }
+const { entries: posts } = await getEmDashCollection("posts");
+
+// Filtra por status
+const { entries: drafts } = await getEmDashCollection("posts", {
+	status: "draft",
+});
+
+// Limitar resultados
+const { entries: recent } = await getEmDashCollection("posts", {
+	limit: 5,
+});
+
+// Filtrar por taxonomia
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	where: { category: "news" },
+});
+
+// Obter uma entrada única por slug - retorna { entry, error, isPreview }
+const { entry: post } = await getEmDashEntry("posts", "my-post-slug");
+
+// Lidar com erros
+const { entries, error } = await getEmDashCollection("posts");
+if (error) {
+	console.error("Failed to load posts:", error);
+}
+```
+
+## Geração de Tipos
+
+Execute `npx emdash types` para gerar tipos TypeScript a partir do seu esquema:
+
+```ts
+// .emdash/types.ts (generated)
+export interface Post {
+	title: string;
+	content: PortableTextBlock[];
+	excerpt?: string;
+	featuredImage?: string;
+	author: string; // reference ID
+}
+
+export interface Product {
+	title: string;
+	price: number;
+	description: PortableTextBlock[];
+}
+```
+
+<Aside type="tip">
+	Execute novamente `emdash types` após modificar coleções no painel de administração para manter os tipos sincronizados.
+</Aside>
+
+## Mapeamento do Banco de Dados
+
+Os tipos de campo mapeiam para tipos de coluna SQLite:
+
+| Tipo de Campo   | Tipo SQLite | Notas                 |
+| -------------- | ----------- | --------------------- |
+| `string`       | `TEXT`      |                       |
+| `text`         | `TEXT`      |                       |
+| `slug`         | `TEXT`      |                       |
+| `number`       | `REAL`      | Ponto flutuante 64-bit |
+| `integer`      | `INTEGER`   | Inteiro com sinal 64-bit |
+| `boolean`      | `INTEGER`   | 0 ou 1                |
+| `datetime`     | `TEXT`      | Formato ISO 8601      |
+| `select`       | `TEXT`      |                       |
+| `multiSelect`  | `JSON`      | Array de strings      |
+| `portableText` | `JSON`      | Array de blocos       |
+| `image`        | `TEXT`      | ID da mídia           |
+| `file`         | `TEXT`      | ID da mídia           |
+| `reference`    | `TEXT`      | ID da entrada         |
+| `json`         | `JSON`      | JSON arbitrário       |
+
+## Próximos Passos
+
+<CardGrid>
+	<Card title="Modelo de Conteúdo" icon="open-book">
+		Compreenda a [abordagem database-first](/pt/concepts/content-model/).
+	</Card>
+	<Card title="Taxonomias" icon="list-format">
+		Organize conteúdo com [categorias e tags](/pt/guides/taxonomies/).
+	</Card>
+	<Card title="Biblioteca de Mídia" icon="seti:image">
+		Gerencie [imagens e arquivos](/pt/guides/media-library/).
+	</Card>
+</CardGrid>

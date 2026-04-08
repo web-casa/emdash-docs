@@ -1,0 +1,144 @@
+---
+title: 页面布局
+description: 让编辑者通过模板字段为单个页面选择不同的布局。
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+WordPress 有“页面模板”功能——编辑器中的一个下拉菜单，允许你为每个页面选择布局（例如：默认、全宽、落地页）。EmDash 使用 `select` 字段支持相同的模式。
+
+## 工作原理
+
+1. 向你的页面集合添加一个 `template` 选择字段
+2. 为每个选项创建布局组件
+3. 在页面路由中将字段值映射到布局
+
+无需特殊系统——这使用了 EmDash 现有的选择字段和 Astro 的组件模型。
+
+## 添加字段
+
+在管理界面中，向你的页面集合添加一个选择字段，其 slug 为 `template`，并设置你的布局选项（例如：“默认”、“全宽”）。或者将其包含在你的种子数据中：
+
+```json title=".emdash/seed.json"
+{
+  "slug": "template",
+  "label": "Template",
+  "type": "select",
+  "validation": {
+    "options": ["Default", "Full Width"]
+  },
+  "defaultValue": "Default"
+}
+```
+
+## 创建布局组件
+
+每个布局都会用不同的样式将内容包裹在你的基础布局中：
+
+```astro title="src/layouts/PageDefault.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "./Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-default">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-default {
+    max-width: var(--content-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+```astro title="src/layouts/PageFullWidth.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "./Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-wide">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-wide {
+    max-width: var(--wide-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+## 连接路由
+
+在你的页面路由中，导入每个布局并映射模板值：
+
+```astro title="src/pages/pages/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import PageDefault from "../../layouts/PageDefault.astro";
+import PageFullWidth from "../../layouts/PageFullWidth.astro";
+
+const { slug } = Astro.params;
+
+if (!slug) {
+  return Astro.redirect("/404");
+}
+
+const { entry: page } = await getEmDashEntry("pages", slug);
+
+if (!page) {
+  return Astro.redirect("/404");
+}
+
+const layouts = {
+  "Default": PageDefault,
+  "Full Width": PageFullWidth,
+};
+
+const Layout = layouts[page.data.template as keyof typeof layouts] ?? PageDefault;
+---
+
+<Layout page={page} />
+```
+
+路由保持简洁。每个布局组件负责自己的标记和样式。添加布局只需：创建一个组件，将选项添加到选择字段，在映射中添加一行。
+
+<Aside type="tip">
+使用人类可读的选项名称，如“全宽”，而不是像“full-width”这样的 slug。该值既是存储值，也是管理下拉菜单的标签。
+</Aside>
+
+## 添加更多布局
+
+WordPress 主题中的常见选择：
+
+- **默认** — 窄内容列，适合阅读
+- **全宽** — 更宽的内容区域，无侧边栏
+- **落地页** — 无页眉/页脚，包含英雄区域
+- **侧边栏** — 带有侧边栏小部件区域的内容
+
+每个都只是你 `src/layouts/` 目录中的另一个 Astro 组件，以及路由布局映射中的另一个条目。

@@ -1,0 +1,194 @@
+---
+title: 插件系统概览
+description: 通过插件扩展 EmDash，添加钩子、存储、设置和管理界面。
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+EmDash 的插件系统允许您在不修改核心代码的情况下扩展 CMS。插件可以挂载到内容生命周期事件、存储自己的数据、向管理员暴露设置，并在管理面板中添加自定义 UI。
+
+## 设计理念
+
+EmDash 插件是**配置转换器**，而非独立的应用程序。它们与您的 Astro 站点运行在同一进程中，并通过定义良好的接口进行交互。
+
+**核心原则：**
+
+- **声明式** — 钩子、存储和路由在定义时声明，而非动态注册
+- **类型安全** — 提供完整的 TypeScript 支持，包含类型化的上下文对象
+- **沙盒就绪** — API 设计支持在 Cloudflare Workers 上隔离执行
+- **基于能力** — 插件声明所需能力；运行时强制执行访问权限
+
+<Aside type="note">
+	EmDash 插件不是 Astro 集成。它们被传递给 Astro 配置中的 EmDash 集成。一个需要同时使用两者的插件可以打包成一个同时注册 EmDash 钩子的 Astro 集成。
+</Aside>
+
+## 插件能做什么
+
+<CardGrid>
+	<Card title="挂载事件" icon="rocket">
+		在内容保存、媒体上传和插件生命周期事件前后运行代码。
+	</Card>
+	<Card title="存储数据" icon="document">
+		在索引集合中持久化插件特定数据，无需编写数据库迁移。
+	</Card>
+	<Card title="暴露设置" icon="setting">
+		声明设置模式，并获取自动生成的管理界面进行配置。
+	</Card>
+	<Card title="添加管理页面" icon="laptop">
+		使用 React 组件创建自定义管理页面和仪表板小部件。
+	</Card>
+	<Card title="创建 API 路由" icon="external">
+		为您的插件管理界面或外部集成暴露端点。
+	</Card>
+	<Card title="发起 HTTP 请求" icon="external">
+		调用外部 API，并声明主机限制以确保安全。
+	</Card>
+</CardGrid>
+
+## 插件架构
+
+每个插件都通过 `definePlugin()` 创建：
+
+```typescript
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "my-plugin",
+	version: "1.0.0",
+
+	// What APIs the plugin needs access to
+	capabilities: ["read:content", "network:fetch"],
+
+	// Hosts the plugin can make HTTP requests to
+	allowedHosts: ["api.example.com"],
+
+	// Persistent storage collections
+	storage: {
+		entries: {
+			indexes: ["userId", "createdAt"],
+		},
+	},
+
+	// Event handlers
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			ctx.log.info("Content saved", { id: event.content.id });
+		},
+	},
+
+	// REST API endpoints
+	routes: {
+		status: {
+			handler: async (ctx) => ({ ok: true }),
+		},
+	},
+
+	// Admin UI configuration
+	admin: {
+		settingsSchema: {
+			apiKey: { type: "secret", label: "API Key" },
+		},
+		pages: [{ path: "/dashboard", label: "Dashboard" }],
+		widgets: [{ id: "status", size: "half" }],
+	},
+});
+```
+
+## 插件上下文
+
+每个钩子和路由处理程序都会收到一个 `PluginContext` 对象，可以访问：
+
+| 属性          | 描述                                           | 可用性                               |
+| ------------- | ---------------------------------------------- | ------------------------------------ |
+| `ctx.storage` | 插件的文档集合                                 | 始终（如果已声明）                   |
+| `ctx.kv`      | 用于设置和状态的键值存储                       | 始终                                 |
+| `ctx.content` | 读取/写入站点内容                              | 需要 `read:content` 或 `write:content` |
+| `ctx.media`   | 读取/写入媒体文件                              | 需要 `read:media` 或 `write:media`     |
+| `ctx.http`    | 用于外部请求的 HTTP 客户端                     | 需要 `network:fetch`                   |
+| `ctx.log`     | 结构化日志记录器（debug, info, warn, error）   | 始终                                 |
+| `ctx.plugin`  | 插件元数据（id, version）                      | 始终                                 |
+| `ctx.site`    | 站点信息：`name`, `url`, `locale`              | 始终                                 |
+| `ctx.url()`   | 根据路径生成绝对 URL                           | 始终                                 |
+| `ctx.users`   | 读取用户信息：`get()`, `getByEmail()`, `list()` | 需要 `read:users`                      |
+| `ctx.cron`    | 调度任务：`schedule()`, `cancel()`, `list()`   | 始终                                 |
+| `ctx.email`   | 发送邮件：`send()`                             | 需要 `email:send` + 已配置提供程序     |
+
+所有钩子和路由的上下文结构都是相同的。受能力限制的属性仅在插件声明了所需能力时才存在。
+
+## 能力
+
+能力决定了插件上下文中哪些 API 可用：
+
+| 能力                | 授予访问权限                                                       |
+| ------------------- | ------------------------------------------------------------------ |
+| `read:content`      | `ctx.content.get()`, `ctx.content.list()`                          |
+| `write:content`     | `ctx.content.create()`, `ctx.content.update()`, `ctx.content.delete()` |
+| `read:media`        | `ctx.media.get()`, `ctx.media.list()`                              |
+| `write:media`       | `ctx.media.getUploadUrl()`, `ctx.media.upload()`, `ctx.media.delete()` |
+| `network:fetch`     | `ctx.http.fetch()`（限制在 `allowedHosts` 内）                     |
+| `network:fetch:any` | `ctx.http.fetch()`（无限制 — 用于用户配置的 URL）                  |
+| `read:users`        | `ctx.users.get()`, `ctx.users.getByEmail()`, `ctx.users.list()`    |
+| `email:send`        | `ctx.email.send()`（需要提供程序插件）                             |
+| `email:provide`     | 注册 `email:deliver` 独占钩子（传输提供程序）                      |
+| `email:intercept`   | 注册 `email:beforeSend` / `email:afterSend` 钩子                   |
+| `page:inject`       | 注册 `page:metadata` / `page:fragments` 钩子                       |
+
+<Aside type="tip">
+	`write:content` 隐含 `read:content`。媒体同理。只声明您需要的。
+</Aside>
+
+## 注册
+
+在您的 Astro 配置中注册插件：
+
+```typescript title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import { emdash } from "emdash/astro";
+import seoPlugin from "@emdash-cms/plugin-seo";
+import auditLogPlugin from "@emdash-cms/plugin-audit-log";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			plugins: [seoPlugin({ generateSitemap: true }), auditLogPlugin({ retentionDays: 90 })],
+		}),
+	],
+});
+```
+
+插件在构建时解析。对于具有相同优先级的钩子，顺序很重要 — 数组中的插件越靠前，越先运行。
+
+## 执行模式
+
+EmDash 支持两种插件执行模式：
+
+| 模式          | 描述                                   | 平台            |
+| ------------- | -------------------------------------- | --------------- |
+| **受信任**    | 插件在进程中运行，拥有完全访问权限     | 任意            |
+| **沙盒化**    | 插件在隔离的 V8 Worker 中运行          | 仅限 Cloudflare |
+
+在受信任模式（默认）下，能力是文档性的 — 插件可以访问任何内容。在沙盒化模式下，能力在运行时级别强制执行。
+
+<Aside type="note">
+	沙盒化执行需要 Cloudflare Workers 与 Dynamic Worker Loader。其他平台仅使用受信任模式。有关各平台安全保证的完整比较，请参阅 [插件沙盒](/zh-cn/plugins/sandbox/)。
+</Aside>
+
+## 后续步骤
+
+<CardGrid>
+	<Card title="创建插件" icon="add-document">
+		[构建您的第一个插件](/zh-cn/plugins/creating-plugins/)，包含存储、钩子和管理界面。
+	</Card>
+	<Card title="可用钩子" icon="rocket">
+		[浏览所有钩子](/zh-cn/plugins/hooks/)，用于内容、媒体和插件生命周期。
+	</Card>
+	<Card title="插件存储" icon="document">
+		[了解存储](/zh-cn/plugins/storage/)以及如何查询插件数据。
+	</Card>
+	<Card title="管理界面" icon="laptop">
+		[添加管理页面](/zh-cn/plugins/admin-ui/)和仪表板小部件。
+	</Card>
+	<Card title="沙盒安全" icon="warning">
+		[了解沙盒隔离](/zh-cn/plugins/sandbox/)在 Cloudflare 和 Node.js 部署中的差异。
+	</Card>
+</CardGrid>

@@ -1,0 +1,490 @@
+---
+title: 配置参考
+description: EmDash 配置选项的完整参考。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash 通过两个文件进行配置：`astro.config.mjs` 用于集成，`src/live.config.ts` 用于内容集合。
+
+## Astro 集成
+
+将 EmDash 配置为 Astro 集成：
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local, r2, s3 } from "emdash/astro";
+import { sqlite, libsql, d1 } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+			plugins: [],
+		}),
+	],
+});
+```
+
+## 集成选项
+
+### `database`
+
+**必需。** 数据库适配器配置。
+
+```js
+// SQLite (Node.js)
+database: sqlite({ url: "file:./data.db" });
+
+// PostgreSQL
+database: postgres({ connectionString: process.env.DATABASE_URL });
+
+// libSQL
+database: libsql({
+	url: process.env.LIBSQL_DATABASE_URL,
+	authToken: process.env.LIBSQL_AUTH_TOKEN,
+});
+
+// Cloudflare D1 (import from @emdash-cms/cloudflare)
+database: d1({ binding: "DB" });
+```
+
+详情请参阅 [数据库选项](/zh-cn/deployment/database/)。
+
+### `storage`
+
+**必需。** 媒体存储适配器配置。
+
+```js
+// Local filesystem (development)
+storage: local({
+	directory: "./uploads",
+	baseUrl: "/_emdash/api/media/file",
+});
+
+// R2 binding (Cloudflare Workers)
+storage: r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev", // optional
+});
+
+// S3-compatible (any platform)
+storage: s3({
+	endpoint: "https://s3.amazonaws.com",
+	bucket: "my-bucket",
+	accessKeyId: process.env.S3_ACCESS_KEY_ID,
+	secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+	region: "us-east-1", // optional, default: "auto"
+	publicUrl: "https://cdn.example.com", // optional
+});
+```
+
+详情请参阅 [存储选项](/zh-cn/deployment/storage/)。
+
+### `plugins`
+
+**可选。** EmDash 插件数组。
+
+```js
+import seoPlugin from "@emdash-cms/plugin-seo";
+
+plugins: [seoPlugin()];
+```
+
+### `auth`
+
+**可选。** 身份验证配置。
+
+```js
+auth: {
+  // Self-signup configuration
+  selfSignup: {
+    domains: ["example.com"],
+    defaultRole: 20, // Contributor
+  },
+  
+  // OAuth providers
+  oauth: {
+    github: {
+      clientId: process.env.GITHUB_CLIENT_ID,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET,
+    },
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    },
+  },
+  
+  // Session configuration
+  session: {
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+    sliding: true, // Reset expiry on activity
+  },
+  
+  // OR use Cloudflare Access (exclusive mode)
+  cloudflareAccess: {
+    teamDomain: "myteam.cloudflareaccess.com",
+    audience: "your-app-audience-tag",
+    autoProvision: true,
+    defaultRole: 30,
+    syncRoles: false,
+    roleMapping: {
+      "Admins": 50,
+      "Editors": 40,
+    },
+  },
+}
+```
+
+#### `auth.selfSignup`
+
+允许用户在其电子邮件域名被允许的情况下自行注册。
+
+| 选项          | 类型         | 默认值 | 描述                     |
+| ------------- | ------------ | ------ | ------------------------ |
+| `domains`     | `string[]`   | `[]`   | 允许的电子邮件域名       |
+| `defaultRole` | `number`     | `20`   | 自注册用户的角色         |
+
+```js
+selfSignup: {
+  domains: ["example.com", "acme.org"],
+  defaultRole: 20, // Contributor
+}
+```
+
+#### `auth.oauth`
+
+配置 OAuth 登录提供商。
+
+```js
+oauth: {
+  github: {
+    clientId: process.env.GITHUB_CLIENT_ID,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET,
+  },
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  },
+}
+```
+
+#### `auth.session`
+
+会话配置。
+
+| 选项      | 类型       | 默认值             | 描述                         |
+| --------- | ---------- | ------------------ | ---------------------------- |
+| `maxAge`  | `number`   | `2592000` (30天)   | 会话生命周期（秒）           |
+| `sliding` | `boolean`  | `true`             | 活动时重置过期时间           |
+
+#### `auth.cloudflareAccess`
+
+使用 Cloudflare Access 作为身份验证提供商，替代通行密钥。
+
+| 选项            | 类型       | 默认值    | 描述                         |
+| --------------- | ---------- | --------- | ---------------------------- |
+| `teamDomain`    | `string`   | 必需      | 您的 Access 团队域名         |
+| `audience`      | `string`   | 必需      | 应用程序受众 (AUD) 标签      |
+| `autoProvision` | `boolean`  | `true`    | 首次登录时创建用户           |
+| `defaultRole`   | `number`   | `30`      | 新用户的默认角色             |
+| `syncRoles`     | `boolean`  | `false`   | 每次登录时更新角色           |
+| `roleMapping`   | `object`   | —         | 映射 IdP 组到角色            |
+
+<Aside>
+	配置 `cloudflareAccess` 后，它将成为唯一的身份验证方法。通行密钥、OAuth、魔法链接和自注册将被禁用。
+</Aside>
+
+### `passkeyPublicOrigin`
+
+**可选。** 传递一个完整的**面向浏览器的源**（协议 + 主机 + 可选端口，**无路径**），以便 WebAuthn 的 **`rpId`** 和 **`origin`** 与用户浏览器在 `clientData.origin` 中发送的内容匹配。
+
+默认情况下，通行密钥遵循 **`Astro.url`** / **`request.url`**。在**TLS 终止反向代理**后面，应用通常仍看到 **`http://`** 的内部跳转，而浏览器标签页是 **`https://`**, 或重建的主机名与公共名称不匹配——这会破坏通行密钥验证。将 `passkeyPublicOrigin` 设置为用户在地址栏中输入的源（例如 `https://cms.example.com` 或 `https://cms.example.com:8443`）。
+
+集成在加载时**验证**此值：它必须是具有 **`http:`** 或 **`https:`** 协议的有效 URL，并规范化为 **`origin`**。
+
+```js
+emdash({
+	database: sqlite({ url: "file:./data.db" }),
+	storage: local({
+		directory: "./uploads",
+		baseUrl: "/_emdash/api/media/file",
+	}),
+	passkeyPublicOrigin: "https://cms.example.com",
+});
+```
+
+#### 反向代理和通行密钥
+
+Astro 仅在公共主机被允许时反映 **`X-Forwarded-*`**。为您的用户访问的主机名（和协议）配置 [**`security.allowedDomains`**](https://docs.astro.build/en/reference/configuration-reference/#securityalloweddomains)。在 **`astro dev`** 中，添加匹配的 **`vite.server.allowedHosts`**，以便 Vite 接受代理的 **`Host`** 头。
+
+优先修复 **`allowedDomains`**（和转发的头信息）；当重建的 URL **仍然**与浏览器源不同时，使用 **`passkeyPublicOrigin`**（通常在 TLS 在前端终止且上游请求保持 **`http://`** 时发生）。
+
+在前端使用 TLS 时，将开发服务器绑定到环回地址（**`astro dev --host 127.0.0.1`**）通常就足够了：代理在本地连接，而 **`passkeyPublicOrigin`** 匹配公共 HTTPS 源。
+
+<Aside type="caution">
+	当您使用非默认端口时，您的反向代理应转发**包含端口**的 `Host` / `X-Forwarded-Host`。如果代理剥离了端口，**`rpId`** 和 Astro 重建的 URL 可能会出错。
+</Aside>
+
+```js title="astro.config.mjs (excerpt)"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	security: {
+		allowedDomains: [
+			{ hostname: "cms.example.com", protocol: "https" },
+			{ hostname: "cms.example.com", protocol: "http" },
+		],
+	},
+	vite: {
+		server: {
+			allowedHosts: ["cms.example.com"],
+		},
+	},
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+			passkeyPublicOrigin: "https://cms.example.com",
+		}),
+	],
+});
+```
+
+## 数据库适配器
+
+从 `emdash/db` 导入：
+
+```js
+import { sqlite, libsql, postgres, d1 } from "emdash/db";
+```
+
+### `sqlite(config)`
+
+使用 better-sqlite3 的 SQLite 数据库。
+
+| 选项 | 类型     | 描述                     |
+| ---- | -------- | ------------------------ |
+| `url` | `string` | 带有 `file:` 前缀的文件路径 |
+
+```js
+sqlite({ url: "file:./data.db" });
+```
+
+### `libsql(config)`
+
+libSQL 数据库。
+
+| 选项        | 类型     | 描述                           |
+| ----------- | -------- | ------------------------------ |
+| `url`       | `string` | 数据库 URL                     |
+| `authToken` | `string` | 身份验证令牌（本地文件可选）   |
+
+```js
+libsql({
+	url: process.env.LIBSQL_DATABASE_URL,
+	authToken: process.env.LIBSQL_AUTH_TOKEN,
+});
+```
+
+### `postgres(config)`
+
+具有连接池的 PostgreSQL 数据库。
+
+| 选项               | 类型      | 描述                         |
+| ------------------ | --------- | ---------------------------- |
+| `connectionString` | `string`  | PostgreSQL 连接 URL          |
+| `host`             | `string`  | 数据库主机                   |
+| `port`             | `number`  | 数据库端口                   |
+| `database`         | `string`  | 数据库名称                   |
+| `user`             | `string`  | 数据库用户                   |
+| `password`         | `string`  | 数据库密码                   |
+| `ssl`              | `boolean` | 启用 SSL                     |
+| `pool.min`         | `number`  | 最小连接池大小（默认：0）    |
+| `pool.max`         | `number`  | 最大连接池大小（默认：10）   |
+
+```js
+postgres({ connectionString: process.env.DATABASE_URL });
+```
+
+### `d1(config)`
+
+Cloudflare D1 数据库。从 `@emdash-cms/cloudflare` 导入。
+
+| 选项             | 类型     | 默认值             | 描述                                         |
+| ---------------- | -------- | ------------------ | -------------------------------------------- |
+| `binding`        | `string` | —                  | 来自 `wrangler.jsonc` 的 D1 绑定名称         |
+| `session`        | `string` | `"disabled"`       | 读取复制模式：`"disabled"`、`"auto"` 或 `"primary-first"` |
+| `bookmarkCookie` | `string` | `"__ec_d1_bookmark"` | 用于会话书签的 Cookie 名称                   |
+
+```js
+// Basic
+d1({ binding: "DB" });
+
+// With read replicas
+d1({ binding: "DB", session: "auto" });
+```
+
+当 `session` 为 `"auto"` 或 `"primary-first"` 时，EmDash 使用 D1 Sessions API 将读取查询路由到附近的副本。经过身份验证的用户获得基于书签的读写一致性。详情请参阅 [数据库选项 — 读取副本](/zh-cn/deployment/database/#read-replicas)。
+
+<Aside type="caution">
+	D1 需要通过 Wrangler CLI 进行迁移。运行时不允许执行 DDL 语句。
+</Aside>
+
+## 存储适配器
+
+从 `emdash/astro` 导入：
+
+```js
+import emdash, { local, r2, s3 } from "emdash/astro";
+```
+
+### `local(config)`
+
+本地文件系统存储。
+
+| 选项        | 类型     | 描述                 |
+| ----------- | -------- | -------------------- |
+| `directory` | `string` | 目录路径             |
+| `baseUrl`   | `string` | 用于提供文件的基础 URL |
+
+```js
+local({
+	directory: "./uploads",
+	baseUrl: "/_emdash/api/media/file",
+});
+```
+
+### `r2(config)`
+
+Cloudflare R2 绑定。
+
+| 选项        | 类型     | 描述             |
+| ----------- | -------- | ---------------- |
+| `binding`   | `string` | R2 绑定名称      |
+| `publicUrl` | `string` | 可选的公共 URL   |
+
+```js
+r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev",
+});
+```
+
+### `s3(config)`
+
+S3 兼容存储。
+
+| 选项                | 类型     | 描述                 |
+| ------------------- | -------- | -------------------- |
+| `endpoint`          | `string` | S3 端点 URL          |
+| `bucket`            | `string` | 存储桶名称           |
+| `accessKeyId`       | `string` | 访问密钥             |
+| `secretAccessKey`   | `string` | 秘密密钥             |
+| `region`            | `string` | 区域（默认：`"auto"`） |
+| `publicUrl`         | `string` | 可选的 CDN URL       |
+
+```js
+s3({
+	endpoint: "https://xxx.r2.cloudflarestorage.com",
+	bucket: "media",
+	accessKeyId: process.env.R2_ACCESS_KEY_ID,
+	secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+	publicUrl: "https://cdn.example.com",
+});
+```
+
+## 实时集合
+
+在 `src/live.config.ts` 中配置 EmDash 加载器：
+
+```ts title="src/live.config.ts"
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({
+		loader: emdashLoader(),
+	}),
+};
+```
+
+### 加载器选项
+
+`emdashLoader()` 函数接受可选配置：
+
+```ts
+emdashLoader({
+	// Currently no options - reserved for future use
+});
+```
+
+## 环境变量
+
+EmDash 遵循以下环境变量：
+
+| 变量                    | 描述                             |
+| ----------------------- | -------------------------------- |
+| `EMDASH_DATABASE_URL`   | 覆盖数据库 URL                   |
+| `EMDASH_AUTH_SECRET`    | 用于通行密钥身份验证的密钥       |
+| `EMDASH_PREVIEW_SECRET` | 用于预览令牌生成的密钥           |
+| `EMDASH_URL`            | 用于模式同步的远程 EmDash URL   |
+
+使用以下命令生成身份验证密钥：
+
+```bash
+npx emdash auth secret
+```
+
+## package.json 配置
+
+`package.json` 中的可选配置：
+
+```json title="package.json"
+{
+	"emdash": {
+		"label": "My Blog Template",
+		"description": "A clean, minimal blog template",
+		"seed": ".emdash/seed.json",
+		"url": "https://my-site.pages.dev",
+		"preview": "https://emdash-blog.pages.dev"
+	}
+}
+```
+
+| 选项          | 描述                       |
+| ------------- | -------------------------- |
+| `label`       | 用于显示的模板名称         |
+| `description` | 模板描述                   |
+| `seed`        | 种子 JSON 文件的路径       |
+| `url`         | 用于模式同步的远程 URL     |
+| `preview`     | 用于模板预览的演示站点 URL |
+
+## TypeScript 配置
+
+EmDash 在 `.emdash/types.ts` 中生成类型。添加到您的 `tsconfig.json`：
+
+```json title="tsconfig.json"
+{
+	"compilerOptions": {
+		"paths": {
+			"@emdash-cms/types": ["./.emdash/types.ts"]
+		}
+	}
+}
+```
+
+使用以下命令生成类型：
+
+```bash
+npx emdash types
+```

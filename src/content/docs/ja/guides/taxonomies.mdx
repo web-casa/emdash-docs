@@ -1,0 +1,463 @@
+---
+title: タクソノミー
+description: カテゴリ、タグ、カスタムタクソノミーでコンテンツを整理します。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+タクソノミーはコンテンツを整理するための分類システムです。EmDashには組み込みのカテゴリとタグが含まれており、専門的な分類ニーズに対応するカスタムタクソノミーもサポートしています。
+
+## 組み込みタクソノミー
+
+EmDashは2つのデフォルトタクソノミーを提供します：
+
+| タクソノミー       | タイプ         | 説明                                           |
+| -------------- | ------------ | ----------------------------------------------------- |
+| **カテゴリ** | 階層型 | 親子関係を持つネストされた分類 |
+| **タグ**       | フラット型         | 階層のないシンプルなラベル                       |
+
+両方ともデフォルトで投稿コレクションで利用可能です。
+
+## タームの管理
+
+### タームの作成
+
+<Tabs>
+  <TabItem label="管理ダッシュボード">
+
+1. タクソノミーページに移動します（例：`/_emdash/admin/taxonomies/category`）
+
+2. **新規追加**フォームにターム名を入力します
+
+3. 必要に応じて設定します：
+   - **スラッグ** - URL識別子（名前から自動生成）
+   - **親** - 階層型タクソノミーの場合
+   - **説明** - タームの説明
+
+4. **追加**をクリックします
+
+  </TabItem>
+  <TabItem label="コンテンツエディター">
+
+5. エディターでコンテンツエントリーを開きます
+
+6. サイドバーのタクソノミーパネルを見つけます
+
+7. カテゴリの場合：適用可能なタームのチェックボックスをオンにするか、**+ 新規追加**をクリックします
+
+8. タグの場合：カンマ区切りでタグ名を入力します
+
+9. コンテンツを保存します
+
+  </TabItem>
+  <TabItem label="API">
+
+```bash
+POST /_emdash/api/taxonomies/category/terms
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "slug": "tutorials",
+  "label": "チュートリアル",
+  "parentId": "term_abc",
+  "description": "ハウツーガイドとチュートリアル"
+}
+```
+
+  </TabItem>
+</Tabs>
+
+### タームの編集
+
+1. タクソノミータームページに移動します
+
+2. タームの横にある**編集**をクリックします
+
+3. 名前、スラッグ、親、または説明を更新します
+
+4. **保存**をクリックします
+
+### タームの削除
+
+1. タクソノミータームページに移動します
+
+2. タームの横にある**削除**をクリックします
+
+3. 削除を確認します
+
+<Aside type="caution">
+	タームを削除すると、関連するすべてのコンテンツからそのタームが削除されます。コンテンツ自体は削除されず、タームの割り当てのみが解除されます。
+</Aside>
+
+## タクソノミーのクエリ
+
+EmDashはタクソノミータームのクエリとタームによるコンテンツのフィルタリングを行う関数を提供します。
+
+### すべてのタームを取得
+
+タクソノミーのすべてのタームを取得します：
+
+```ts
+import { getTaxonomyTerms } from "emdash";
+
+// すべてのカテゴリを取得（ツリー構造を返す）
+const categories = await getTaxonomyTerms("category");
+
+// すべてのタグを取得（フラットなリストを返す）
+const tags = await getTaxonomyTerms("tag");
+```
+
+階層型タクソノミーの場合、タームには`children`配列が含まれます：
+
+```ts
+interface TaxonomyTerm {
+	id: string;
+	name: string; // Taxonomy name ("category")
+	slug: string; // Term slug ("news")
+	label: string; // Display label ("News")
+	parentId?: string;
+	description?: string;
+	children: TaxonomyTerm[];
+	count?: number; // Number of entries with this term
+}
+```
+
+### 単一タームを取得
+
+```ts
+import { getTerm } from "emdash";
+
+const category = await getTerm("category", "news");
+// TaxonomyTermまたはnullを返す
+```
+
+### エントリーのタームを取得
+
+```ts
+import { getEntryTerms } from "emdash";
+
+// 投稿のすべてのカテゴリを取得
+const categories = await getEntryTerms("posts", "post-123", "category");
+
+// 投稿のすべてのタグを取得
+const tags = await getEntryTerms("posts", "post-123", "tag");
+```
+
+### タームでコンテンツをフィルタリング
+
+`where`フィルターと共に`getEmDashCollection`を使用します：
+
+```ts
+import { getEmDashCollection } from "emdash";
+
+// "news"カテゴリの投稿
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: "news" },
+});
+
+// "javascript"タグの投稿
+const { entries: jsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { tag: "javascript" },
+});
+```
+
+または便利関数を使用します：
+
+```ts
+import { getEntriesByTerm } from "emdash";
+
+const newsPosts = await getEntriesByTerm("posts", "category", "news");
+```
+
+## タクソノミーページの構築
+
+### カテゴリアーカイブ
+
+カテゴリ内の投稿を一覧表示するページを作成します：
+
+```
+astro title="src/pages/category/[slug].astro"
+---
+import { getTaxonomyTerms, getTerm, getEmDashCollection } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const categories = await getTaxonomyTerms("category");
+
+  // ルーティング用に階層ツリーをフラット化
+  function flatten(terms) {
+    return terms.flatMap((term) => [term, ...flatten(term.children)]);
+  }
+
+  return flatten(categories).map((cat) => ({
+    params: { slug: cat.slug },
+    props: { category: cat },
+  }));
+}
+
+const { category } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  where: { category: category.slug },
+});
+---
+
+<Base title={category.label}>
+  <h1>{category.label}</h1>
+  {category.description && <p>{category.description}</p>
+}
+  <p>{category.count} posts</p>
+
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+### タグアーカイブ
+
+タグが付いた投稿を一覧表示するページを作成します：
+
+```
+astro title="src/pages/tag/[slug].astro"
+---
+import { getTaxonomyTerms, getEmDashCollection } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const tags = await getTaxonomyTerms("tag");
+
+  return tags.map((tag) => ({
+    params: { slug: tag.slug },
+    props: { tag },
+  }));
+}
+
+const { tag } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  where: { tag: tag.slug },
+});
+---
+
+<Base title={`Posts tagged "${tag.label}"`}>
+  <h1>#{tag.label}</h1>
+
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+### カテゴリリストウィジェット
+
+投稿数と共にカテゴリのリストを表示します：
+
+```
+astro title="src/components/CategoryList.astro"
+---
+import { getTaxonomyTerms } from "emdash";
+
+const categories = await getTaxonomyTerms("category");
+---
+
+<nav class="category-list">
+  <h3>Categories</h3>
+  <ul>
+    {categories.map((cat) => (
+      <li>
+        <a href={`/category/${cat.slug}`}>
+          {cat.label} ({cat.count})
+        </a>
+        {cat.children.length > 0 && (
+          <ul>
+            {cat.children.map((child) => (
+              <li>
+                <a href={`/category/${child.slug}`}>
+                  {child.label} ({child.count})
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+
+### タグクラウド
+
+使用頻度に基づいてサイズを変えたタグを表示します：
+
+```
+astro title="src/components/TagCloud.astro"
+---
+import { getTaxonomyTerms } from "emdash";
+
+const tags = await getTaxonomyTerms("tag");
+
+// カウントに基づいてフォントサイズを計算
+const counts = tags.map((t) => t.count ?? 0);
+const maxCount = Math.max(...counts, 1);
+const minSize = 0.8;
+const maxSize = 2;
+
+function getSize(count: number) {
+  const ratio = count / maxCount;
+  return minSize + ratio * (maxSize - minSize);
+}
+---
+
+<div class="tag-cloud">
+  {tags.map((tag) => (
+    <a
+      href={`/tag/${tag.slug}`}
+      style={`font-size: ${getSize(tag.count ?? 0)}rem`}
+    >
+      {tag.label}
+    </a>
+  ))}
+</div>
+```
+
+## コンテンツでのタームの表示
+
+投稿にカテゴリとタグを表示します：
+
+```
+astro title="src/components/PostTerms.astro"
+---
+import { getEntryTerms } from "emdash";
+
+interface Props {
+  collection: string;
+  entryId: string;
+}
+
+const { collection, entryId } = Astro.props;
+
+const categories = await getEntryTerms(collection, entryId, "category");
+const tags = await getEntryTerms(collection, entryId, "tag");
+---
+
+<div class="post-terms">
+  {categories.length > 0 && (
+    <div class="categories">
+      <span>投稿先:</span>
+      {categories.map((cat, i) => (
+        <>
+          {i > 0 && ", "}
+          <a href={`/category/${cat.slug}`}>{cat.label}</a>
+        </>
+      ))}
+    </div>
+  )}
+
+  {tags.length > 0 && (
+    <div class="tags">
+      {tags.map((tag) => (
+        <a href={`/tag/${tag.slug}`} class="tag">
+          #{tag.label}
+        </a>
+      ))}
+    </div>
+  )}
+</div>
+```
+
+## カスタム分類法
+
+カテゴリーやタグを超えた、専門的なニーズに対応する分類法を作成します。
+
+### カスタム分類法を作成する
+
+管理APIを使用して分類法を作成します:
+
+```bash
+POST /_emdash/api/taxonomies
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "name": "genre",
+  "label": "Genres",
+  "labelSingular": "Genre",
+  "hierarchical": true,
+  "collections": ["books", "movies"]
+}
+```
+
+### カスタム分類法を使用する
+
+カスタム分類法は、組み込みのものと同じ方法でクエリおよび表示できます:
+
+```ts
+import { getTaxonomyTerms, getEmDashCollection } from "emdash";
+
+// すべてのジャンルを取得
+const genres = await getTaxonomyTerms("genre");
+
+// 特定のジャンルの書籍を取得
+const { entries: sciFiBooks } = await getEmDashCollection("books", {
+	where: { genre: "science-fiction" },
+});
+```
+
+### コレクションに割り当てる
+
+分類法は、適用するコレクションを指定します:
+
+```ts
+{
+  "name": "difficulty",
+  "label": "Difficulty Levels",
+  "hierarchical": false,
+  "collections": ["recipes", "tutorials"]
+}
+```
+
+## 分類法 API リファレンス
+
+### REST エンドポイント
+
+| エンドポイント                                      | メソッド | 説明               |
+| --------------------------------------------- | ------ | ------------------------- |
+| `/_emdash/api/taxonomies`                   | GET    | 分類法定義の一覧表示 |
+| `/_emdash/api/taxonomies`                   | POST   | 分類法の作成           |
+| `/_emdash/api/taxonomies/:name/terms`       | GET    | 用語の一覧表示                |
+| `/_emdash/api/taxonomies/:name/terms`       | POST   | 用語の作成               |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | GET    | 用語の取得                  |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | PUT    | 用語の更新               |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | DELETE | 用語の削除               |
+
+### コンテンツに用語を割り当てる
+
+```bash
+POST /_emdash/api/content/posts/post-123/terms/category
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "termIds": ["term_news", "term_featured"]
+}
+```
+
+## 次のステップ
+
+- [ブログを作成する](/ja/guides/create-a-blog/) - ブログでカテゴリーとタグを使用する
+- [コンテンツのクエリ](/ja/guides/querying-content/) - 分類法の用語でフィルタリングする
+- [コンテンツの操作](/ja/guides/working-with-content/) - エディターで用語を割り当てる

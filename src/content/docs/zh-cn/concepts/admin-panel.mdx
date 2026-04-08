@@ -1,0 +1,367 @@
+---
+title: 管理面板
+description: EmDash 管理面板——一个使用 TanStack Router、TanStack Query 和 Kumo 组件构建的 React 单页应用。
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDash 管理面板是一个嵌入在您的 Astro 站点中的 React 单页应用。它为编辑和管理员提供了一个完整的内容管理界面。
+
+## 架构概述
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                    Astro Shell                                 │
+│  /_emdash/admin/[...path].astro                              │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                    React SPA                             │  │
+│  │                                                          │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐   │  │
+│  │  │  TanStack   │  │  TanStack   │  │     Kumo        │   │  │
+│  │  │   Router    │  │   Query     │  │   Components    │   │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────────┘   │  │
+│  │                                                          │  │
+│  │  ┌────────────────────────────────────────────────────┐  │  │
+│  │  │              REST API Client                       │  │  │
+│  │  │           /_emdash/api/*                         │  │  │
+│  │  └────────────────────────────────────────────────────┘  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────┘
+```
+
+管理面板是一个“大岛屿”式的 React 应用。Astro 负责外壳和身份验证；管理面板内部的所有导航和渲染都在客户端进行。
+
+## 技术栈
+
+| 层级         | 技术                 | 用途                                       |
+| ------------ | -------------------- | ------------------------------------------ |
+| **路由**     | TanStack Router      | 类型安全的客户端路由                       |
+| **数据**     | TanStack Query       | 服务器状态、缓存、变更                     |
+| **UI**       | Kumo                 | 无障碍组件（基于 Base UI + Tailwind）      |
+| **表格**     | TanStack Table       | 排序、筛选、分页                           |
+| **表单**     | React Hook Form + Zod | 与服务器模式匹配的验证                     |
+| **图标**     | Phosphor             | 一致的图标系统                             |
+| **编辑器**   | TipTap               | 富文本编辑（Portable Text）                |
+
+<Aside type="note">
+	Kumo 是 Cloudflare 的设计系统，基于 Base UI 原语并使用 Tailwind 样式构建。它作为管理面板包的依赖项安装。
+</Aside>
+
+## 路由结构
+
+管理面板挂载在 `/_emdash/admin/` 路径下，并使用客户端路由：
+
+| 路径                         | 界面                       |
+| ---------------------------- | -------------------------- |
+| `/`                          | 仪表板                     |
+| `/content/:collection`       | 内容列表                   |
+| `/content/:collection/:id`   | 内容编辑器                 |
+| `/content/:collection/new`   | 新建条目                   |
+| `/media`                     | 媒体库                     |
+| `/content-types`             | 模式构建器（仅管理员）     |
+| `/menus`                     | 导航菜单                   |
+| `/widgets`                   | 小部件区域                 |
+| `/taxonomies`                | 分类/标签管理              |
+| `/settings`                  | 站点设置                   |
+| `/plugins/:pluginId/*`       | 插件页面                   |
+
+<Aside type="tip">
+	`/content-types` 路由仅对管理员可见。编辑只能看到他们有权管理的内容。
+</Aside>
+
+## 清单驱动的 UI
+
+管理面板不会硬编码关于集合或插件的知识。相反，它会从服务器获取一个清单：
+
+```
+GET /_emdash/api/manifest
+```
+
+响应：
+
+```json
+{
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Blog Posts",
+			"labelSingular": "Post",
+			"icon": "file-text",
+			"supports": ["drafts", "revisions", "preview"],
+			"fields": [
+				{ "slug": "title", "type": "string", "required": true },
+				{ "slug": "content", "type": "portableText" }
+			]
+		}
+	],
+	"plugins": [
+		{
+			"id": "audit-log",
+			"label": "Audit Log",
+			"adminPages": [{ "path": "history", "label": "Audit History" }],
+			"widgets": [{ "id": "recent-activity", "title": "Recent Activity" }]
+		}
+	],
+	"taxonomies": [{ "name": "category", "label": "Categories", "hierarchical": true }],
+	"version": "abc123"
+}
+```
+
+管理面板完全根据此清单构建其导航、表单和编辑器。优点：
+
+- **模式变更立即生效** —— 无需重新构建管理面板
+- **插件 UI 自动集成** —— 清单中的页面和小部件
+- **边界处的类型安全** —— Zod 模式保留在服务器端
+
+## 数据流
+
+<Steps>
+	1. **管理面板 SPA 加载** —— TanStack Router 初始化 2. **获取清单** —— TanStack Query 缓存集合/插件元数据 3. **构建导航** —— 根据清单生成侧边栏 4. **用户导航** —— 客户端路由，无页面重载 5. **获取数据** —— TanStack Query 从 REST API 请求内容 6. **渲染表单** —— 根据清单字段描述符生成字段编辑器 7. **提交更改** —— 通过 TanStack Query 进行变更，乐观更新 8. **服务器验证** —— 服务器端的 Zod 模式，错误以 JSON 形式返回
+</Steps>
+
+## REST API 端点
+
+管理面板完全通过 REST API 进行通信：
+
+### 内容 API
+
+| 方法     | 端点                                         | 目的               |
+| -------- | -------------------------------------------- | ------------------ |
+| `GET`    | `/api/content/:collection`                   | 列出条目           |
+| `POST`   | `/api/content/:collection`                   | 创建条目           |
+| `GET`    | `/api/content/:collection/:id`               | 获取条目           |
+| `PUT`    | `/api/content/:collection/:id`               | 更新条目           |
+| `DELETE` | `/api/content/:collection/:id`               | 软删除条目         |
+| `GET`    | `/api/content/:collection/:id/revisions`     | 列出修订版本       |
+| `POST`   | `/api/content/:collection/:id/preview-url`   | 生成预览 URL       |
+
+### 模式 API
+
+| 方法     | 端点                                            | 目的             |
+| -------- | ----------------------------------------------- | ---------------- |
+| `GET`    | `/api/schema`                                   | 导出完整模式     |
+| `GET`    | `/api/schema/collections`                       | 列出集合         |
+| `POST`   | `/api/schema/collections`                       | 创建集合         |
+| `PUT`    | `/api/schema/collections/:slug`                 | 更新集合         |
+| `DELETE` | `/api/schema/collections/:slug`                 | 删除集合         |
+| `POST`   | `/api/schema/collections/:slug/fields`          | 添加字段         |
+| `PUT`    | `/api/schema/collections/:slug/fields/:field`   | 更新字段         |
+| `DELETE` | `/api/schema/collections/:slug/fields/:field`   | 删除字段         |
+
+### 媒体 API
+
+| 方法     | 端点                     | 目的                   |
+| -------- | ------------------------ | ---------------------- |
+| `GET`    | `/api/media`             | 列出媒体项             |
+| `POST`   | `/api/media/upload-url`  | 获取签名上传 URL       |
+| `POST`   | `/api/media/:id/confirm` | 确认上传完成           |
+| `DELETE` | `/api/media/:id`         | 删除媒体项             |
+| `GET`    | `/api/media/file/:key`   | 提供媒体文件           |
+
+### 其他 API
+
+| 端点                    | 目的                   |
+| ----------------------- | ---------------------- |
+| `/api/settings`         | 站点设置（GET/POST）   |
+| `/api/menus/*`          | 导航菜单               |
+| `/api/widget-areas/*`   | 小部件管理             |
+| `/api/taxonomies/*`     | 分类术语               |
+| `/api/admin/plugins/*`  | 插件状态               |
+
+## 分页
+
+所有列表端点都使用基于游标的分页：
+
+```json
+{
+  "items": [...],
+  "nextCursor": "eyJpZCI6IjAxSjEyMzQ1NiJ9"
+}
+```
+
+获取下一页：
+
+```
+GET /api/content/posts?cursor=eyJpZCI6IjAxSjEyMzQ1NiJ9
+```
+
+<Aside type="note">
+	游标分页确保即使在请求之间添加或删除内容，也能获得一致的结果。
+</Aside>
+
+## 插件管理界面
+
+插件可以通过页面和仪表板小部件扩展管理面板。集成会生成一个包含静态导入的虚拟模块：
+
+```ts
+// virtual:emdash/plugin-admins (generated)
+import * as pluginAdmin0 from "@emdash-cms/plugin-seo/admin";
+import * as pluginAdmin1 from "@emdash-cms/plugin-analytics/admin";
+
+export const pluginAdmins = {
+	seo: pluginAdmin0,
+	analytics: pluginAdmin1,
+};
+```
+
+### 插件页面
+
+插件页面挂载在 `/_emdash/admin/plugins/:pluginId/*` 路径下：
+
+```tsx
+// @emdash-cms/plugin-seo/src/admin.tsx
+export const pages = [
+	{
+		path: "settings",
+		component: SEOSettingsPage,
+		label: "SEO Settings",
+	},
+];
+```
+
+渲染位置：`/_emdash/admin/plugins/seo/settings`
+
+### 仪表板小部件
+
+插件可以向仪表板添加小部件：
+
+```tsx
+export const widgets = [
+	{
+		id: "seo-overview",
+		component: SEOWidget,
+		title: "SEO Overview",
+		size: "half", // "full" | "half" | "third"
+	},
+];
+```
+
+<Aside type="caution">
+	插件只能在其自己的命名空间（`/plugins/:pluginId/*`）下挂载页面。它们不能覆盖核心管理面板路由。
+</Aside>
+
+## 身份验证
+
+管理面板外壳路由通过 Astro 中间件强制执行身份验证：
+
+```ts
+// Simplified middleware logic
+export async function onRequest({ request, locals }, next) {
+	const session = await getSession(request);
+
+	if (request.url.includes("/_emdash/admin")) {
+		if (!session?.user) {
+			return redirect("/_emdash/admin/login");
+		}
+		locals.user = session.user;
+	}
+
+	return next();
+}
+```
+
+管理面板 SPA 本身不处理登录——这是一个设置会话 cookie 的 Astro 页面。
+
+## 基于角色的访问控制
+
+不同角色看到的管理面板部分不同：
+
+| 角色           | 可见部分                                   |
+| -------------- | ------------------------------------------ |
+| **编辑**       | 仪表板、分配的集合、媒体                   |
+| **管理员**     | + 内容类型、所有集合、设置                 |
+| **开发者**     | + CLI 访问、生成的类型                     |
+
+清单端点会根据请求用户的角色过滤集合和功能。
+
+## 内容编辑器
+
+内容编辑器根据字段定义动态生成表单：
+
+```tsx
+// Simplified editor rendering
+function ContentEditor({ collection, fields }) {
+	return (
+		<form>
+			{fields.map((field) => (
+				<FieldWidget
+					key={field.slug}
+					type={field.type}
+					label={field.label}
+					required={field.required}
+					options={field.options}
+				/>
+			))}
+		</form>
+	);
+}
+```
+
+每种字段类型都有对应的小部件：
+
+| 字段类型       | 小部件           |
+| -------------- | ---------------- |
+| `string`       | 文本输入框       |
+| `text`         | 文本域           |
+| `number`       | 数字输入框       |
+| `boolean`      | 切换开关         |
+| `datetime`     | 日期/时间选择器  |
+| `select`       | 下拉菜单         |
+| `multiSelect`  | 多选菜单         |
+| `portableText` | TipTap 编辑器    |
+| `image`        | 媒体选择器       |
+| `reference`    | 条目选择器       |
+
+## 富文本编辑器
+
+Portable Text 字段使用 TipTap（ProseMirror）进行编辑：
+
+```
+User types → TipTap (ProseMirror JSON) → Save → Portable Text (DB)
+Load → Portable Text (DB) → TipTap (ProseMirror JSON) → Display
+```
+
+在加载/保存边界通过 `portableTextToProsemirror()` 和 `prosemirrorToPortableText()` 进行转换。
+
+支持的块：
+
+- 段落、标题（H1-H6）
+- 项目符号和编号列表
+- 引用块、代码块
+- 图像（来自媒体库）
+- 链接
+
+来自插件或导入的未知块将作为只读占位符保留。
+
+## 媒体库
+
+媒体库提供：
+
+- 网格和列表视图
+- 按类型、日期搜索和筛选
+- 拖放上传
+- 带元数据的图像预览
+- 批量选择和删除
+
+上传使用签名 URL 进行客户端到存储的直接上传：
+
+<Steps>
+	1. **请求上传 URL** —— `POST /api/media/upload-url` 2. **直接上传** —— 客户端将文件 PUT 到签名 URL（R2/S3） 3. **确认上传** —— `POST /api/media/:id/confirm` 4. **服务器提取元数据** —— 尺寸、MIME 类型等。
+</Steps>
+
+这种方法绕过了 Workers 的请求体大小限制，并提供真实的上传进度。
+
+## 后续步骤
+
+<CardGrid>
+	<Card title="入门指南" icon="rocket">
+		[设置您的第一个 EmDash 站点](/zh-cn/getting-started/)。
+	</Card>
+	<Card title="插件开发" icon="puzzle">
+		[构建管理界面扩展](/zh-cn/plugins/admin-ui/)。
+	</Card>
+	<Card title="架构" icon="open-book">
+		查看完整的[系统架构](/zh-cn/concepts/architecture/)。
+	</Card>
+</CardGrid>

@@ -1,0 +1,199 @@
+---
+title: Visão Geral do Sistema de Plugins
+description: Estenda o EmDash com plugins que adicionam hooks, armazenamento, configurações e interface administrativa.
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+O sistema de plugins do EmDash permite que você estenda o CMS sem modificar o código principal. Os plugins podem conectar-se a eventos do ciclo de vida do conteúdo, armazenar seus próprios dados, expor configurações aos administradores e adicionar interface personalizada ao painel administrativo.
+
+## Filosofia de Design
+
+Os plugins do EmDash são **transformadores de configuração**, não aplicações separadas. Eles são executados no mesmo processo do seu site Astro e interagem através de interfaces bem definidas.
+
+**Princípios-chave:**
+
+- **Declarativo** — Hooks, armazenamento e rotas são declarados no momento da definição, não registrados dinamicamente
+- **Type-safe** — Suporte total ao TypeScript com objetos de contexto tipados
+- **Pronto para sandboxing** — APIs projetadas para execução isolada no Cloudflare Workers
+- **Baseado em capacidades** — Os plugins declaram o que precisam; o runtime impõe o acesso
+
+<Aside type="note">
+	Os plugins do EmDash não são integrações do Astro. Eles são passados para a integração do EmDash na sua
+	configuração do Astro. Um plugin que precisa de ambos pode ser distribuído como uma integração do Astro que também registra
+	hooks do EmDash.
+</Aside>
+
+## O que os Plugins Podem Fazer
+
+<CardGrid>
+	<Card title="Conectar-se a eventos" icon="rocket">
+		Execute código antes ou depois de salvar conteúdo, uploads de mídia e eventos do ciclo de vida do plugin.
+	</Card>
+	<Card title="Armazenar dados" icon="document">
+		Persista dados específicos do plugin em coleções indexadas sem escrever migrações de banco de dados.
+	</Card>
+	<Card title="Expor configurações" icon="setting">
+		Declare um esquema de configurações e obtenha uma interface administrativa gerada automaticamente para configuração.
+	</Card>
+	<Card title="Adicionar páginas administrativas" icon="laptop">
+		Crie páginas administrativas personalizadas e widgets de painel com componentes React.
+	</Card>
+	<Card title="Criar rotas de API" icon="external">
+		Exponha endpoints para a interface administrativa do seu plugin ou integrações externas.
+	</Card>
+	<Card title="Fazer requisições HTTP" icon="external">
+		Chame APIs externas com restrições de host declaradas para segurança.
+	</Card>
+</CardGrid>
+
+## Arquitetura do Plugin
+
+Cada plugin é criado com `definePlugin()`:
+
+```typescript
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "my-plugin",
+	version: "1.0.0",
+
+	// Quais APIs o plugin precisa acessar
+	capabilities: ["read:content", "network:fetch"],
+
+	// Hosts para os quais o plugin pode fazer requisições HTTP
+	allowedHosts: ["api.example.com"],
+
+	// Coleções de armazenamento persistente
+	storage: {
+		entries: {
+			indexes: ["userId", "createdAt"],
+		},
+	},
+
+	// Manipuladores de eventos
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			ctx.log.info("Content saved", { id: event.content.id });
+		},
+	},
+
+	// Endpoints da API REST
+	routes: {
+		status: {
+			handler: async (ctx) => ({ ok: true }),
+		},
+	},
+
+	// Configuração da interface administrativa
+	admin: {
+		settingsSchema: {
+			apiKey: { type: "secret", label: "API Key" },
+		},
+		pages: [{ path: "/dashboard", label: "Dashboard" }],
+		widgets: [{ id: "status", size: "half" }],
+	},
+});
+```
+
+## Contexto do Plugin
+
+Cada hook e manipulador de rota recebe um objeto `PluginContext` com acesso a:
+
+| Propriedade   | Descrição                                          | Disponibilidade                           |
+| ------------- | -------------------------------------------------- | ----------------------------------------- |
+| `ctx.storage` | Coleções de documentos do plugin                   | Sempre (se declarado)                     |
+| `ctx.kv`      | Armazenamento chave-valor para configurações e estado | Sempre                                 |
+| `ctx.content` | Ler/escrever conteúdo do site                      | Com `read:content` ou `write:content`     |
+| `ctx.media`   | Ler/escrever arquivos de mídia                     | Com `read:media` ou `write:media`         |
+| `ctx.http`    | Cliente HTTP para requisições externas             | Com `network:fetch`                       |
+| `ctx.log`     | Logger estruturado (debug, info, warn, error)      | Sempre                                    |
+| `ctx.plugin`  | Metadados do plugin (id, versão)                   | Sempre                                    |
+| `ctx.site`    | Informações do site: `name`, `url`, `locale`       | Sempre                                    |
+| `ctx.url()`   | Gerar URLs absolutas a partir de caminhos          | Sempre                                    |
+| `ctx.users`   | Ler informações do usuário: `get()`, `getByEmail()`, `list()` | Com `read:users`                      |
+| `ctx.cron`    | Agendar tarefas: `schedule()`, `cancel()`, `list()` | Sempre                                 |
+| `ctx.email`   | Enviar email: `send()`                             | Com `email:send` + provedor configurado   |
+
+A forma do contexto é idêntica em todos os hooks e rotas. Propriedades controladas por capacidade estão presentes apenas quando o plugin declara a capacidade necessária.
+
+## Capacidades
+
+As capacidades determinam quais APIs estão disponíveis no contexto do plugin:
+
+| Capacidade        | Concede Acesso A                                                       |
+| ----------------- | ---------------------------------------------------------------------- |
+| `read:content`    | `ctx.content.get()`, `ctx.content.list()`                              |
+| `write:content`   | `ctx.content.create()`, `ctx.content.update()`, `ctx.content.delete()` |
+| `read:media`      | `ctx.media.get()`, `ctx.media.list()`                                  |
+| `write:media`     | `ctx.media.getUploadUrl()`, `ctx.media.upload()`, `ctx.media.delete()` |
+| `network:fetch`   | `ctx.http.fetch()` (restrito a `allowedHosts`)                         |
+| `network:fetch:any` | `ctx.http.fetch()` (sem restrições — para URLs configuradas pelo usuário) |
+| `read:users`      | `ctx.users.get()`, `ctx.users.getByEmail()`, `ctx.users.list()`        |
+| `email:send`      | `ctx.email.send()` (requer um plugin de provedor)                      |
+| `email:provide`   | Registrar hook exclusivo `email:deliver` (provedor de transporte)      |
+| `email:intercept` | Registrar hooks `email:beforeSend` / `email:afterSend`                 |
+| `page:inject`     | Registrar hooks `page:metadata` / `page:fragments`                     |
+
+<Aside type="tip">
+	`write:content` implica `read:content`. O mesmo para mídia. Declare apenas o que você precisa.
+</Aside>
+
+## Registro
+
+Registre plugins na sua configuração do Astro:
+
+```
+typescript title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import { emdash } from "emdash/astro";
+import seoPlugin from "@emdash-cms/plugin-seo";
+import auditLogPlugin from "@emdash-cms/plugin-audit-log";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			plugins: [seoPlugin({ generateSitemap: true }), auditLogPlugin({ retentionDays: 90 })],
+		}),
+	],
+});
+```
+
+Os plugins são resolvidos no momento da compilação. A ordem importa para hooks com a mesma prioridade—os plugins anteriores no array são executados primeiro.
+
+## Modos de Execução
+
+O EmDash suporta dois modos de execução de plugins:
+
+| Modo          | Descrição                             | Plataforma        |
+| ------------- | --------------------------------------- | --------------- |
+| **Trusted**   | Plugins executados em processo com acesso total | Qualquer             |
+| **Sandboxed** | Plugins executados em workers V8 isolados      | Apenas Cloudflare |
+
+No modo trusted (padrão), as capacidades são documentação—os plugins podem acessar qualquer coisa. No modo sandboxed, as capacidades são impostas no nível do runtime.
+
+<Aside type="note">
+	A execução sandboxed requer Cloudflare Workers com Dynamic Worker Loader. Outras plataformas usam
+	apenas o modo trusted. Veja [Plugin Sandbox](/pt/plugins/sandbox/) para uma comparação completa das garantias
+	de segurança em cada plataforma.
+</Aside>
+
+## Próximos Passos
+
+<CardGrid>
+	<Card title="Criar um Plugin" icon="add-document">
+		[Construa seu primeiro plugin](/pt/plugins/creating-plugins/) com armazenamento, hooks e interface de administração.
+	</Card>
+	<Card title="Hooks Disponíveis" icon="rocket">
+		[Navegue por todos os hooks](/pt/plugins/hooks/) para conteúdo, mídia e ciclo de vida do plugin.
+	</Card>
+	<Card title="Armazenamento de Plugin" icon="document">
+		[Saiba mais sobre armazenamento](/pt/plugins/storage/) e como consultar dados do plugin.
+	</Card>
+	<Card title="Interface de Administração" icon="laptop">
+		[Adicione páginas de administração](/pt/plugins/admin-ui/) e widgets do painel.
+	</Card>
+	<Card title="Segurança Sandbox" icon="warning">
+		[Entenda o isolamento sandbox](/pt/plugins/sandbox/) em implantações Cloudflare e Node.js.
+	</Card>
+</CardGrid>

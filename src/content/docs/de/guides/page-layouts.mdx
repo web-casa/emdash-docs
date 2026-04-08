@@ -1,0 +1,144 @@
+---
+title: Seitenlayouts
+description: Ermöglichen Sie Redakteuren, für einzelne Seiten unterschiedliche Layouts über ein Vorlagenfeld auszuwählen.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+WordPress kennt "Seitenvorlagen": ein Dropdown im Editor, mit dem sich für jede Seite ein eigenes Layout auswählen lässt, zum Beispiel "Standard", "Vollbreite" oder "Landingpage". In EmDash lässt sich dasselbe Muster mit einem `select`-Feld umsetzen.
+
+## Funktionsweise
+
+1. Fügen Sie Ihren Seiten-Sammlungen ein `template`-Auswahlfeld hinzu
+2. Erstellen Sie Layout-Komponenten für jede Option
+3. Ordnen Sie den Feldwert einem Layout in Ihrer Seiten-Route zu
+
+Dafür ist kein spezielles System nötig. Sie nutzen einfach das vorhandene `select`-Feld von EmDash und Astros Komponentenmodell.
+
+## Feld hinzufügen
+
+Fügen Sie in der Admin-Oberfläche Ihrer Seitensammlung ein Auswahlfeld mit dem Slug `template` und den gewünschten Layout-Optionen hinzu, zum Beispiel "Standard" und "Vollbreite". Alternativ können Sie es in Ihre Seed-Daten aufnehmen:
+
+```json title=".emdash/seed.json"
+{
+  "slug": "template",
+  "label": "Template",
+  "type": "select",
+  "validation": {
+    "options": ["Default", "Full Width"]
+  },
+  "defaultValue": "Default"
+}
+```
+
+## Layout-Komponenten erstellen
+
+Jedes Layout umschließt Inhalte in Ihrem Basis-Layout mit unterschiedlichem Styling:
+
+```astro title="src/layouts/PageDefault.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../guides/Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-default">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-default {
+    max-width: var(--content-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+```astro title="src/layouts/PageFullWidth.astro"
+---
+import type { ContentEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../guides/Base.astro";
+
+interface Props {
+  page: ContentEntry<any>;
+}
+
+const { page } = Astro.props;
+---
+
+<Base title={page.data.title}>
+  <article class="page-wide">
+    <h1>{page.data.title}</h1>
+    <PortableText value={page.data.content} />
+  </article>
+</Base>
+
+<style>
+  .page-wide {
+    max-width: var(--wide-width);
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+</style>
+```
+
+## Route verbinden
+
+Importieren Sie in Ihrer Seiten-Route jedes Layout und ordnen Sie den Wert des Template-Felds dem passenden Layout zu:
+
+```astro title="src/pages/pages/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import PageDefault from "../../../layouts/PageDefault.astro";
+import PageFullWidth from "../../../layouts/PageFullWidth.astro";
+
+const { slug } = Astro.params;
+
+if (!slug) {
+  return Astro.redirect("/404");
+}
+
+const { entry: page } = await getEmDashEntry("pages", slug);
+
+if (!page) {
+  return Astro.redirect("/404");
+}
+
+const layouts = {
+  "Default": PageDefault,
+  "Full Width": PageFullWidth,
+};
+
+const Layout = layouts[page.data.template as keyof typeof layouts] ?? PageDefault;
+---
+
+<Layout page={page} />
+```
+
+Die Route bleibt dabei kompakt. Jede Layout-Komponente bringt ihr eigenes Markup und Styling mit. Ein neues Layout bedeutet also nur: Komponente anlegen, Option im Auswahlfeld ergänzen und eine weitere Zuordnung ins Mapping aufnehmen.
+
+<Aside type="tip">
+Verwenden Sie gut lesbare Namen wie "Vollbreite" statt Slugs wie `full-width`. Dieser Wert wird gespeichert und zugleich als Beschriftung im Admin-Dropdown angezeigt.
+</Aside>
+
+## Weitere Layouts hinzufügen
+
+Typische Varianten aus WordPress-Themes:
+
+- **Standard** — schmale Inhalts-Spalte, gut zum Lesen
+- **Vollbreite** — breiterer Inhaltsbereich, ohne Seitenleiste
+- **Landing Page** — ohne Header/Footer, mit Hero-Sektionen
+- **Seitenleiste** — Inhalt mit einem Widget-Bereich in der Seitenleiste
+
+Jede Variante ist letztlich nur eine weitere Astro-Komponente im Verzeichnis `src/layouts/` und ein zusätzlicher Eintrag im Layout-Mapping Ihrer Route.

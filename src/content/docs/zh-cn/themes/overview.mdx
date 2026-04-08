@@ -1,0 +1,157 @@
+---
+title: 主题概述
+description: 了解 EmDash 主题的工作原理以及它们如何引导新站点。
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+EmDash 主题是一个完整的 Astro 站点——包含页面、布局、组件、样式——通过 `create-astro` 分发。它还包含一个**种子文件**，用于在首次运行时引导数据库，创建集合、字段、菜单、重定向和示例内容。
+
+## 主题提供的内容
+
+主题是一个可运行的 Astro 项目，包含：
+
+- **页面** — 用于渲染内容的 Astro 路由（首页、博客文章、归档页面等）
+- **布局** — 共享的 HTML 结构
+- **组件** — 可复用的 UI 元素（导航、卡片、页脚）
+- **样式** — CSS 或 Tailwind 配置
+- **种子文件** — 告知 CMS 需要创建哪些内容类型和字段的 JSON 文件
+
+<Aside>
+	EmDash 在内容模型上给予你的控制权远超过 WordPress。主题通过种子文件精确声明所需的集合和字段来利用这一点。
+	大多数主题应建立在标准的 **posts** 和 **pages** 集合之上，根据需要添加字段和分类法，而不是发明全新的内容类型。
+</Aside>
+
+## 主题结构
+
+```
+my-theme/
+├── package.json           # Theme metadata + EmDash config
+├── astro.config.mjs       # Astro integration setup
+├── src/
+│   ├── live.config.ts     # Live Collections configuration
+│   ├── pages/             # Astro routes
+│   ├── layouts/           # Layout components
+│   └── components/        # UI components
+└── .emdash/
+    ├── seed.json          # Schema + sample content
+    └── uploads/           # Optional local media files
+```
+
+## 主题如何引导站点
+
+当你从主题创建站点时，会发生以下步骤：
+
+1. `create-astro` 从模板搭建项目
+2. 你运行 `npm install` 和 `npm run dev`
+3. 首次访问管理面板时，**设置向导**会自动运行
+4. 向导应用种子文件，创建集合、菜单、重定向和内容
+5. 站点准备就绪，可以使用
+
+<CardGrid>
+	<Card title="面向用户" icon="laptop">
+		选择一个主题，运行向导，开始编辑。无需数据库知识。
+	</Card>
+	<Card title="面向开发者" icon="seti:config">
+		主题是标准的 Astro 项目。在搭建完成后可以自由定制。
+	</Card>
+</CardGrid>
+
+## 安装主题
+
+使用 `create-astro` 配合模板：
+
+```bash
+npm create astro@latest -- --template @emdash-cms/template-blog
+```
+
+社区主题通过 GitHub 使用：
+
+```bash
+npm create astro@latest -- --template github:user/emdash-portfolio
+```
+
+安装完成后：
+
+```bash
+cd my-site
+npm install
+npm run dev
+```
+
+访问 `http://localhost:4321/_emdash/admin` 以完成设置向导。
+
+## 设置向导
+
+设置向导在首次访问管理面板时自动运行。它会：
+
+1. 提示输入站点标题、标语和管理员凭据
+2. 提供包含示例内容的选项
+3. 将种子文件应用到数据库
+4. 重定向到管理仪表板
+
+```
+┌────────────────────────────────────────────────────────┐
+│                                                        │
+│                    ◆ EmDash                          │
+│                                                        │
+│              Welcome to your new site                  │
+│                                                        │
+│  Site Title:     [My Awesome Blog                    ] │
+│  Tagline:        [Thoughts and ideas                 ] │
+│                                                        │
+│  Admin Email:    [admin@example.com                  ] │
+│  Admin Password: [••••••••••••                       ] │
+│                                                        │
+│  ☑ Include sample content                              │
+│                                                        │
+│                   [Create Site →]                      │
+│                                                        │
+│  Template: Blog Starter                                │
+│  Creates: 2 collections, 3 pages, 1 post              │
+└────────────────────────────────────────────────────────┘
+```
+
+<Aside type="tip">
+	首次探索主题时，请勾选“包含示例内容”。示例内容展示了主题期望的内容结构。
+</Aside>
+
+## 官方主题
+
+EmDash 提供官方的入门主题，每个主题都有本地（SQLite + 文件系统）和 Cloudflare（D1 + R2）两种变体：
+
+| 主题 | 描述 | 使用场景 |
+| ----- | ----------- | -------- |
+| `@emdash-cms/template-blog` | 包含文章、页面、分类和深色模式的极简博客 | 个人博客、简单站点 |
+| `@emdash-cms/template-portfolio` | 编辑风格的组合，包含项目、衬线字体（Playfair Display）和以图片为中心的布局 | 自由职业者、机构、创意人士 |
+| `@emdash-cms/template-marketing` | 大胆的营销站点，包含自定义的 Portable Text 区块（英雄区、功能、推荐、定价、常见问题） | 落地页、SaaS 站点、产品营销 |
+
+### Cloudflare 变体
+
+对于部署在 Cloudflare Pages（使用 D1 和 R2）的场景，请在模板名称后追加 `-cloudflare`：
+
+```bash
+npm create astro@latest -- --template @emdash-cms/template-blog-cloudflare
+npm create astro@latest -- --template @emdash-cms/template-portfolio-cloudflare
+npm create astro@latest -- --template @emdash-cms/template-marketing-cloudflare
+```
+
+这些变体包含用于部署配置的 `wrangler.jsonc` 文件。
+
+## 安装后自定义
+
+设置向导完成后，你的站点就是一个标准的 Astro 项目。可以像定制任何 Astro 站点一样进行修改：
+
+- 在 `src/pages/` 中编辑页面
+- 在 `src/layouts/` 中修改布局
+- 通过管理面板 UI 添加集合
+- 安装 Astro 集成
+- 部署到任何支持 Astro 运行的地方
+
+种子文件仅在初始设置时使用。一旦应用，你的架构就存在于数据库中。
+
+## 后续步骤
+
+- **[创建主题](/zh-cn/themes/creating-themes/)** — 构建你自己的 EmDash 主题
+- **[种子文件格式](/zh-cn/themes/seed-files/)** — 种子文件结构参考
+- **[入门指南](/zh-cn/getting-started/)** — 创建你的第一个 EmDash 站点

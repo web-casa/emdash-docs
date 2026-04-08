@@ -1,0 +1,517 @@
+---
+title: 플러그인 훅
+description: 콘텐츠, 미디어 및 플러그인 생명주기 이벤트에 연결합니다.
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+훅을 사용하면 플러그인이 이벤트에 응답하여 코드를 실행할 수 있습니다. 모든 훅은 이벤트 객체와 플러그인 컨텍스트를 받습니다. 훅은 플러그인 정의 시점에 선언되며, 런타임에 동적으로 등록되지 않습니다.
+
+## 훅 시그니처
+
+모든 훅 핸들러는 두 개의 인수를 받습니다:
+
+```typescript
+async (event: EventType, ctx: PluginContext) => ReturnType;
+```
+
+- `event` — 이벤트에 대한 데이터 (저장되는 콘텐츠, 업로드된 미디어 등)
+- `ctx` — 스토리지, KV, 로깅 및 기능 제한 API를 포함한 [플러그인 컨텍스트](/ko/plugins/overview/#plugin-context)
+
+## 훅 구성
+
+훅은 간단한 핸들러로 선언하거나 전체 구성으로 선언할 수 있습니다:
+
+<Tabs>
+  <TabItem label="Simple">
+```typescript
+hooks: {
+  "content:afterSave": async (event, ctx) => {
+    ctx.log.info("Content saved");
+  }
+}
+```
+  </TabItem>
+  <TabItem label="Full Config">
+```typescript
+hooks: {
+  "content:afterSave": {
+    priority: 100,
+    timeout: 5000,
+    dependencies: ["audit-log"],
+    errorPolicy: "continue",
+    handler: async (event, ctx) => {
+      ctx.log.info("Content saved");
+    }
+  }
+}
+```
+  </TabItem>
+</Tabs>
+
+### 구성 옵션
+
+| 옵션           | 유형                    | 기본값    | 설명                                       |
+| -------------- | ----------------------- | --------- | ------------------------------------------ |
+| `priority`     | `number`                | `100`     | 실행 순서. 숫자가 낮을수록 먼저 실행됩니다. |
+| `timeout`      | `number`                | `5000`    | 최대 실행 시간(밀리초)입니다.              |
+| `dependencies` | `string[]`              | `[]`      | 이 훅보다 먼저 실행되어야 하는 플러그인 ID들입니다. |
+| `errorPolicy`  | `"abort" \| "continue"` | `"abort"` | 오류 발생 시 파이프라인을 중지할지 여부입니다. |
+| `exclusive`    | `boolean`               | `false`   | 하나의 플러그인만 활성 제공자가 될 수 있습니다. `email:deliver` 및 `comment:moderate`에 사용됩니다. |
+| `handler`      | `function`              | —         | 훅 핸들러 함수입니다. 필수입니다.          |
+
+<Aside type="tip">
+	알림과 같은 중요하지 않은 훅에는 `errorPolicy: "continue"`를 사용하세요. 훅의 결과가 필수적인 경우 `"abort"`(기본값)를 사용하세요.
+</Aside>
+
+## 라이프사이클 훅
+
+라이프사이클 훅은 플러그인 설치, 활성화 및 비활성화 중에 실행됩니다.
+
+### `plugin:install`
+
+플러그인이 사이트에 처음 추가될 때 한 번 실행됩니다.
+
+```typescript
+"plugin:install": async (_event, ctx) => {
+  ctx.log.info("Installing plugin...");
+
+  // 기본 데이터 시드
+  await ctx.kv.set("settings:enabled", true);
+  await ctx.storage.items!.put("default", { name: "Default Item" });
+}
+```
+
+**이벤트:** `{}`  
+**반환:** `Promise<void>`
+
+### `plugin:activate`
+
+플러그인이 활성화될 때 실행됩니다 (설치 후 또는 다시 활성화될 때).
+
+```typescript
+"plugin:activate": async (_event, ctx) => {
+  ctx.log.info("Plugin activated");
+}
+```
+
+**이벤트:** `{}`  
+**반환:** `Promise<void>`
+
+### `plugin:deactivate`
+
+플러그인이 비활성화될 때 실행됩니다 (제거되지는 않음).
+
+```typescript
+"plugin:deactivate": async (_event, ctx) => {
+  ctx.log.info("Plugin deactivated");
+  // Release resources, pause background work
+}
+```
+
+**이벤트:** `{}`  
+**반환:** `Promise<void>`
+
+### `plugin:uninstall`
+
+플러그인이 사이트에서 제거될 때 실행됩니다.
+
+```typescript
+"plugin:uninstall": async (event, ctx) => {
+  ctx.log.info("Uninstalling plugin...");
+
+  if (event.deleteData) {
+    // 사용자가 플러그인 데이터 삭제를 선택함
+    const result = await ctx.storage.items!.query({ limit: 1000 });
+    await ctx.storage.items!.deleteMany(result.items.map(i => i.id));
+  }
+}
+```
+
+**이벤트:** `{ deleteData: boolean }`  
+**반환:** `Promise<void>`
+
+<Aside type="caution">
+	`plugin:uninstall`에서는 보수적으로 접근하세요. 기본적으로 데이터를 보존하세요 — 사용자가 다시 설치할 수 있습니다. `event.deleteData`가 `true`일 때만 삭제하세요.
+</Aside>
+
+## 콘텐츠 훅
+
+콘텐츠 훅은 생성, 업데이트 및 삭제 작업 중에 실행됩니다.
+
+### `content:beforeSave`
+
+콘텐츠가 저장되기 전에 실행됩니다. 수정된 콘텐츠를 반환하거나 변경 없이 유지하려면 `void`를 반환하세요. 저장을 취소하려면 예외를 던지세요.
+
+```typescript
+"content:beforeSave": async (event, ctx) => {
+  const { content, collection, isNew } = event;
+
+  // 유효성 검사
+  if (collection === "posts" && !content.title) {
+    throw new Error("Posts require a title");
+  }
+
+  // 변환
+  if (content.slug) {
+    content.slug = content.slug.toLowerCase().replace(/\s+/g, "-");
+  }
+
+  return content;
+}
+```
+
+**이벤트:**
+
+```typescript
+{
+	content: Record<string, unknown>; // Content data being saved
+	collection: string; // Collection name
+	isNew: boolean; // True if creating, false if updating
+}
+```
+
+**반환:** `Promise<Record<string, unknown> | void>`
+
+### `content:afterSave`
+
+콘텐츠가 성공적으로 저장된 후 실행됩니다. 알림, 로깅 또는 외부 시스템 동기화와 같은 부수 효과에 사용하세요.
+
+```typescript
+"content:afterSave": async (event, ctx) => {
+  const { content, collection, isNew } = event;
+
+  ctx.log.info(`${isNew ? "Created" : "Updated"} ${collection}/${content.id}`);
+
+  // 외부 동기화 트리거
+  if (ctx.http) {
+    await ctx.http.fetch("https://api.example.com/webhook", {
+      method: "POST",
+      body: JSON.stringify({ event: "content:save", id: content.id })
+    });
+  }
+}
+```
+
+**이벤트:**
+
+```typescript
+{
+	content: Record<string, unknown>; // Saved content (includes id, timestamps)
+	collection: string;
+	isNew: boolean;
+}
+```
+
+**반환:** `Promise<void>`
+
+### `content:beforeDelete`
+
+콘텐츠가 삭제되기 전에 실행됩니다. 삭제를 취소하려면 `false`를 반환하고, 허용하려면 `true` 또는 `void`를 반환하세요.
+
+```typescript
+"content:beforeDelete": async (event, ctx) => {
+  const { id, collection } = event;
+
+  // 보호된 콘텐츠 삭제 방지
+  if (collection === "pages" && id === "home") {
+    ctx.log.warn("Cannot delete home page");
+    return false;
+  }
+
+  return true;
+}
+```
+
+**이벤트:**
+
+```typescript
+{
+	id: string; // Content ID being deleted
+	collection: string;
+}
+```
+
+**반환:** `Promise<boolean | void>`
+
+### `content:afterDelete`
+
+콘텐츠가 성공적으로 삭제된 후 실행됩니다.
+
+```typescript
+"content:afterDelete": async (event, ctx) => {
+  const { id, collection } = event;
+
+  ctx.log.info(`Deleted ${collection}/${id}`);
+
+  // 관련 플러그인 데이터 정리
+  await ctx.storage.cache!.delete(`${collection}:${id}`);
+}
+```
+
+**이벤트:**
+
+```typescript
+{
+	id: string;
+	collection: string;
+}
+```
+
+**반환:** `Promise<void>`
+
+## 미디어 훅
+
+미디어 훅은 파일 업로드 중에 실행됩니다.
+
+### `media:beforeUpload`
+
+파일이 업로드되기 전에 실행됩니다. 수정된 파일 정보를 반환하거나 변경 없이 유지하려면 `void`를 반환하세요. 업로드를 취소하려면 예외를 던지세요.
+
+```typescript
+"media:beforeUpload": async (event, ctx) => {
+  const { file } = event;
+
+  // 파일 유형 유효성 검사
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Only images are allowed");
+  }
+
+  // 파일 크기 유효성 검사 (최대 10MB)
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error("File too large");
+  }
+
+  // 파일 이름 변경
+  return {
+    ...file,
+    name: `${Date.now()}-${file.name}`
+  };
+}
+```
+
+**이벤트:**
+
+```typescript
+{
+	file: {
+		name: string; // Original filename
+		type: string; // MIME type
+		size: number; // Size in bytes
+	}
+}
+```
+
+**반환:** `Promise<{ name: string; type: string; size: number } | void>`
+
+### `media:afterUpload`
+
+파일이 성공적으로 업로드된 후 실행됩니다.
+
+```typescript
+"media:afterUpload": async (event, ctx) => {
+  const { media } = event;
+
+  ctx.log.info(`Uploaded ${media.filename}`, {
+    id: media.id,
+    size: media.size,
+    mimeType: media.mimeType
+  });
+}
+```
+
+**이벤트:**
+
+```typescript
+{
+	media: {
+		id: string;
+		filename: string;
+		mimeType: string;
+		size: number | null;
+		url: string;
+		createdAt: string;
+	}
+}
+```
+
+**반환:** `Promise<void>`
+
+## 훅 실행 순서
+
+훅은 다음 순서로 실행됩니다:
+
+1. `priority` 값이 낮은 훅이 먼저 실행됩니다
+2. 동일한 우선순위의 경우, 플러그인 등록 순서로 실행됩니다
+3. `dependencies`가 있는 훅은 해당 플러그인이 완료될 때까지 대기합니다
+
+```typescript
+// Plugin A
+"content:afterSave": {
+  priority: 50,  // Runs first
+  handler: async () => {}
+}
+
+// Plugin B
+"content:afterSave": {
+  priority: 100,  // 두 번째로 실행됨 (기본 우선순위)
+  handler: async () => {}
+}
+
+// Plugin C
+"content:afterSave": {
+  priority: 200,
+  dependencies: ["plugin-a"],  // 우선순위가 더 낮더라도 A 이후에 실행됨
+  handler: async () => {}
+}
+```
+
+## 오류 처리
+
+훅이 예외를 던지거나 시간 초과될 때:
+
+- **`errorPolicy: "abort"`** — 전체 파이프라인이 중지됩니다. 원래 작업이 실패할 수 있습니다.
+- **`errorPolicy: "continue"`** — 오류가 기록되고 나머지 훅이 계속 실행됩니다.
+
+```typescript
+"content:afterSave": {
+  timeout: 5000,
+  errorPolicy: "continue",  // Don't fail the save if this hook fails
+  handler: async (event, ctx) => {
+    // External API call that might fail
+    await ctx.http!.fetch("https://unreliable-api.com/notify");
+  }
+}
+```
+
+<Aside type="tip">
+	분석, 알림 또는 외부 동기화와 같은 중요하지 않은 작업에는 `errorPolicy: "continue"`를 사용하세요. 훅이 실패해도 콘텐츠 저장은 성공합니다.
+</Aside>
+
+## 시간 초과
+
+훅의 기본 시간 초과는 5000ms(5초)입니다. 더 오래 걸릴 수 있는 작업의 경우 이를 늘리세요:
+
+```typescript
+"content:afterSave": {
+  timeout: 30000,  // 30 seconds
+  handler: async (event, ctx) => {
+    // Long-running operation
+  }
+}
+```
+
+<Aside type="caution">
+	Cloudflare의 샌드박스 모드에서는 리소스 제한이 격리 수준에서 적용됩니다. 구성된 타임아웃과 관계없이 장기 실행
+	훅이 종료될 수 있습니다.
+</Aside>
+
+## 공개 페이지 훅
+
+공개 페이지 훅을 사용하면 플러그인이 렌더링된 페이지의 `<head>` 및 `<body>`에 기여할 수 있습니다. 템플릿은 `emdash/ui`의 `<EmDashHead>`, `<EmDashBodyStart>`, `<EmDashBodyEnd>` 컴포넌트를 사용하여 선택합니다.
+
+### `page:metadata`
+
+타입이 지정된 메타데이터를 `<head>`에 기여합니다 — 메타 태그, OpenGraph 속성, 표준/대체 링크, JSON-LD 구조화 데이터. 신뢰 모드와 샌드박스 모드 모두에서 작동합니다.
+
+코어는 기여 내용을 검증, 중복 제거 및 렌더링합니다. 플러그인은 원시 HTML이 아닌 구조화된 데이터를 반환합니다.
+
+```typescript
+"page:metadata": async (event, ctx) => {
+  if (event.page.kind !== "content") return null;
+
+  return {
+    kind: "jsonld",
+    id: `schema:${event.page.content?.collection}:${event.page.content?.id}`,
+    graph: {
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      headline: event.page.title,
+      description: event.page.description,
+    },
+  };
+}
+```
+
+**이벤트:**
+
+```typescript
+{
+  page: {
+    url: string;
+    path: string;
+    locale: string | null;
+    kind: "content" | "custom";
+    pageType: string;
+    title: string | null;
+    description: string | null;
+    canonical: string | null;
+    image: string | null;
+    content?: { collection: string; id: string; slug: string | null };
+  }
+}
+```
+
+**반환:** `PageMetadataContribution | PageMetadataContribution[] | null`
+
+**기여 유형:**
+
+| 종류       | 렌더링                                            | 중복 제거 키              |
+| ---------- | -------------------------------------------------- | ----------------------- |
+| `meta`     | `<meta name="..." content="...">`                  | `key` 또는 `name`         |
+| `property` | `<meta property="..." content="...">`              | `key` 또는 `property`     |
+| `link`     | `<link rel="canonical\|alternate" href="...">`     | canonical: 단일; alternate: `key` 또는 `hreflang` |
+| `jsonld`   | `<script type="application/ld+json">`              | `id` (존재하는 경우)       |
+
+중복 제거 키에 대해 첫 번째 기여가 우선합니다. 링크 href는 HTTP 또는 HTTPS여야 합니다.
+
+### `page:fragments`
+
+원시 HTML, 스크립트 또는 마크업을 페이지 삽입 지점에 기여합니다. **신뢰된 플러그인만** — 샌드박스 플러그인은 이 훅을 사용할 수 없습니다.
+
+```typescript
+"page:fragments": async (event, ctx) => {
+  return {
+    kind: "external-script",
+    placement: "head",
+    src: "https://www.googletagmanager.com/gtm.js?id=GTM-XXXXX",
+    async: true,
+  };
+}
+```
+
+**반환:** `PageFragmentContribution | PageFragmentContribution[] | null`
+
+배치 위치: `"head"`, `"body:start"`, `"body:end"`. 특정 배치를 위한 컴포넌트를 생략한 템플릿은 해당 배치를 대상으로 하는 기여를 자동으로 무시합니다.
+
+<Aside type="caution">
+	`page:fragments`는 신뢰된 플러그인만 사용할 수 있습니다. 그 출력이 브라우저에서 일방 코드로 실행되기 때문입니다.
+	Worker Loader 격리는 브라우저에서 실행되는 스크립트까지 확장되지 않습니다. 샌드박스 안전 기여에는 `page:metadata`를 사용하세요.
+</Aside>
+
+## 훅 참조
+
+| 훅                    | 트리거                        | 반환                         | 배타적 |
+| ----------------------- | ------------------------------ | ------------------------------ | --------- |
+| `plugin:install`        | 첫 번째 플러그인 설치      | `void`                         | 아니오        |
+| `plugin:activate`       | 플러그인 활성화                 | `void`                         | 아니오        |
+| `plugin:deactivate`     | 플러그인 비활성화                | `void`                         | 아니오        |
+| `plugin:uninstall`      | 플러그인 제거                 | `void`                         | 아니오        |
+| `content:beforeSave`    | 콘텐츠 저장 전            | 수정된 콘텐츠 또는 `void`     | 아니오        |
+| `content:afterSave`     | 콘텐츠 저장 후             | `void`                         | 아니오        |
+| `content:beforeDelete`  | 콘텐츠 삭제 전          | `false`로 취소, 그 외 허용  | 아니오        |
+| `content:afterDelete`   | 콘텐츠 삭제 후           | `void`                         | 아니오        |
+| `media:beforeUpload`    | 파일 업로드 전             | 수정된 파일 정보 또는 `void`   | 아니오        |
+| `media:afterUpload`     | 파일 업로드 후              | `void`                         | 아니오        |
+| `cron`                  | 예약된 작업 실행           | `void`                         | 아니오        |
+| `email:beforeSend`      | 이메일 전송 전          | 수정된 메시지, `false`, 또는 `void` | 아니오  |
+| `email:deliver`         | 전송 수단을 통한 이메일 전송    | `void`                         | 예       |
+| `email:afterSend`       | 이메일 전송 후           | `void`                         | 아니오        |
+| `comment:beforeCreate`  | 댓글 저장 전          | 수정된 이벤트, `false`, 또는 `void` | 아니오    |
+| `comment:moderate`      | 댓글 상태 결정          | `{ status, reason? }`          | 예       |
+| `comment:afterCreate`   | 댓글 저장 후           | `void`                         | 아니오        |
+| `comment:afterModerate` | 관리자가 댓글 상태 변경   | `void`                         | 아니오        |
+| `page:metadata`         | 페이지 렌더링                    | 기여 또는 `null`        | 아니오        |
+| `page:fragments`        | 페이지 렌더링 (신뢰된)          | 기여 또는 `null`        | 아니오        |
+
+전체 이벤트 유형 및 핸들러 시그니처는 [훅 참조](/ko/reference/hooks/)를 참조하세요.

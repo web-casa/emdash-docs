@@ -1,0 +1,472 @@
+---
+title: 创建插件
+description: 构建一个包含钩子、存储、设置和管理界面的 EmDash 插件。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+本指南将引导您构建一个完整的 EmDash 插件。您将学习如何组织代码结构、定义钩子和存储，以及导出管理界面组件。
+
+## 插件结构
+
+每个插件都有两个**在不同上下文中运行**的部分：
+
+1. **插件描述符** (`PluginDescriptor`) — 由工厂函数返回，告知 EmDash 如何加载插件。**在 Vite 构建时运行**（在 `astro.config.mjs` 中导入）。必须是无副作用的，并且不能使用运行时 API。
+2. **插件定义** (`definePlugin()`) — 包含运行时逻辑（钩子、路由、存储）。**在部署服务器的请求时运行。** 可以访问完整的插件上下文 (`ctx`)。
+
+这两部分必须位于**不同的入口点**，因为它们执行的环境完全不同：
+
+```
+my-plugin/
+├── src/
+│   ├── descriptor.ts     # Plugin descriptor (runs in Vite at build time)
+│   ├── index.ts           # Plugin definition with definePlugin() (runs at deploy time)
+│   ├── admin.tsx          # Admin UI exports (React components) — optional
+│   └── astro/             # Optional: Astro components for site-side rendering
+│       └── index.ts       # Must export `blockComponents`
+├── package.json
+└── tsconfig.json
+```
+
+## 创建插件
+
+### 描述符（构建时）
+
+描述符告知 EmDash 在哪里找到插件以及它提供什么管理界面。此文件在 `astro.config.mjs` 中导入，并在 Vite 中运行。
+
+```typescript title="src/descriptor.ts"
+import type { PluginDescriptor } from "emdash";
+
+// Options your plugin accepts at registration time
+export interface MyPluginOptions {
+	enabled?: boolean;
+	maxItems?: number;
+}
+
+export function myPlugin(options: MyPluginOptions = {}): PluginDescriptor {
+	return {
+		id: "my-plugin",
+		version: "1.0.0",
+		entrypoint: "@my-org/plugin-example",
+		options,
+		adminEntry: "@my-org/plugin-example/admin",
+		componentsEntry: "@my-org/plugin-example/astro",
+		adminPages: [{ path: "/settings", label: "Settings", icon: "settings" }],
+		adminWidgets: [{ id: "status", title: "Status", size: "half" }],
+	};
+}
+```
+
+### 定义（运行时）
+
+定义包含运行时逻辑 — 钩子、路由、存储和管理配置。此文件在部署服务器的请求时加载。
+
+```typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+import type { MyPluginOptions } from "./descriptor.js";
+
+export function createPlugin(options: MyPluginOptions = {}) {
+	const maxItems = options.maxItems ?? 100;
+
+	return definePlugin({
+		id: "my-plugin",
+		version: "1.0.0",
+
+		// Declare required capabilities
+		capabilities: ["read:content"],
+
+		// Plugin storage (document collections)
+		storage: {
+			items: {
+				indexes: ["status", "createdAt", ["status", "createdAt"]],
+			},
+		},
+
+		// Admin UI configuration
+		admin: {
+			entry: "@my-org/plugin-example/admin",
+			settingsSchema: {
+				maxItems: {
+					type: "number",
+					label: "Maximum Items",
+					description: "Limit stored items",
+					default: maxItems,
+					min: 1,
+					max: 1000,
+				},
+				enabled: {
+					type: "boolean",
+					label: "Enabled",
+					default: options.enabled ?? true,
+				},
+			},
+			pages: [{ path: "/settings", label: "Settings", icon: "settings" }],
+			widgets: [{ id: "status", title: "Status", size: "half" }],
+		},
+
+		// Hook handlers
+		hooks: {
+			"plugin:install": async (_event, ctx) => {
+				ctx.log.info("Plugin installed");
+			},
+
+			"content:afterSave": async (event, ctx) => {
+				const enabled = await ctx.kv.get<boolean>("settings:enabled");
+				if (enabled === false) return;
+
+				ctx.log.info("Content saved", {
+					collection: event.collection,
+					id: event.content.id,
+				});
+			},
+		},
+
+		// API routes (trusted only — not available in sandboxed plugins)
+		routes: {
+			status: {
+				handler: async (ctx) => {
+					const count = await ctx.storage.items!.count();
+					return { count, maxItems };
+				},
+			},
+		},
+	});
+}
+
+export default createPlugin;
+```
+
+## 插件 ID 规则
+
+`id` 字段必须遵循以下规则：
+
+-   仅使用小写字母数字字符和连字符
+-   可以是简单的 (`my-plugin`) 或带作用域的 (`@my-org/my-plugin`)
+-   在所有已安装的插件中保持唯一
+
+```typescript
+// Valid IDs
+"seo";
+"audit-log";
+"@emdash-cms/plugin-forms";
+
+// Invalid IDs
+"MyPlugin"; // No uppercase
+"my_plugin"; // No underscores
+"my.plugin"; // No dots
+```
+
+## 版本格式
+
+使用语义化版本控制：
+
+```typescript
+version: "1.0.0"; // Valid
+version: "1.2.3-beta"; // Valid (prerelease)
+version: "1.0"; // Invalid (missing patch)
+```
+
+## 包导出
+
+配置 `package.json` 的导出项，以便 EmDash 可以加载每个入口点。描述符和定义是分开导出的，因为它们在不同的环境中运行：
+
+```json title="package.json"
+{
+	"name": "@my-org/plugin-example",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./descriptor": {
+			"types": "./dist/descriptor.d.ts",
+			"import": "./dist/descriptor.js"
+		},
+		"./admin": {
+			"types": "./dist/admin.d.ts",
+			"import": "./dist/admin.js"
+		},
+		"./astro": {
+			"types": "./dist/astro/index.d.ts",
+			"import": "./dist/astro/index.js"
+		}
+	},
+	"files": ["dist"],
+	"peerDependencies": {
+		"emdash": "^0.1.0",
+		"react": "^18.0.0"
+	}
+}
+```
+
+| 导出 | 上下文 | 用途 |
+|--------|---------|---------|
+| `"."` | 服务器（运行时） | `createPlugin()` / `definePlugin()` — 由 `entrypoint` 在请求时加载 |
+| `"./descriptor"` | Vite（构建时） | `PluginDescriptor` 工厂函数 — 在 `astro.config.mjs` 中导入 |
+| `"./admin"` | 浏览器 | 用于管理页面/小部件的 React 组件 |
+| `"./astro"` | 服务器（SSR） | 用于站点端块渲染的 Astro 组件 |
+
+仅当插件使用它们时才包含 `./admin` 和 `./astro` 导出。
+
+<Aside type="tip">
+	将 `emdash` 和 `react` 保持为对等依赖。这可以防止插件安装到站点时出现版本冲突。
+</Aside>
+
+## 完整示例：审计日志插件
+
+此示例演示了存储、生命周期钩子、内容钩子和 API 路由：
+
+```typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+
+interface AuditEntry {
+	timestamp: string;
+	action: "create" | "update" | "delete";
+	collection: string;
+	resourceId: string;
+	userId?: string;
+}
+
+export function createPlugin() {
+	return definePlugin({
+		id: "audit-log",
+		version: "0.1.0",
+
+		storage: {
+			entries: {
+				indexes: [
+					"timestamp",
+					"action",
+					"collection",
+					["collection", "timestamp"],
+					["action", "timestamp"],
+				],
+			},
+		},
+
+		admin: {
+			settingsSchema: {
+				retentionDays: {
+					type: "number",
+					label: "Retention (days)",
+					description: "Days to keep entries. 0 = forever.",
+					default: 90,
+					min: 0,
+					max: 365,
+				},
+			},
+			pages: [{ path: "/history", label: "Audit History", icon: "history" }],
+			widgets: [{ id: "recent-activity", title: "Recent Activity", size: "half" }],
+		},
+
+		hooks: {
+			"plugin:install": async (_event, ctx) => {
+				ctx.log.info("Audit log plugin installed");
+			},
+
+			"content:afterSave": {
+				priority: 200, // Run after other plugins
+				timeout: 2000,
+				handler: async (event, ctx) => {
+					const { content, collection, isNew } = event;
+
+					const entry: AuditEntry = {
+						timestamp: new Date().toISOString(),
+						action: isNew ? "create" : "update",
+						collection,
+						resourceId: content.id as string,
+					};
+
+					const entryId = `${Date.now()}-${content.id}`;
+					await ctx.storage.entries!.put(entryId, entry);
+
+					ctx.log.info(`Logged ${entry.action} on ${collection}/${content.id}`);
+				},
+			},
+
+			"content:afterDelete": {
+				priority: 200,
+				timeout: 1000,
+				handler: async (event, ctx) => {
+					const { id, collection } = event;
+
+					const entry: AuditEntry = {
+						timestamp: new Date().toISOString(),
+						action: "delete",
+						collection,
+						resourceId: id,
+					};
+
+					const entryId = `${Date.now()}-${id}`;
+					await ctx.storage.entries!.put(entryId, entry);
+
+					ctx.log.info(`Logged delete on ${collection}/${id}`);
+				},
+			},
+		},
+
+		routes: {
+			recent: {
+				handler: async (ctx) => {
+					const result = await ctx.storage.entries!.query({
+						orderBy: { timestamp: "desc" },
+						limit: 10,
+					});
+
+					return {
+						entries: result.items.map((item) => ({
+							id: item.id,
+							...(item.data as AuditEntry),
+						})),
+					};
+				},
+			},
+
+			history: {
+				handler: async (ctx) => {
+					const url = new URL(ctx.request.url);
+					const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+					const cursor = url.searchParams.get("cursor") || undefined;
+
+					const result = await ctx.storage.entries!.query({
+						orderBy: { timestamp: "desc" },
+						limit,
+						cursor,
+					});
+
+					return {
+						entries: result.items.map((item) => ({
+							id: item.id,
+							...(item.data as AuditEntry),
+						})),
+						cursor: result.cursor,
+						hasMore: result.hasMore,
+					};
+				},
+			},
+		},
+	});
+}
+
+export default createPlugin;
+```
+
+## 测试插件
+
+通过创建一个注册了插件的最小化 Astro 站点来测试插件：
+
+1. 创建一个已安装 EmDash 的测试站点。
+
+2. 在 `astro.config.mjs` 中注册您的插件：
+
+    ```typescript
+   import myPlugin from "../path/to/my-plugin/src";
+
+   export default defineConfig({
+   	integrations: [
+   		emdash({
+   			plugins: [myPlugin()],
+   		}),
+   	],
+   });
+   ```
+
+3. 运行开发服务器，并通过创建/更新内容来触发钩子。
+
+4. 检查控制台中的 `ctx.log` 输出，并通过 API 路由验证存储。
+
+对于单元测试，可以模拟 `PluginContext` 接口并直接调用钩子处理程序。
+
+## 可移植文本块类型
+
+插件可以向可移植文本编辑器添加自定义块类型。这些类型会出现在编辑器的斜杠命令菜单中，并且可以插入到任何 `portableText` 字段中。
+
+### 声明块类型
+
+在 `createPlugin()` 中，在 `admin.portableTextBlocks` 下声明块：
+
+```typescript title="src/index.ts"
+admin: {
+	portableTextBlocks: [
+		{
+			type: "youtube",
+			label: "YouTube Video",
+			icon: "video",           // Named icon: video, code, link, link-external
+			placeholder: "Paste YouTube URL...",
+			fields: [                // Block Kit fields for the editing UI
+				{ type: "text_input", action_id: "id", label: "YouTube URL" },
+				{ type: "text_input", action_id: "title", label: "Title" },
+				{ type: "text_input", action_id: "poster", label: "Poster Image URL" },
+			],
+		},
+	],
+}
+```
+
+每个块类型定义：
+
+-   **`type`** — 块类型名称（用于可移植文本的 `_type`）
+-   **`label`** — 在斜杠命令菜单中的显示名称
+-   **`icon`** — 图标键 (`video`, `code`, `link`, `link-external`)。回退到通用立方体图标。
+-   **`placeholder`** — 输入占位符文本
+-   **`fields`** — 用于编辑的 Block Kit 表单字段。如果省略，则显示一个简单的 URL 输入框。
+
+### 站点端渲染
+
+要在站点上渲染您的块类型，请从 `componentsEntry` 导出 Astro 组件：
+
+```typescript title="src/astro/index.ts"
+import YouTube from "./YouTube.astro";
+import CodePen from "./CodePen.astro";
+
+// This export name is required — the virtual module imports it
+export const blockComponents = {
+	youtube: YouTube,
+	codepen: CodePen,
+};
+```
+
+在插件描述符中设置 `componentsEntry`：
+
+```typescript
+export function myPlugin(options = {}): PluginDescriptor {
+	return {
+		id: "my-plugin",
+		entrypoint: "@my-org/my-plugin",
+		componentsEntry: "@my-org/my-plugin/astro",
+		// ...
+	};
+}
+```
+
+插件块组件会自动合并到 `<PortableText>` 中 — 站点作者无需导入任何内容。用户提供的组件优先于插件的默认组件。
+
+<Aside type="tip">
+	embeds 插件 (`@emdash-cms/plugin-embeds`) 是此模式的完整示例。它提供了
+	YouTube、Vimeo、Tweet、Bluesky、Mastodon、Gist 和 Link Preview 块类型，并包含管理端
+	编辑字段和站点端 Astro 渲染组件。
+</Aside>
+
+### 包导出
+
+将 `./astro` 导出添加到 `package.json`：
+
+```json title="package.json"
+{
+	"exports": {
+		".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+		"./admin": { "types": "./dist/admin.d.ts", "import": "./dist/admin.js" },
+		"./astro": { "types": "./dist/astro/index.d.ts", "import": "./dist/astro/index.js" }
+	}
+}
+```
+
+## 后续步骤
+
+-   [钩子参考](/zh-cn/plugins/hooks/) — 所有可用钩子及其签名
+-   [存储 API](/zh-cn/plugins/storage/) — 文档集合和查询
+-   [设置](/zh-cn/plugins/settings/) — 设置模式和 KV 存储
+-   [管理界面](/zh-cn/plugins/admin-ui/) — 页面和小部件
+-   [API 路由](/zh-cn/plugins/api-routes/) — REST 端点

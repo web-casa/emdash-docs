@@ -1,0 +1,144 @@
+---
+title: Block Kit
+description: 用于沙盒化插件管理页面和小部件的声明式 UI 块。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash 的 Block Kit 允许沙盒化插件将其管理界面描述为 JSON。由宿主渲染这些块——插件的 JavaScript 代码永远不会在浏览器中运行。
+
+<Aside>
+受信任的插件（在 `astro.config.ts` 中声明）仍然可以交付自定义 React 组件。Block Kit 适用于运行时安装的、无法被信任拥有 DOM 访问权限的沙盒化插件。
+</Aside>
+
+<Aside type="tip">
+Block Kit 元素也用于[可移植文本块编辑字段](/zh-cn/plugins/creating-plugins/#portable-text-block-types)。当插件在块类型上声明 `fields` 时，编辑器会渲染一个 Block Kit 表单来编辑块数据（URL、标题、参数等）。
+</Aside>
+
+## 工作原理
+
+1. 用户导航到插件的管理页面
+2. 管理界面向插件的管理路由发送 `page_load` 交互
+3. 插件返回一个包含块数组的 `BlockResponse`
+4. 管理界面使用 `BlockRenderer` 组件渲染这些块
+5. 当用户进行交互（点击按钮、提交表单）时，管理界面将交互发送回插件
+6. 插件返回新的块，循环重复
+
+```typescript
+// Plugin admin route handler
+routes: {
+  admin: {
+    handler: async (ctx, { request }) => {
+      const interaction = await request.json();
+
+      if (interaction.type === "page_load") {
+        return {
+          blocks: [
+            { type: "header", text: "My Plugin Settings" },
+            {
+              type: "form",
+              block_id: "settings",
+              fields: [
+                { type: "text_input", action_id: "api_url", label: "API URL" },
+                { type: "toggle", action_id: "enabled", label: "Enabled", initial_value: true },
+              ],
+              submit: { label: "Save", action_id: "save" },
+            },
+          ],
+        };
+      }
+
+      if (interaction.type === "form_submit" && interaction.action_id === "save") {
+        await ctx.kv.set("settings", interaction.values);
+        return {
+          blocks: [/* ... updated blocks ... */],
+          toast: { message: "Settings saved", type: "success" },
+        };
+      }
+    },
+  },
+}
+```
+
+## 块类型
+
+| 类型 | 描述 |
+|------|-------------|
+| `header` | 大型粗体标题 |
+| `section` | 带有可选辅助元素的文本 |
+| `divider` | 水平分隔线 |
+| `fields` | 两列标签/值网格 |
+| `table` | 具有格式化、排序、分页功能的数据表格 |
+| `actions` | 水平排列的按钮和控件行 |
+| `stats` | 带有趋势指示器的仪表板指标卡片 |
+| `form` | 具有条件可见性和提交功能的输入字段 |
+| `image` | 带有标题的块级图像 |
+| `context` | 小型、颜色较浅的帮助文本 |
+| `columns` | 2-3 列布局，可嵌套块 |
+
+## 元素类型
+
+| 类型 | 描述 |
+|------|-------------|
+| `button` | 操作按钮，带有可选的确认对话框 |
+| `text_input` | 单行或多行文本输入 |
+| `number_input` | 带有最小/最大值的数字输入 |
+| `select` | 下拉选择器 |
+| `toggle` | 开/关切换开关 |
+| `secret_input` | 用于 API 密钥和令牌的掩码输入 |
+
+## 构建器辅助工具
+
+`@emdash-cms/blocks` 包导出了构建器辅助工具，用于编写更清晰的代码：
+
+```typescript
+import { blocks, elements } from "@emdash-cms/blocks";
+
+const { header, form, section, stats } = blocks;
+const { textInput, toggle, select, button } = elements;
+
+return {
+  blocks: [
+    header("SEO Settings"),
+    form({
+      blockId: "settings",
+      fields: [
+        textInput("site_title", "Site Title", { initialValue: "My Site" }),
+        toggle("generate_sitemap", "Generate Sitemap", { initialValue: true }),
+        select("robots", "Default Robots", [
+          { label: "Index, Follow", value: "index,follow" },
+          { label: "No Index", value: "noindex,follow" },
+        ]),
+      ],
+      submit: { label: "Save", actionId: "save" },
+    }),
+  ],
+};
+```
+
+## 条件字段
+
+表单字段可以根据其他字段的值有条件地显示：
+
+```json
+{
+  "type": "toggle",
+  "action_id": "auth_enabled",
+  "label": "Enable Authentication"
+}
+```
+
+```json
+{
+  "type": "secret_input",
+  "action_id": "api_key",
+  "label": "API Key",
+  "condition": { "field": "auth_enabled", "eq": true }
+}
+```
+
+`api_key` 字段仅在 `auth_enabled` 切换为开启时出现。条件在客户端评估，无需往返服务器。
+
+## 尝试一下
+
+使用 [Block Playground](https://emdash-blocks.cto.cloudflare.dev/) 来交互式地构建和测试块布局。

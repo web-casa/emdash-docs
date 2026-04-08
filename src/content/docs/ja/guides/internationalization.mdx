@@ -1,0 +1,334 @@
+---
+title: 国際化 (i18n)
+description: ロケールごとの公開、スラッグ、自動フォールバックにより、コンテンツを複数の言語に翻訳します。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDashは[Astroの組み込みi18nルーティング](https://docs.astro.build/en/guides/internationalization/)と統合し、多言語コンテンツ管理を提供します。AstroがURLルーティングと言語検出を処理し、EmDashが翻訳コンテンツの保存と取得を処理します。
+
+各翻訳は完全で独立したコンテンツエントリであり、独自のスラッグ、ステータス、改訂履歴を持ちます。投稿のフランス語版は下書きのままにし、英語版を公開することができます。
+
+## 設定
+
+Astro設定に`i18n`ブロックを追加してi18nを有効にします。EmDashはこの設定を自動的に読み取ります — EmDash内で別途ロケール設定を行う必要はありません。
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	i18n: {
+		defaultLocale: "en",
+		locales: ["en", "fr", "es"],
+		fallback: { fr: "en", es: "en" },
+	},
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+Astro設定に`i18n`が存在しない場合、すべてのi18n機能は無効になり、EmDashは単一言語CMSとして動作します。
+
+## 翻訳の仕組み
+
+EmDashは**ロケールごとの行**モデルを使用します。各翻訳はデータベース内で独自のID、スラッグ、ステータスを持つ行であり、共有の`translation_group`識別子を介して他の翻訳とリンクされます。
+
+```
+ec_posts:
+id       | slug        | locale | translation_group | status
+---------|-------------|--------|-------------------|----------
+01ABC... | my-post     | en     | 01ABC...          | published
+01DEF... | mon-article | fr     | 01ABC...          | draft
+01GHI... | mi-entrada  | es     | 01ABC...          | published
+```
+
+この設計は以下を意味します：
+
+- **ロケールごとのスラッグ** — `/blog/my-post`と`/fr/blog/mon-article`が自然に機能
+- **ロケールごとの公開** — 英語版を公開しながらフランス語版を下書きのまま保持
+- **ロケールごとの改訂** — 各翻訳が独自の改訂履歴を持つ
+- **クロスロケールクエリの複雑さなし** — リストクエリは単一ロケールのエントリのみを返す
+
+## 翻訳コンテンツのクエリ
+
+### 単一エントリ
+
+特定の翻訳を取得するには、`getEmDashEntry`に`locale`を渡します。省略された場合、リクエストの現在のロケール（Astroのi18nミドルウェアによって設定）がデフォルトになります。
+
+```
+astro title="src/pages/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug, {
+  locale: Astro.currentLocale,
+});
+
+if (!post) return Astro.redirect("/404");
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+</article>
+```
+
+### フォールバックチェーン
+
+リクエストされたロケールのコンテンツが存在しない場合、EmDashはAstro設定で定義されたフォールバックチェーンに従います。`fallback: { fr: "en" }`が与えられた場合：
+
+1. リクエストされたロケールを試す（`fr`）
+2. フォールバックロケールを試す（`en`）
+3. デフォルトロケールを試す
+
+フォールバックは単一エントリクエリにのみ適用されます。リストクエリはリクエストされたロケールのエントリのみを返します — クロスロケールの混合はありません。
+
+<Aside>
+  フォールバックが使用された場合、レスポンスメタデータには`fallbackLocale`が含まれるため、テンプレートで「このコンテンツはまだ翻訳されていません」という通知を表示できます。
+</Aside>
+
+### コレクションリスト
+
+ロケールでコレクションをフィルタリング：
+
+```
+astro title="src/pages/posts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  locale: Astro.currentLocale,
+  status: "published",
+});
+---
+
+<ul>
+  {posts.map((post) => (
+    <li><a href={`/${post.data.slug}`}>{post.data.title}</a>
+</li>
+  ))}
+</ul>
+```
+
+## 言語切り替え
+
+`getTranslations`を使用して、現在のエントリの既存の翻訳にリンクする言語切り替えを構築：
+
+```
+astro title="src/components/LanguageSwitcher.astro"
+---
+import { getTranslations } from "emdash";
+import { getRelativeLocaleUrl } from "astro:i18n";
+
+interface Props {
+  collection: string;
+  entryId: string;
+}
+
+const { collection, entryId } = Astro.props;
+const { translations } = await getTranslations(collection, entryId);
+---
+
+<nav aria-label="Language">
+  <ul>
+    {translations.map((t) => (
+      <li>
+        <a
+          href={getRelativeLocaleUrl(t.locale, `/blog/${t.slug}`)}
+          aria-current={t.locale === Astro.currentLocale ? "page" : undefined}
+        >
+          {t.locale.toUpperCase()}
+        </a>
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+
+`getTranslations`関数は同じ翻訳グループ内のすべてのロケールバリアントを返します：
+
+```ts
+const { translationGroup, translations } = await getTranslations("posts", post.entry.id);
+// translations: [
+//   { locale: "en", id: "01ABC...", slug: "my-post", status: "published" },
+//   { locale: "fr", id: "01DEF...", slug: "mon-article", status: "draft" },
+// ]
+```
+
+<Aside type="tip">
+  ロケールプレフィックス付きURLを構築するには、`astro:i18n`の`getRelativeLocaleUrl`を使用します。これはAstroのルーティング戦略（`prefix-other-locales`または`prefix-always`）を尊重します。
+</Aside>
+
+## 管理パネルでの翻訳管理
+
+### コンテンツリスト
+
+i18nが有効な場合、コンテンツリストは以下を表示します：
+
+- 各エントリのロケールを表示する**ロケール列**
+- ロケール間を切り替えるツールバーの**ロケールフィルター**
+
+### 翻訳の作成
+
+エディタで任意のコンテンツエントリを開きます。サイドバーには、設定されたすべてのロケールをリストする**翻訳**パネルが表示されます。各ロケールについて：
+
+- 翻訳がないロケールには**「翻訳」**が表示 — クリックして作成
+- 既存の翻訳があるロケールには**「編集」**が表示 — クリックして移動
+- 現在のロケールはチェックマークでマーク
+
+翻訳を作成する際、新しいエントリはソースロケールのデータで事前入力され、デフォルトスラッグ`{source-slug}-{locale}`が割り当てられます。必要に応じてスラッグとコンテンツを調整し、保存します。
+
+### ロケールごとの公開
+
+各翻訳は独自のステータスを持ちます。翻訳を独立して公開、非公開、またはスケジュールできます。フランス語版は下書きのままにし、英語版をライブにすることができます。
+
+## コンテンツAPI
+
+### ロケールパラメータ
+
+すべてのコンテンツAPIルートはオプションの`locale`クエリパラメータを受け入れます：
+
+```http
+GET /_emdash/api/content/posts?locale=fr
+GET /_emdash/api/content/posts/my-post?locale=fr
+```
+
+省略された場合、設定されたデフォルトロケールがデフォルトになります。
+
+### API経由での翻訳作成
+
+コンテンツ作成エンドポイントに`locale`と`translationOf`を渡して翻訳を作成：
+
+```http
+POST /_emdash/api/content/posts
+Content-Type: application/json
+
+{
+  "locale": "fr",
+  "translationOf": "01ABC...",
+  "data": {
+    "title": "Mon Article",
+    "slug": "mon-article"
+  }
+}
+```
+
+新しいエントリはソースエントリの`translation_group`を共有し、下書きとして開始します。
+
+### 翻訳のリスト
+
+特定のエントリのすべての翻訳を取得：
+
+```http
+GET /_emdash/api/content/posts/01ABC.../translations
+```
+
+翻訳グループIDと、ID、スラッグ、ステータスを含むロケールバリアントの配列を返します。
+
+## CLI
+
+CLIはコンテンツコマンドで`--locale`フラグをサポート：
+
+```bash
+# List French posts
+emdash content list posts --locale fr
+
+# フランス語の特定のエントリを取得
+emdash content get posts my-post --locale fr
+
+# 既存エントリのフランス語翻訳を作成
+emdash content create posts --locale fr --translation-of 01ABC...
+```
+
+## 多言語コンテンツのシーディング
+
+シードファイルは`locale`と`translationOf`を使用して翻訳を表現：
+
+```
+json title=".emdash/seed.json"
+{
+  "content": {
+    "posts": [
+      {
+        "id": "welcome",
+        "slug": "welcome",
+        "locale": "en",
+        "status": "published",
+        "data": { "title": "ようこそ" }
+      },
+      {
+        "id": "welcome-fr",
+        "slug": "bienvenue",
+        "locale": "fr",
+        "translationOf": "welcome",
+        "status": "draft",
+        "data": { "title": "Bienvenue" }
+      }
+    ]
+  }
+}
+```
+
+ソースロケールエントリは、`translationOf`参照が正しく解決されるように、シードファイル内でその翻訳よりも前に表示される必要があります。
+
+## フィールドの翻訳可能性
+
+各フィールドには`translatable`設定（デフォルト：`true`）があります。翻訳を作成する際：
+
+- **翻訳可能フィールド**は編集のためにソースロケールから事前入力
+- **翻訳不可能フィールド**はコピーされ、グループ内のすべての翻訳間で同期保持
+
+`status`、`published_at`、`author_id`などのシステムフィールドは常にロケールごとであり、同期されることはありません。
+
+<Aside>
+  翻訳不可能フィールドは、製品SKUや並び順番号など、ロケール間で一貫して保持すべき値に有用です。
+</Aside>
+
+## URL戦略
+
+EmDashはロケールURLを管理しません — ルーティングはAstroが処理します。一般的なパターン:
+
+```
+# prefix-other-locales (Astro default)
+/blog/my-post          → en (default locale, no prefix)
+/fr/blog/mon-article   → fr
+
+# prefix-always
+/en/blog/my-post       → en
+/fr/blog/mon-article   → fr
+```
+
+ルーティングモードに関わらず正しいURLを構築するには、`astro:i18n`の`getRelativeLocaleUrl`を使用してください。
+
+## 多言語コンテンツのインポート
+
+### WPMLまたはPolylangを使用したWordPress
+
+WordPressプラグインのインポートソースは、WPMLとPolylangを自動的に検出します。検出されると、インポートされたコンテンツにはロケールと翻訳グループのメタデータが含まれ、多言語構造が保持されます。
+
+### WXRファイル
+
+WXRエクスポートにはWPML/Polylangメタデータは含まれません。単一ロケールとしてインポートし手動で翻訳を作成するか、`--locale`フラグを使用してすべてのインポート項目にロケールを割り当てます:
+
+```bash
+# Import a French WXR export
+emdash import wordpress export-fr.xml --execute --locale fr
+
+# 既存の英語コンテンツをスラッグで照合
+emdash import wordpress export-fr.xml --execute --locale fr --translation-of-locale en
+```
+
+## 次のステップ
+
+- [コンテンツのクエリ](/ja/guides/querying-content/) — 完全なクエリAPIリファレンス
+- [コンテンツの操作](/ja/guides/working-with-content/) — 管理者用コンテンツ管理
+- [Astro i18nルーティング](https://docs.astro.build/en/guides/internationalization/) — Astroのルーティング設定

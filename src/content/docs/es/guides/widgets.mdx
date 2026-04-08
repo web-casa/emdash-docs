@@ -1,0 +1,364 @@
+---
+title: Áreas de widgets
+description: Agrega bloques de contenido dinámico a barras laterales, pies de página y otras regiones de la plantilla.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Las áreas de widgets son regiones nombradas en tus plantillas donde los administradores pueden colocar bloques de contenido. Úsalas para barras laterales, columnas de pie de página, banners promocionales o cualquier sección que los editores deban controlar sin tocar código.
+
+## Consultar áreas de widgets
+
+Usa `getWidgetArea()` para obtener un área de widgets a partir de su nombre:
+
+```astro title="src/layouts/Base.astro"
+---
+import { getWidgetArea } from "emdash";
+
+const sidebar = await getWidgetArea("sidebar");
+---
+
+{sidebar && sidebar.widgets.length > 0 && (
+  <aside class="sidebar">
+    {sidebar.widgets.map(widget => (
+      <div class="widget">
+        {widget.title && <h3>{widget.title}</h3>}
+        <!-- Render widget content -->
+      </div>
+    ))}
+  </aside>
+)}
+```
+
+La función devuelve `null` si el área de widgets no existe.
+
+## Estructura de un área de widgets
+
+Un área de widgets contiene metadatos y un arreglo de widgets:
+
+```ts
+interface WidgetArea {
+	id: string;
+	name: string; // Identificador único ("sidebar", "footer-1")
+	label: string; // Nombre visible ("Barra lateral principal")
+	description?: string;
+	widgets: Widget[];
+}
+
+interface Widget {
+	id: string;
+	type: "content" | "menu" | "component";
+	title?: string;
+	// Campos específicos por tipo
+	content?: PortableTextBlock[]; // Para widgets de contenido
+	menuName?: string; // Para widgets de menú
+	componentId?: string; // Para widgets de componente
+	componentProps?: Record<string, unknown>;
+}
+```
+
+## Tipos de widgets
+
+EmDash admite tres tipos de widgets:
+
+### Widgets de Contenido
+
+Contenido de texto enriquecido almacenado como Portable Text. Renderízalo usando el componente `PortableText`:
+
+```astro
+---
+import { PortableText } from "emdash/ui";
+---
+
+{widget.type === "content" && widget.content && (
+  <div class="widget-content">
+    <PortableText value={widget.content} />
+  </div>
+)}
+```
+
+### Widgets de Menú
+
+Muestra un menú de navegación dentro de un área de widgets:
+
+```astro
+---
+import { getMenu } from "emdash";
+
+const menu = widget.menuName ? await getMenu(widget.menuName) : null;
+---
+
+{widget.type === "menu" && menu && (
+  <nav class="widget-nav">
+    <ul>
+      {menu.items.map(item => (
+        <li><a href={item.url}>{item.label}</a>
+</li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+### Widgets de Componente
+
+Renderiza un componente registrado con propiedades configurables. EmDash incluye estos componentes principales:
+
+| ID del Componente   | Descripción             | Propiedades                           |
+| ------------------- | ----------------------- | ------------------------------------- |
+| `core:recent-posts` | Lista de publicaciones recientes | `count`, `showThumbnails`, `showDate` |
+| `core:categories`   | Lista de categorías     | `showCount`, `hierarchical`           |
+| `core:tags`         | Nube de etiquetas       | `showCount`, `limit`                  |
+| `core:search`       | Formulario de búsqueda  | `placeholder`                         |
+| `core:archives`     | Archivos mensuales/anuales | `type`, `limit`                       |
+
+## Renderizar widgets
+
+Puedes crear un componente reutilizable para renderizar widgets:
+
+```astro title="src/components/WidgetRenderer.astro"
+---
+import { PortableText } from "emdash/ui";
+import { getMenu } from "emdash";
+import type { Widget } from "emdash";
+
+// Importa tus componentes de widgets
+import RecentPosts from "../../guides/widgets/RecentPosts.astro";
+import Categories from "../../guides/widgets/Categories.astro";
+import TagCloud from "../../guides/widgets/TagCloud.astro";
+import SearchForm from "../../guides/widgets/SearchForm.astro";
+import Archives from "../../guides/widgets/Archives.astro";
+
+interface Props {
+  widget: Widget;
+}
+
+const { widget } = Astro.props;
+
+const componentMap: Record<string, any> = {
+  "core:recent-posts": RecentPosts,
+  "core:categories": Categories,
+  "core:tags": TagCloud,
+  "core:search": SearchForm,
+  "core:archives": Archives,
+};
+
+const menu = widget.type === "menu" && widget.menuName
+  ? await getMenu(widget.menuName)
+  : null;
+---
+
+<div class="widget">
+  {widget.title && <h3 class="widget-title">{widget.title}</h3>}
+
+  {widget.type === "content" && widget.content && (
+    <div class="widget-content">
+      <PortableText value={widget.content} />
+    </div>
+  )}
+
+  {widget.type === "menu" && menu && (
+    <nav class="widget-menu">
+      <ul>
+        {menu.items.map(item => (
+          <li><a href={item.url}>{item.label}</a></li>
+        ))}
+      </ul>
+    </nav>
+  )}
+
+  {widget.type === "component" && widget.componentId && componentMap[widget.componentId] && (
+    <Fragment>
+      {(() => {
+        const Component = componentMap[widget.componentId!];
+        return <Component {...widget.componentProps} />;
+      })()}
+    </Fragment>
+  )}
+</div>
+```
+
+## Ejemplos de componentes de widgets
+
+### Widget de Publicaciones Recientes
+
+```astro title="src/components/widgets/RecentPosts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+interface Props {
+  count?: number;
+  showThumbnails?: boolean;
+  showDate?: boolean;
+}
+
+const { count = 5, showThumbnails = false, showDate = true } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  limit: count,
+  orderBy: { publishedAt: "desc" },
+});
+---
+
+<ul class="recent-posts">
+  {posts.map(post => (
+    <li>
+      {showThumbnails && post.data.featured_image && (
+        <img src={post.data.featured_image} alt="" class="thumbnail" />
+      )}
+      <a href={`/posts/${post.slug}`}>{post.data.title}</a>
+      {showDate && post.data.publishedAt && (
+        <time datetime={post.data.publishedAt.toISOString()}>
+          {post.data.publishedAt.toLocaleDateString()}
+        </time>
+      )}
+    </li>
+  ))}
+</ul>
+```
+
+### Widget de Búsqueda
+
+```astro title="src/components/widgets/SearchForm.astro"
+---
+interface Props {
+  placeholder?: string;
+}
+
+const { placeholder = "Buscar..." } = Astro.props;
+---
+
+<form action="/search" method="get" class="search-form">
+  <input
+    type="search"
+    name="q"
+    placeholder={placeholder}
+    aria-label="Buscar"
+  />
+  <button type="submit">Buscar</button>
+</form>
+```
+
+## Usar áreas de widgets en layouts
+
+El siguiente ejemplo muestra un diseño de blog con un área de widgets en la barra lateral:
+
+```astro title="src/layouts/BlogPost.astro"
+---
+import { getWidgetArea } from "emdash";
+import WidgetRenderer from "../../components/WidgetRenderer.astro";
+
+const sidebar = await getWidgetArea("sidebar");
+---
+
+<div class="layout">
+  <main class="content">
+    <slot />
+  </main>
+
+  {sidebar && sidebar.widgets.length > 0 && (
+    <aside class="sidebar">
+      {sidebar.widgets.map(widget => (
+        <WidgetRenderer widget={widget} />
+      ))}
+    </aside>
+  )}
+</div>
+
+<style>
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .layout {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+```
+
+## Listar todas las áreas de widgets
+
+Usa `getWidgetAreas()` para recuperar todas las áreas de widgets con sus widgets:
+
+```ts
+import { getWidgetAreas } from "emdash";
+
+const areas = await getWidgetAreas();
+// Devuelve todas las áreas con widgets poblados
+```
+
+## Crear áreas de widgets
+
+Crea áreas de widgets a través de la interfaz de administración en `/_emdash/admin/widgets`, o usa la API de administración:
+
+```http
+POST /_emdash/api/widget-areas
+Content-Type: application/json
+
+{
+  "name": "footer-1",
+  "label": "Columna 1 del pie",
+  "description": "Primera columna del pie de página"
+}
+```
+
+Agrega un widget de contenido:
+
+```http
+POST /_emdash/api/widget-areas/footer-1/widgets
+Content-Type: application/json
+
+{
+  "type": "content",
+  "title": "Sobre nosotros",
+  "content": [
+    {
+      "_type": "block",
+      "style": "normal",
+      "children": [{ "_type": "span", "text": "Bienvenido a nuestro sitio." }]
+    }
+  ]
+}
+```
+
+Agrega un widget de componente:
+
+```http
+POST /_emdash/api/widget-areas/sidebar/widgets
+Content-Type: application/json
+
+{
+  "type": "component",
+  "title": "Entradas recientes",
+  "componentId": "core:recent-posts",
+  "componentProps": { "count": 5, "showDate": true }
+}
+```
+
+## Referencia de la API
+
+### `getWidgetArea(name)`
+
+Obtiene un área de widgets por nombre con todos sus widgets.
+
+**Parámetros:**
+
+- `name` — El identificador único del área de widgets (string)
+
+**Devuelve:** `Promise<WidgetArea | null>`
+
+### `getWidgetAreas()`
+
+Lista todas las áreas de widgets con sus widgets.
+
+**Devuelve:** `Promise<WidgetArea[]>`
+
+### `getWidgetComponents()`
+
+Lista las definiciones de componentes de widgets disponibles para la interfaz de administración.
+
+**Devuelve:** `WidgetComponentDef[]`

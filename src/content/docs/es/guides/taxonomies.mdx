@@ -1,0 +1,457 @@
+---
+title: Taxonomías
+description: Organiza contenido con categorías, etiquetas y taxonomías personalizadas.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Las taxonomías son sistemas de clasificación para organizar contenido. EmDash incluye categorías y etiquetas integradas, y admite taxonomías personalizadas para necesidades de clasificación especializadas.
+
+## Taxonomías integradas
+
+EmDash proporciona dos taxonomías por defecto:
+
+| Taxonomía      | Tipo          | Descripción                                           |
+| -------------- | ------------ | ----------------------------------------------------- |
+| **Categorías** | Jerárquica   | Clasificación anidada con relaciones padre-hijo       |
+| **Etiquetas**  | Plana        | Etiquetas simples sin jerarquía                       |
+
+Ambas están disponibles para la colección de publicaciones por defecto.
+
+## Gestión de Términos
+
+### Crear un término
+
+<Tabs>
+  <TabItem label="Panel de Administración">
+
+1. Ve a la página de la taxonomía (ej., `/_emdash/admin/taxonomies/category`)
+
+2. Ingresa el nombre del término en el formulario **Agregar Nuevo**
+
+3. Opcionalmente configura:
+   - **Slug** - Identificador para la URL (generado automáticamente desde el nombre)
+   - **Padre** - Para taxonomías jerárquicas
+   - **Descripción** - Descripción del término
+
+4. Haz clic en **Agregar**
+
+  </TabItem>
+  <TabItem label="Editor de Contenido">
+
+5. Abre una entrada de contenido en el editor
+
+6. Encuentra el panel de la taxonomía en la barra lateral
+
+7. Para categorías: marca las casillas de los términos aplicables, o haz clic en **+ Agregar Nuevo**
+
+8. Para etiquetas: escribe los nombres de las etiquetas separados por comas
+
+9. Guarda el contenido
+
+  </TabItem>
+  <TabItem label="API">
+
+```bash
+POST /_emdash/api/taxonomies/category/terms
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "slug": "tutorials",
+  "label": "Tutoriales",
+  "parentId": "term_abc",
+  "description": "Guias practicas y tutoriales"
+}
+```
+
+  </TabItem>
+</Tabs>
+
+### Editar un término
+
+1. Ve a la página de términos de la taxonomía
+
+2. Haz clic en **Editar** junto al término
+
+3. Actualiza el nombre, slug, padre o descripción
+
+4. Haz clic en **Guardar**
+
+### Eliminar un término
+
+1. Ve a la página de términos de la taxonomía
+
+2. Haz clic en **Eliminar** junto al término
+
+3. Confirma la eliminación
+
+<Aside type="caution">
+	Eliminar un término lo quita de todo el contenido asociado. El contenido no se elimina, solo la asignación del término.
+</Aside>
+
+## Consulta de Taxonomías
+
+EmDash proporciona funciones para consultar términos de taxonomía y filtrar contenido por término.
+
+### Obtener todos los términos
+
+Recupera todos los términos de una taxonomía:
+
+```ts
+import { getTaxonomyTerms } from "emdash";
+
+// Obtener todas las categorías (devuelve estructura de árbol)
+const categories = await getTaxonomyTerms("category");
+
+// Obtener todas las etiquetas (devuelve lista plana)
+const tags = await getTaxonomyTerms("tag");
+```
+
+Para taxonomías jerárquicas, los términos incluyen un array `children`:
+
+```ts
+interface TaxonomyTerm {
+	id: string;
+	name: string; // Taxonomy name ("category")
+	slug: string; // Term slug ("news")
+	label: string; // Display label ("News")
+	parentId?: string;
+	description?: string;
+	children: TaxonomyTerm[];
+	count?: number; // Number of entries with this term
+}
+```
+
+### Obtener un término concreto
+
+```ts
+import { getTerm } from "emdash";
+
+const category = await getTerm("category", "news");
+// Devuelve TaxonomyTerm o null
+```
+
+### Obtener términos de una entrada
+
+```ts
+import { getEntryTerms } from "emdash";
+
+// Obtener todas las categorías para una publicación
+const categories = await getEntryTerms("posts", "post-123", "category");
+
+// Obtener todas las etiquetas para una publicación
+const tags = await getEntryTerms("posts", "post-123", "tag");
+```
+
+### Filtrar contenido por término
+
+Usa `getEmDashCollection` con el filtro `where`:
+
+```ts
+import { getEmDashCollection } from "emdash";
+
+// Publicaciones en la categoría "news"
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: "news" },
+});
+
+// Publicaciones con la etiqueta "javascript"
+const { entries: jsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { tag: "javascript" },
+});
+```
+
+O usa la función de conveniencia:
+
+```ts
+import { getEntriesByTerm } from "emdash";
+
+const newsPosts = await getEntriesByTerm("posts", "category", "news");
+```
+
+## Construcción de Páginas de Taxonomía
+
+### Archivo de Categoría
+
+Crea una página que liste publicaciones en una categoría:
+
+```astro title="src/pages/category/[slug].astro"
+---
+import { getTaxonomyTerms, getTerm, getEmDashCollection } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const categories = await getTaxonomyTerms("category");
+
+  // Aplanar árbol jerárquico para enrutamiento
+  function flatten(terms) {
+    return terms.flatMap((term) => [term, ...flatten(term.children)]);
+  }
+
+  return flatten(categories).map((cat) => ({
+    params: { slug: cat.slug },
+    props: { category: cat },
+  }));
+}
+
+const { category } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  where: { category: category.slug },
+});
+---
+
+<Base title={category.label}>
+  <h1>{category.label}</h1>
+  {category.description && <p>{category.description}</p>}
+  <p>{category.count} publicaciones</p>
+
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+### Archivo de Etiqueta
+
+Crea una página que liste publicaciones con una etiqueta:
+
+```astro title="src/pages/tag/[slug].astro"
+---
+import { getTaxonomyTerms, getEmDashCollection } from "emdash";
+import Base from "../../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const tags = await getTaxonomyTerms("tag");
+
+  return tags.map((tag) => ({
+    params: { slug: tag.slug },
+    props: { tag },
+  }));
+}
+
+const { tag } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+  where: { tag: tag.slug },
+});
+---
+
+<Base title={`Publicaciones con la etiqueta "${tag.label}"`}>
+  <h1>#{tag.label}</h1>
+
+  <ul>
+    {posts.map((post) => (
+      <li>
+        <a href={`/blog/${post.data.slug}`}>{post.data.title}</a>
+      </li>
+    ))}
+  </ul>
+</Base>
+```
+
+### Widget de Lista de Categorías
+
+Muestra una lista de categorías con conteos de publicaciones:
+
+```astro title="src/components/CategoryList.astro"
+---
+import { getTaxonomyTerms } from "emdash";
+
+const categories = await getTaxonomyTerms("category");
+---
+
+<nav class="category-list">
+  <h3>Categorías</h3>
+  <ul>
+    {categories.map((cat) => (
+      <li>
+        <a href={`/category/${cat.slug}`}>
+          {cat.label} ({cat.count})
+        </a>
+        {cat.children.length > 0 && (
+          <ul>
+            {cat.children.map((child) => (
+              <li>
+                <a href={`/category/${child.slug}`}>
+                  {child.label} ({child.count})
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+
+### Nube de Etiquetas
+
+Muestra etiquetas con tamaño basado en su uso:
+
+```astro title="src/components/TagCloud.astro"
+---
+import { getTaxonomyTerms } from "emdash";
+
+const tags = await getTaxonomyTerms("tag");
+
+// Calcular tamaños de fuente en función del número de usos
+const counts = tags.map((t) => t.count ?? 0);
+const maxCount = Math.max(...counts, 1);
+const minSize = 0.8;
+const maxSize = 2;
+
+function getSize(count: number) {
+  const ratio = count / maxCount;
+  return minSize + ratio * (maxSize - minSize);
+}
+---
+
+<div class="tag-cloud">
+  {tags.map((tag) => (
+    <a
+      href={`/tag/${tag.slug}`}
+      style={`font-size: ${getSize(tag.count ?? 0)}rem`}
+    >
+      {tag.label}
+    </a>
+  ))}
+</div>
+```
+
+## Mostrar términos en el contenido
+
+Muestra categorías y etiquetas en una publicación:
+
+```astro title="src/components/PostTerms.astro"
+---
+import { getEntryTerms } from "emdash";
+
+interface Props {
+  collection: string;
+  entryId: string;
+}
+
+const { collection, entryId } = Astro.props;
+
+const categories = await getEntryTerms(collection, entryId, "category");
+const tags = await getEntryTerms(collection, entryId, "tag");
+---
+
+<div class="post-terms">
+  {categories.length > 0 && (
+    <div class="categories">
+      <span>Publicado en:</span>
+      {categories.map((cat, i) => (
+        <>
+          {i > 0 && ", "}
+          <a href={`/category/${cat.slug}`}>{cat.label}</a>
+        </>
+      ))}
+    </div>
+  )}
+
+  {tags.length > 0 && (
+    <div class="tags">
+      {tags.map((tag) => (
+        <a href={`/tag/${tag.slug}`} class="tag">
+          #{tag.label}
+        </a>
+      ))}
+    </div>
+  )}
+</div>
+```
+
+## Taxonomías personalizadas
+
+Crea taxonomías más allá de categorías y etiquetas para necesidades especializadas.
+
+### Crear una taxonomía personalizada
+
+Usa la API de administración para crear una taxonomía:
+
+```bash
+POST /_emdash/api/taxonomies
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "name": "genre",
+  "label": "Géneros",
+  "labelSingular": "Género",
+  "hierarchical": true,
+  "collections": ["books", "movies"]
+}
+```
+
+### Usar taxonomías personalizadas
+
+Consulta y muestra taxonomías personalizadas de la misma manera que las integradas:
+
+```ts
+import { getTaxonomyTerms, getEmDashCollection } from "emdash";
+
+// Obtener todos los géneros
+const genres = await getTaxonomyTerms("genre");
+
+// Obtener libros en un género
+const { entries: sciFiBooks } = await getEmDashCollection("books", {
+	where: { genre: "science-fiction" },
+});
+```
+
+### Asignar a colecciones
+
+Las taxonomías especifican a qué colecciones se aplican:
+
+```ts
+{
+  "name": "difficulty",
+  "label": "Niveles de dificultad",
+  "hierarchical": false,
+  "collections": ["recipes", "tutorials"]
+}
+```
+
+## Referencia de la API de Taxonomías
+
+### Endpoints REST
+
+| Endpoint                                      | Método | Descripción               |
+| --------------------------------------------- | ------ | ------------------------- |
+| `/_emdash/api/taxonomies`                   | GET    | Listar definiciones de taxonomías |
+| `/_emdash/api/taxonomies`                   | POST   | Crear taxonomía           |
+| `/_emdash/api/taxonomies/:name/terms`       | GET    | Listar términos           |
+| `/_emdash/api/taxonomies/:name/terms`       | POST   | Crear término             |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | GET    | Obtener término           |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | PUT    | Actualizar término        |
+| `/_emdash/api/taxonomies/:name/terms/:slug` | DELETE | Eliminar término          |
+
+### Asignar términos al contenido
+
+```bash
+POST /_emdash/api/content/posts/post-123/terms/category
+Content-Type: application/json
+Authorization: Bearer YOUR_API_TOKEN
+
+{
+  "termIds": ["term_news", "term_featured"]
+}
+```
+
+## Próximos pasos
+
+- [Crear un Blog](/es/guides/create-a-blog/) - Usa categorías y etiquetas en un blog
+- [Consultar Contenido](/es/guides/querying-content/) - Filtrar por términos de taxonomía
+- [Trabajar con Contenido](/es/guides/working-with-content/) - Asignar términos en el editor

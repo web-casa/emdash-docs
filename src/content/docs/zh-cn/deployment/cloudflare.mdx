@@ -1,0 +1,266 @@
+---
+title: 部署到 Cloudflare
+description: 使用 D1 和 R2 将 EmDash 部署到 Cloudflare Workers。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Cloudflare Workers 为 EmDash 提供了一个快速、全球分布式的运行时环境。本指南涵盖使用 D1 作为数据库和 R2 作为媒体存储的部署。
+
+## 先决条件
+
+- 一个 Cloudflare 账户
+- 已安装 Wrangler CLI (`npm install -g wrangler`)
+- 已通过 Cloudflare 认证 (`wrangler login`)
+
+## 创建资源
+
+### 1. 创建 D1 数据库
+
+```bash
+wrangler d1 create emdash-db
+```
+
+记下输出中的 `database_id`。
+
+### 2. 创建 R2 存储桶
+
+```bash
+wrangler r2 bucket create emdash-media
+```
+
+### 3. 创建 wrangler.jsonc
+
+在你的项目根目录下创建 `wrangler.jsonc`：
+
+```jsonc title="wrangler.jsonc"
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "my-emdash-site",
+	"compatibility_date": "2025-01-15",
+	"compatibility_flags": ["nodejs_compat"],
+
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "emdash-db",
+			"database_id": "your-database-id",
+		},
+	],
+
+	"r2_buckets": [
+		{
+			"binding": "MEDIA",
+			"bucket_name": "emdash-media",
+		},
+	],
+}
+```
+
+## 配置 EmDash
+
+更新你的 Astro 配置以使用 D1 和 R2：
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import cloudflare from "@astrojs/cloudflare";
+import emdash from "emdash/astro";
+import { d1, r2 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	output: "server",
+	adapter: cloudflare(),
+	integrations: [
+		emdash({
+			database: d1({ binding: "DB" }),
+			storage: r2({ binding: "MEDIA" }),
+		}),
+	],
+});
+```
+
+<Aside type="caution">
+	D1 迁移必须在部署前通过 Wrangler CLI 运行。运行时不允许执行 DDL 语句。
+</Aside>
+
+## 运行迁移
+
+生成并应用数据库模式。
+
+### 1. 导出模式 SQL
+
+```bash
+npx emdash init --database ./data.db
+```
+
+### 2. 将迁移应用到 D1
+
+```bash
+wrangler d1 migrations apply emdash-db
+```
+
+如果你没有迁移文件，直接应用核心模式：
+
+```bash
+wrangler d1 execute emdash-db --file=./node_modules/emdash/migrations/0001_core.sql
+```
+
+## 部署
+
+部署到 Cloudflare Workers：
+
+```bash
+wrangler deploy
+```
+
+你的站点现已上线，地址为 `https://my-emdash-site.<your-subdomain>.workers.dev`。
+
+## 只读副本
+
+对于全球分布的站点，启用 D1 只读复制可以将读取查询路由到附近的副本，而不是总是访问主数据库。这能显著减少远离主区域访问者的延迟。
+
+```js title="astro.config.mjs"
+emdash({
+	database: d1({
+		binding: "DB",
+		session: "auto",
+	}),
+	storage: r2({ binding: "MEDIA" }),
+}),
+```
+
+你还需要在 Cloudflare 仪表板中或通过 REST API 在 D1 数据库本身上启用只读复制。
+
+有关会话模式以及基于书签的一致性如何工作，请参阅 [数据库选项 — 只读副本](/zh-cn/deployment/database/#read-replicas)。
+
+## 自定义域名
+
+在 Cloudflare 仪表板中添加自定义域名：
+
+1. 转到 **Workers & Pages** > 你的 worker
+2. 点击 **Custom Domains** > **Add Custom Domain**
+3. 输入你的域名并按照 DNS 设置说明操作
+
+## 公共 R2 访问
+
+要直接从 R2 提供媒体服务（推荐以提升性能）：
+
+1. 在 Cloudflare 仪表板中，转到 **R2** > 你的存储桶
+2. 点击 **Settings** > **Public access**
+3. 启用公共访问并记下公共 URL
+4. 更新你的存储配置：
+
+```js title="astro.config.mjs"
+storage: r2({
+  binding: "MEDIA",
+  publicUrl: "https://pub-xxx.r2.dev"
+}),
+```
+
+<Aside type="tip">
+	对于生产环境，建议将自定义域名连接到你的 R2 存储桶，以获得更好的 URL 和缓存控制。
+</Aside>
+
+## Cloudflare Access 身份验证
+
+如果你的组织使用 Cloudflare Access，你可以将其用作身份验证提供者，而不是通行密钥。这提供了与你现有身份提供者的单点登录。
+
+```js title="astro.config.mjs"
+emdash({
+  database: d1({ binding: "DB" }),
+  storage: r2({ binding: "MEDIA" }),
+  auth: access({
+    teamDomain: "myteam.cloudflareaccess.com",
+    audience: "your-app-audience-tag",
+    roleMapping: {
+      "Admins": 50,
+      "Editors": 40,
+    },
+  }),
+}),
+```
+
+完整的配置选项，请参阅 [身份验证指南](/zh-cn/guides/authentication#cloudflare-access)。
+
+## 环境变量
+
+EmDash 需要某些密钥用于身份验证和预览功能。
+
+### 必需的密钥
+
+| 变量 | 用途 |
+| -------- | ------- |
+| `EMDASH_AUTH_SECRET` | 用于签署会话 cookie 和身份验证令牌。生产环境必需。 |
+| `EMDASH_PREVIEW_SECRET` | 用于签署草稿内容的预览 URL。预览功能必需。 |
+
+生成安全的密钥：
+
+```bash
+npx emdash auth secret
+```
+
+通过 Wrangler 设置密钥：
+
+```bash
+wrangler secret put EMDASH_AUTH_SECRET
+wrangler secret put EMDASH_PREVIEW_SECRET
+```
+
+<Aside type="caution">
+切勿将密钥提交到你的代码仓库。对于生产部署，请始终使用 `wrangler secret`。
+</Aside>
+
+在你的配置中使用 `import.meta.env` 或 Cloudflare 的 `env` 绑定来访问环境变量。
+
+## 预览部署
+
+部署一个预览分支：
+
+```bash
+wrangler deploy --env preview
+```
+
+在 `wrangler.jsonc` 中添加一个环境部分：
+
+```jsonc
+{
+	"env": {
+		"preview": {
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "emdash-db-preview",
+					"database_id": "your-preview-db-id",
+				},
+			],
+		},
+	},
+}
+```
+
+## 故障排除
+
+### "D1 绑定未找到"
+
+验证 `wrangler.jsonc` 中的绑定名称是否与你的数据库配置匹配：
+
+```js
+// Must match: d1({ binding: "DB" })
+"binding": "DB"
+```
+
+### "R2 绑定未找到"
+
+检查 R2 存储桶是否正确绑定：
+
+```js
+// Must match: r2({ binding: "MEDIA" })
+"binding": "MEDIA"
+```
+
+### 迁移错误
+
+D1 迁移通过 Wrangler 运行，而不是在运行时。如果你看到模式错误：
+
+1. 检查迁移是否已应用：`wrangler d1 migrations list emdash-db`
+2. 如果需要，重新应用：`wrangler d1 migrations apply emdash-db`

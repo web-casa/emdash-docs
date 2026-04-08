@@ -1,0 +1,203 @@
+---
+title: 플러그인 샌드박스
+description: EmDash가 Cloudflare Workers와 Node.js 배포에서 신뢰할 수 없는 플러그인을 어떻게 격리하는지 설명합니다.
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDash는 플러그인을 두 가지 실행 모드에서 실행할 수 있도록 지원합니다: **신뢰(trusted)** 모드와 **샌드박스(sandboxed)** 모드. 이 페이지는 각 모드의 작동 방식, 제공하는 보호 기능, 그리고 다양한 배포 대상에 대한 보안적 함의를 설명합니다.
+
+## 실행 모드
+
+| | 신뢰(Trusted) | 샌드박스(Sandboxed) |
+|---|---|---|
+| **실행 위치** | 메인 프로세스 | 격리된 V8 isolate (Dynamic Worker Loader) |
+| **권한(Capabilities)** | 권고 사항 (강제되지 않음) | 런타임에 강제 적용 |
+| **자원 제한** | 없음 | CPU, 메모리, 서브요청, 경과 시간 |
+| **네트워크 접근** | 제한 없음 | 차단됨; `ctx.http`를 통해서만 허용 목록(host allowlist)과 함께 가능 |
+| **데이터 접근** | 전체 데이터베이스 접근 | RPC 브리지를 통해 선언된 권한 범위 내로 제한 |
+| **사용 가능 플랫폼** | 모든 플랫폼 | Cloudflare Workers 전용 |
+
+## 신뢰(Trusted) 모드
+
+신뢰(trusted) 플러그인은 Astro 사이트와 동일한 프로세스에서 실행됩니다. 이들은 npm 패키지나 로컬 파일에서 로드되며 `astro.config.mjs`에서 구성됩니다:
+
+```typescript title="astro.config.mjs"
+import myPlugin from "@emdash-cms/plugin-analytics";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			plugins: [myPlugin()],
+		}),
+	],
+});
+```
+
+신뢰 모드에서는:
+
+- **권한(Capabilities)은 문서화일 뿐, 강제 사항이 아닙니다.** `["read:content"]`를 선언한 플러그인도 여전히 프로세스 내의 모든 것에 접근할 수 있습니다. `capabilities` 필드는 관리자에게 플러그인이 *사용하려고* 하는 것이 무엇인지 알려줍니다.
+- **자원 제한이 없습니다.** CPU, 메모리, 네트워크 사용량은 제한되지 않습니다. 잘못 동작하는 플러그인은 전체 요청을 중단시킬 수 있습니다.
+- **전체 프로세스 접근.** 플러그인은 Astro 사이트와 Node.js/Workers 런타임을 공유합니다. 플러그인은 모든 모듈을 임포트하고, 환경 변수에 접근하며, 파일 시스템(Node.js에서)을 읽고 쓸 수 있습니다.
+
+<Aside type="caution" title="보안적 함의">
+	신뢰 모드에서는 신뢰할 수 있는 출처 — 검토한 npm 패키지나 직접 작성한 코드 — 에서만 플러그인을 설치하세요. 신뢰 모드에서 악성 플러그인은 애플리케이션 코드와 동일한 접근 권한을 가집니다.
+</Aside>
+
+## 샌드박스(Sandboxed) 모드 (Cloudflare Workers)
+
+샌드박스(sandboxed) 플러그인은 Cloudflare의 [Dynamic Worker Loader](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/) API가 제공하는 격리된 V8 isolate에서 실행됩니다. 각 플러그인은 강제된 제한이 적용된 자체 isolate를 얻습니다.
+
+샌드박싱을 활성화하려면 Astro 설정에서 샌드박스 러너를 구성하세요:
+
+```
+typescript title="astro.config.mjs"
+export default defineConfig({
+	integrations: [
+		emdash({
+			sandboxRunner: "@emdash-cms/cloudflare/sandbox",
+			sandboxed: [
+				{
+					manifest: seoPluginManifest,
+					code: seoPluginCode,
+				},
+			],
+		}),
+	],
+});
+```
+
+### 샌드박스가 강제하는 사항
+
+<Steps>
+
+1. **권한(Capability) 강제 적용**
+
+   플러그인이 `capabilities: ["read:content"]`를 선언하면, `ctx.content.get()`과 `ctx.content.list()`만 호출할 수 있습니다. `ctx.content.create()`를 시도하면 권한 오류가 발생합니다. 이는 RPC 브리지에 의해 강제 적용됩니다 — 플러그인은 직접적인 데이터베이스 접근 권한이 없으므로 이를 우회할 수 없습니다.
+
+2. **자원 제한**
+
+   모든 호출(훅 또는 라우트 호출)은 다음 제한 하에 실행됩니다:
+
+   | 자원 | 기본값 | 강제 주체 |
+   |---|---|---|
+   | CPU 시간 | 50ms | Worker Loader (V8 isolate) |
+   | 서브요청 | 호출당 10회 | Worker Loader (V8 isolate) |
+   | 경과 시간 | 30초 | EmDash 러너 (`Promise.race`) |
+   | 메모리 | ~128MB | V8 플랫폼 상한 (플러그인별로 구성 불가) |
+
+   CPU 또는 서브요청 제한을 초과하면 Worker Loader가 isolate를 중단시키고 예외를 발생시킵니다. 경과 시간 제한을 초과하면 EmDash가 호출 프라미스를 거부합니다. 메모리는 V8 플랫폼 상한에 의해 제한되지만 플러그인별로 구성할 수는 없습니다.
+
+   이는 내장된 기본값입니다. 사용자 정의 제한은 `SandboxOptions.limits`를 통해 다른 값을 전달하는 사용자 정의 `SandboxRunnerFactory`를 제공하여 구성할 수 있습니다. EmDash 통합 설정을 통한 사이트별 구성은 아직 구현되지 않았습니다.
+
+3. **네트워크 격리**
+
+   샌드박싱된 플러그인은 `globalOutbound: null`을 가집니다 — 직접적인 `fetch()` 호출은 V8 수준에서 차단됩니다. 플러그인은 브릿지를 통해 프록시하는 `ctx.http.fetch()`를 사용해야 합니다. 브릿지는 플러그인의 `allowedHosts` 목록에 대해 대상 호스트를 검증합니다.
+
+4. **저장소 범위 지정**
+
+   모든 저장소 작업(KV, 컬렉션)은 플러그인의 ID로 범위가 지정됩니다. 한 플러그인은 다른 플러그인의 데이터를 읽을 수 없습니다. 콘텐츠 및 미디어 접근은 브릿지를 통해 이루어지며, 모든 호출 시 기능을 확인합니다.
+
+5. **기능 제한**
+
+   일부 기능은 신뢰 모드에서만 사용 가능합니다:
+
+   - **API 경로** — 사용자 정의 REST 엔드포인트(`routes`)는 사용할 수 없습니다. 샌드박싱된 플러그인은 Block Kit 관리자 페이지와 훅을 통해 사용자와 상호작용합니다.
+   - **Portable Text 블록 유형** — PT 블록은 사이트 측 렌더링(`componentsEntry`)을 위한 Astro 컴포넌트가 필요하며, 빌드 시 npm에서 로드됩니다. 샌드박싱된 플러그인은 런타임에 설치되며 컴포넌트를 제공할 수 없습니다.
+   - **사용자 정의 React 관리자 페이지** — 샌드박싱된 플러그인은 React 컴포넌트를 제공하는 대신 관리자 UI에 Block Kit을 사용합니다.
+
+   `emdash plugin bundle` 명령은 플러그인이 이러한 기능을 선언할 경우 경고합니다.
+
+</Steps>
+
+### 아키텍처
+
+샌드박싱된 플러그인은 RPC 브릿지를 통해 EmDash와 통신합니다:
+
+```
+┌─────────────────────┐     RPC      ┌──────────────────────┐
+│  Plugin Isolate     │ ◄──────────► │  PluginBridge        │
+│  (Worker Loader)    │   (binding)  │  (WorkerEntrypoint)  │
+│                     │              │                      │
+│  ctx.kv.get(k)      │──────────────│► kvGet(k)            │
+│  ctx.content.list() │──────────────│► contentList()       │
+│  ctx.http.fetch(u)  │──────────────│► httpFetch(u)        │
+└─────────────────────┘              └──────────────────────┘
+                                            │
+                                            ▼
+                                     ┌──────────────┐
+                                     │  D1 / R2     │
+                                     └──────────────┘
+```
+
+플러그인의 코드는 V8 격리 환경에서 실행됩니다. 모든 메서드가 브릿지에 대한 프록시인 `ctx` 객체를 수신합니다. 브릿지는 주요 EmDash 워커에서 실행되며, 기능을 검증한 후 실제 데이터베이스/저장소 작업을 수행합니다.
+
+### Wrangler 구성
+
+샌드박싱에는 Dynamic Worker Loader가 필요합니다. `wrangler.jsonc`에 추가하세요:
+
+```
+jsonc
+{
+	"worker_loaders": [{ "binding": "LOADER" }],
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "emdash-media" }],
+	"d1_databases": [{ "binding": "DB", "database_name": "emdash" }]
+}
+```
+
+## Node.js 배포
+
+<Aside type="danger" title="Node.js에서 격리 없음">
+	Node.js는 플러그인 샌드박싱을 지원하지 않습니다. 모든 플러그인은 구성과 관계없이 신뢰 모드로 실행됩니다. V8 격리 경계, 리소스 제한, 런타임 수준의 기능 강제 적용이 없습니다.
+</Aside>
+
+Node.js(또는 비-Cloudflare 플랫폼)에 배포할 때:
+
+- `NoopSandboxRunner`이 사용됩니다. 이는 `isAvailable() === false`를 반환합니다.
+- 샌드박싱된 플러그인 로드를 시도하면 `SandboxNotAvailableError`가 발생합니다.
+- 모든 플러그인은 `plugins` 배열에서 신뢰된 플러그인으로 등록되어야 합니다.
+- 기능 선언은 순전히 정보 제공용입니다 — 강제되지 않습니다.
+
+### 보안에 대한 의미
+
+| 위협 | Cloudflare (샌드박스화) | Node.js (신뢰된 환경만) |
+|---|---|---|
+| 플러그인이 접근 권한이 없는 데이터를 읽음 | 브릿지 기능 검사에 의해 차단됨 | **방지되지 않음** — 플러그인은 DB 전체에 접근 가능 |
+| 플러그인이 무단 네트워크 호출을 시도 | `globalOutbound: null` + 호스트 허용 목록에 의해 차단됨 | **방지되지 않음** — 플러그인이 직접 `fetch()` 호출 가능 |
+| 플러그인이 CPU를 고갈시킴 | Worker Loader에 의해 격리 중단됨 | **방지되지 않음** — 이벤트 루프를 차단함 |
+| 플러그인이 메모리를 고갈시킴 | Worker Loader에 의해 격리 종료됨 | **방지되지 않음** — 프로세스 충돌을 유발할 수 있음 |
+| 플러그인이 환경 변수에 접근 | 접근 불가 (격리된 V8 컨텍스트) | **방지되지 않음** — `process.env`를 공유함 |
+| 플러그인이 파일 시스템에 접근 | Workers에는 파일 시스템 없음 | **방지되지 않음** — 전체 `fs` 접근 가능 |
+
+### Node.js 배포를 위한 권장 사항
+
+1. **신뢰할 수 있는 출처의 플러그인만 설치하세요.** 설치 전 모든 플러그인의 소스 코드를 검토하세요. 알려진 관리자가 게시한 플러그인을 선호하세요.
+2. **기능 선언을 검토 체크리스트로 활용하세요.** 기능이 강제되지는 않지만, 플러그인의 의도된 범위를 문서화합니다. 네트워크 접근이 필요하지 않은 플러그인이 `["network:fetch"]`를 선언하는 것은 의심스러울 수 있습니다.
+3. **리소스 사용량을 모니터링하세요.** 프로세스 수준 모니터링(예: `--max-old-space-size`, 헬스 체크)을 사용하여 제어 불가능한 플러그인을 감지하세요.
+4. **신뢰할 수 없는 플러그인에는 Cloudflare를 고려하세요.** 알 수 없는 출처(예: 마켓플레이스)의 플러그인을 실행해야 하는 경우, 샌드박싱이 가능한 Cloudflare Workers에 배포하세요.
+
+## 동일한 API, 다른 보장
+
+플러그인의 코드는 실행 모드와 관계없이 동일합니다. `definePlugin()` API, 컨텍스트 구조, 훅, 라우트 및 스토리지는 모두 동일하게 작동합니다. 변경되는 것은 **강제 적용**입니다:
+
+```typescript
+// This plugin works in both trusted and sandboxed mode
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+	capabilities: ["read:content", "network:fetch"],
+	allowedHosts: ["api.analytics.example.com"],
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			// In trusted mode: ctx.http is always present (capabilities not enforced)
+			// In sandboxed mode: ctx.http is present because "network:fetch" is declared
+			await ctx.http.fetch("https://api.analytics.example.com/track", {
+				method: "POST",
+				body: JSON.stringify({ contentId: event.content.id }),
+			});
+		},
+	},
+});
+```
+
+목표는 플러그인 개발자가 신뢰된 모드에서 로컬로 개발하고(더 빠른 반복, 쉬운 디버깅) 코드 변경 없이 프로덕션에서 샌드박스 모드로 배포할 수 있도록 하는 것입니다.

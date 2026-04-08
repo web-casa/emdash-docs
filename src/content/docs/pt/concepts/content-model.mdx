@@ -1,0 +1,335 @@
+---
+title: Modelo de Conteúdo
+description: O modelo de conteúdo baseado em banco de dados do EmDash—como o esquema é armazenado, modificado em tempo de execução e consultado.
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+O EmDash utiliza um **modelo de conteúdo baseado em banco de dados** onde as definições de esquema residem no banco de dados, não no código. Esta é uma escolha de design fundamental que permite modificação de esquema em tempo de execução e configuração amigável para não-desenvolvedores.
+
+## Esquema como Dados
+
+CMSs tradicionais como Strapi ou Keystatic exigem que você defina o esquema em código:
+
+```ts
+// Traditional approach - schema in code
+const posts = collection({
+	fields: {
+		title: text({ required: true }),
+		content: richText(),
+	},
+});
+```
+
+O EmDash armazena essa mesma informação em tabelas do banco de dados:
+
+```sql
+-- _emdash_collections table
+INSERT INTO _emdash_collections (slug, label)
+VALUES ('posts', 'Blog Posts');
+
+-- Tabela _emdash_fields
+INSERT INTO _emdash_fields (collection_id, slug, type, required)
+VALUES
+  ('coll_abc', 'title', 'string', true),
+  ('coll_abc', 'content', 'portableText', false);
+```
+
+Ambas as abordagens definem a mesma estrutura de conteúdo. A diferença está em onde essa estrutura reside e como pode ser modificada.
+
+## Por que Banco de Dados Primeiro?
+
+<CardGrid>
+	<Card title="Modificação em Tempo de Execução" icon="pencil">
+		Crie e edite tipos de conteúdo sem alterações de código ou rebuilds. Não-desenvolvedores podem projetar seu
+		modelo de conteúdo através da interface administrativa.
+	</Card>
+	<Card title="Colunas SQL Reais" icon="seti:db">
+		Diferente do modelo EAV (Entidade-Atributo-Valor) do WordPress, cada campo obtém uma coluna real. Indexação
+		adequada, chaves estrangeiras e otimização de consultas.
+	</Card>
+	<Card title="Auto-documentado" icon="document">
+		Ferramentas de banco de dados podem inspecionar o esquema diretamente. Não é necessário analisar código para entender o modelo de conteúdo.
+	</Card>
+	<Card title="Caminho de Migração" icon="right-arrow">
+		Exporte o esquema como JSON para controle de versão. Importe o esquema em novos ambientes.
+	</Card>
+</CardGrid>
+
+## Tabelas de Esquema
+
+Duas tabelas do sistema definem sua estrutura de conteúdo:
+
+### Tabela de Coleções
+
+```sql
+CREATE TABLE _emdash_collections (
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE NOT NULL,        -- "posts", "products"
+  label TEXT NOT NULL,              -- "Blog Posts"
+  label_singular TEXT,              -- "Post"
+  description TEXT,
+  icon TEXT,                        -- Lucide icon name
+  supports JSON,                    -- ["drafts", "revisions", "preview"]
+  source TEXT,                      -- How it was created
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+```
+
+O campo `source` rastreia como a coleção foi criada:
+
+| Fonte              | Descrição                        |
+| ------------------ | ---------------------------------- |
+| `manual`           | Criada via interface administrativa |
+| `template:blog`    | Criada por um arquivo de seed de template |
+| `import:wordpress` | Importada do WordPress            |
+| `discovered`       | Descoberta automaticamente a partir de dados existentes |
+
+### Tabela de Campos
+
+```sql
+CREATE TABLE _emdash_fields (
+  id TEXT PRIMARY KEY,
+  collection_id TEXT REFERENCES _emdash_collections(id),
+  slug TEXT NOT NULL,               -- Column name: "title", "price"
+  label TEXT NOT NULL,              -- Display label
+  type TEXT NOT NULL,               -- Field type
+  column_type TEXT NOT NULL,        -- SQLite type: TEXT, REAL, INTEGER, JSON
+  required INTEGER DEFAULT 0,
+  unique_field INTEGER DEFAULT 0,
+  default_value TEXT,               -- JSON-encoded default
+  validation JSON,                  -- Validation rules
+  widget TEXT,                      -- Custom widget identifier
+  options JSON,                     -- Widget options
+  sort_order INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(collection_id, slug)
+);
+```
+
+## Tabelas de Conteúdo
+
+Cada coleção obtém sua própria tabela com o prefixo `ec_`. Quando você cria uma coleção "products" com campos title e price:
+
+```sql
+CREATE TABLE ec_products (
+  -- System columns (always present)
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
+  status TEXT DEFAULT 'draft',
+  author_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  published_at TEXT,
+  deleted_at TEXT,                  -- Soft delete
+  version INTEGER DEFAULT 1,        -- Optimistic locking
+
+  -- Colunas de conteúdo (das definições de campo)
+  title TEXT NOT NULL,
+  price REAL
+);
+```
+
+<Aside type="tip">
+	Colunas do sistema são automaticamente adicionadas a cada tabela de conteúdo. Você não as define como
+	campos—elas estão sempre presentes.
+</Aside>
+
+## Alterações de Esquema em Tempo de Execução
+
+Quando você adiciona um campo via interface administrativa, o EmDash:
+
+<Steps>
+	1. Insere um registro em `_emdash_fields` 2. Executa `ALTER TABLE ec_collection ADD COLUMN
+	nome_da_coluna TIPO` 3. Regenera o esquema Zod para validação
+</Steps>
+
+O SQLite suporta estas operações `ALTER TABLE` em tempo de execução:
+
+| Operação          | Suportada                   |
+| ------------------ | --------------------------- |
+| Adicionar coluna   | Sim                         |
+| Renomear coluna    | Sim                         |
+| Remover coluna     | Sim (SQLite 3.35+)          |
+| Alterar tipo de coluna | Não (requer reconstrução da tabela) |
+
+Para alterações de tipo, o EmDash lida com a reconstrução da tabela de forma transparente: cria nova tabela → copia dados → remove tabela antiga → renomeia nova tabela.
+
+## Separação entre Esquema e Conteúdo
+
+O EmDash mantém uma separação clara:
+
+| Preocupação      | Localização                 | Tabelas                                      |
+| ------------ | ------------------------ | ------------------------------------------- |
+| **Esquema**   | Tabelas do sistema       | `_emdash_collections`, `_emdash_fields` |
+| **Conteúdo**  | Tabelas por coleção      | `ec_posts`, `ec_products`, etc.             |
+| **Mídia**    | Tabela separada + armazenamento | Tabela `media` + R2/S3                       |
+| **Configurações** | Tabela de opções         | `options` com prefixo `site:`               |
+
+Esta separação significa:
+
+- O esquema pode ser exportado sem conteúdo
+- O conteúdo pode ser migrado entre esquemas
+- As tabelas do sistema nunca ficam poluídas com dados do usuário
+
+## Validação em Tempo de Execução
+
+O EmDash constrói esquemas Zod a partir das definições de campo do banco de dados na inicialização:
+
+```ts
+// Simplified example
+function buildSchema(fields: Field[]): ZodSchema {
+	const shape: Record<string, ZodType> = {};
+
+	for (const field of fields) {
+		let zodType = fieldTypeToZod(field.type);
+
+		if (field.required) {
+			zodType = zodType.required();
+		}
+
+		if (field.validation?.min !== undefined) {
+			zodType = zodType.min(field.validation.min);
+		}
+
+		shape[field.slug] = zodType;
+	}
+
+	return z.object(shape);
+}
+```
+
+O conteúdo é validado contra esses esquemas de tempo de execução em cada operação de criação e atualização.
+
+## Integração com TypeScript
+
+Gere tipos TypeScript a partir do esquema do seu banco de dados:
+
+```bash
+# Fetch schema from database, generate types
+npx emdash types
+```
+
+Isso gera `.emdash/types.ts`:
+
+```ts
+// .emdash/types.ts (generated)
+export interface Post {
+	title: string;
+	content: PortableTextBlock[];
+	excerpt?: string;
+	featuredImage?: string;
+}
+
+export interface Product {
+	title: string;
+	price: number;
+	quantity: number;
+}
+
+// Sobrecargas tipadas para funções de consulta
+declare module "emdash" {
+	export function getEmDashCollection(
+		type: "posts",
+	): Promise<{ entries: ContentEntry<Post>[]; error?: Error }>;
+
+	export function getEmDashEntry(
+		type: "products",
+		id: string,
+	): Promise<{ entry: ContentEntry<Product> | null; error?: Error; isPreview: boolean }>;
+}
+```
+
+<Aside type="note">
+	A geração de tipos é opcional, mas recomendada. Ela fornece autocompletar e verificação de tipos para suas
+	coleções definidas dinamicamente.
+</Aside>
+
+## Fluxo de Trabalho para Desenvolvedores vs. Não-Desenvolvedores
+
+**Desenvolvedores** podem usar a CLI:
+
+```bash
+# Fetch schema, generate types
+npx emdash types
+
+# Exportar esquema como JSON
+npx emdash export-seed > seed.json
+```
+
+**Não-desenvolvedores** usam exclusivamente a interface administrativa:
+
+1. Abra **Tipos de Conteúdo** no painel administrativo
+2. Clique em **Adicionar Coleção**
+3. Defina campos através do construtor visual
+4. Comece a criar conteúdo imediatamente
+
+Ambas as abordagens modificam as mesmas tabelas de banco de dados subjacentes.
+
+## Arquivos de Seed
+
+Templates e exportações usam arquivos JSON de seed para definições de esquema portáteis:
+
+```json
+{
+	"version": "1",
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Posts do blog",
+			"labelSingular": "Post",
+			"supports": ["drafts", "revisions", "preview"],
+			"fields": [
+				{ "slug": "title", "type": "string", "required": true },
+				{ "slug": "content", "type": "portableText" },
+				{ "slug": "featuredImage", "type": "image" }
+			]
+		}
+	],
+	"taxonomies": [{ "name": "category", "label": "Categorias", "hierarchical": true }],
+	"menus": [{ "name": "primary", "label": "Navegação principal" }]
+}
+```
+
+Aplique arquivos de seed programaticamente:
+
+```ts
+import { applySeed, validateSeed } from "emdash/seed";
+import seedData from "../../concepts/.emdash/seed.json";
+
+// Valide primeiro
+const { valid, errors } = validateSeed(seedData);
+
+// Aplique (idempotente - seguro para reexecutar)
+await applySeed(db, seedData, {
+	includeContent: true,
+	onConflict: "skip", // 'skip' | 'update' | 'error'
+});
+```
+
+## Comparação com Outras Abordagens
+
+| Abordagem      | Localização do Esquema | Modificação em Tempo de Execução    | Segurança de Tipos        |
+| ------------- | --------------- | ----------------------- | ------------------ |
+| **EmDash**  | Banco de Dados  | Sim (completa)          | Gerada a partir do BD  |
+| **WordPress** | Código PHP + EAV  | Limitada (campos meta)   | Nenhuma               |
+| **Strapi**    | Arquivos de código | Não (rebuild necessário)   | Gerada no build |
+| **Sanity**    | Arquivos de código | Não (esquema deve ser implantado) | Integrada           |
+| **Directus**  | Banco de Dados  | Sim (completa)          | Gerada a partir do BD  |
+
+O EmDash segue o modelo do Directus: banco de dados primeiro com geração opcional de tipos. Isso oferece máxima flexibilidade, enquanto ainda suporta desenvolvimento com tipagem segura quando desejado.
+
+## Próximos Passos
+
+<CardGrid>
+	<Card title="Collections" icon="document">
+		Aprenda sobre [tipos de campo e validação](/pt/concepts/collections/).
+	</Card>
+		<Card title="Painel administrativo" icon="setting">
+		Explore a [arquitetura do painel de administração](/pt/concepts/admin-panel/).
+	</Card>
+	<Card title="Seeding" icon="open-book">
+		Configure sites com [arquivos de seed](/pt/themes/seed-files/).
+	</Card>
+</CardGrid>

@@ -1,0 +1,196 @@
+---
+title: 플러그인 시스템 개요
+description: EmDash를 확장하여 훅, 스토리지, 설정 및 관리자 UI를 추가하는 플러그인을 사용하세요.
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+EmDash의 플러그인 시스템을 통해 코어 코드를 수정하지 않고 CMS를 확장할 수 있습니다. 플러그인은 콘텐츠 생명주기 이벤트에 연결하고, 자체 데이터를 저장하며, 관리자에게 설정을 노출하고, 관리자 패널에 커스텀 UI를 추가할 수 있습니다.
+
+## 설계 철학
+
+EmDash 플러그인은 별도의 애플리케이션이 아닌 **설정 변환기**입니다. 플러그인은 Astro 사이트와 동일한 프로세스에서 실행되며, 잘 정의된 인터페이스를 통해 상호작용합니다.
+
+**핵심 원칙:**
+
+- **선언적** — 훅, 저장소, 라우트는 정의 시점에 선언되며 동적으로 등록되지 않음
+- **타입 안전** — 타입이 지정된 컨텍스트 객체를 통한 완전한 TypeScript 지원
+- **샌드박싱 준비 완료** — Cloudflare Workers에서 격리 실행을 위해 설계된 API
+- **권한 기반** — 플러그인이 필요한 것을 선언하고, 런타임이 접근을 강제함
+
+<Aside type="note">
+	EmDash 플러그인은 Astro 통합이 아닙니다. 플러그인은 Astro 설정의 EmDash 통합에 전달됩니다. 둘 다 필요한 플러그인은 EmDash 훅도 등록하는 Astro 통합으로 제공될 수 있습니다.
+</Aside>
+
+## 플러그인이 할 수 있는 일
+
+<CardGrid>
+	<Card title="이벤트에 훅 연결" icon="rocket">
+		콘텐츠 저장, 미디어 업로드, 플러그인 생명주기 이벤트 전후에 코드를 실행합니다.
+	</Card>
+	<Card title="데이터 저장" icon="document">
+		데이터베이스 마이그레이션을 작성하지 않고도 인덱싱된 컬렉션에 플러그인별 데이터를 영구 저장합니다.
+	</Card>
+	<Card title="설정 노출" icon="setting">
+		설정 스키마를 선언하고 구성용 자동 생성된 관리자 UI를 얻습니다.
+	</Card>
+	<Card title="관리자 페이지 추가" icon="laptop">
+		React 컴포넌트로 커스텀 관리자 페이지와 대시보드 위젯을 생성합니다.
+	</Card>
+	<Card title="API 라우트 생성" icon="external">
+		플러그인의 관리자 UI 또는 외부 통합을 위한 엔드포인트를 노출합니다.
+	</Card>
+	<Card title="HTTP 요청 수행" icon="external">
+		보안을 위해 선언된 호스트 제한과 함께 외부 API를 호출합니다.
+	</Card>
+</CardGrid>
+
+## 플러그인 아키텍처
+
+모든 플러그인은 `definePlugin()`로 생성됩니다:
+
+```typescript
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "my-plugin",
+	version: "1.0.0",
+
+	// 플러그인이 접근 권한이 필요한 API
+	capabilities: ["read:content", "network:fetch"],
+
+	// 플러그인이 HTTP 요청을 보낼 수 있는 호스트
+	allowedHosts: ["api.example.com"],
+
+	// 영구 저장소 컬렉션
+	storage: {
+		entries: {
+			indexes: ["userId", "createdAt"],
+		},
+	},
+
+	// 이벤트 핸들러
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			ctx.log.info("Content saved", { id: event.content.id });
+		},
+	},
+
+	// REST API 엔드포인트
+	routes: {
+		status: {
+			handler: async (ctx) => ({ ok: true }),
+		},
+	},
+
+	// 관리자 UI 구성
+	admin: {
+		settingsSchema: {
+			apiKey: { type: "secret", label: "API Key" },
+		},
+		pages: [{ path: "/dashboard", label: "Dashboard" }],
+		widgets: [{ id: "status", size: "half" }],
+	},
+});
+```
+
+## 플러그인 컨텍스트
+
+모든 훅과 라우트 핸들러는 다음에 접근할 수 있는 `PluginContext` 객체를 받습니다:
+
+| 속성          | 설명                                          | 가용성                           |
+| ------------- | ---------------------------------------------------- | -------------------------------------- |
+| `ctx.storage` | 플러그인의 문서 컬렉션                        | 항상 (선언된 경우)                   |
+| `ctx.kv`      | 설정 및 상태를 위한 키-값 저장소               | 항상                                 |
+| `ctx.content` | 사이트 콘텐츠 읽기/쓰기                              | `read:content` 또는 `write:content` 권한이 있을 때 |
+| `ctx.media`   | 미디어 파일 읽기/쓰기                               | `read:media` 또는 `write:media` 권한이 있을 때     |
+| `ctx.http`    | 외부 요청을 위한 HTTP 클라이언트                    | `network:fetch` 권한이 있을 때                   |
+| `ctx.log`     | 구조화된 로거 (debug, info, warn, error)         | 항상                                 |
+| `ctx.plugin`  | 플러그인 메타데이터 (id, version)                        | 항상                                 |
+| `ctx.site`    | 사이트 정보: `name`, `url`, `locale`                   | 항상                                 |
+| `ctx.url()`   | 경로에서 절대 URL 생성                    | 항상                                 |
+| `ctx.users`   | 사용자 정보 읽기: `get()`, `getByEmail()`, `list()`    | `read:users` 권한이 있을 때                      |
+| `ctx.cron`    | 작업 예약: `schedule()`, `cancel()`, `list()`   | 항상                                 |
+| `ctx.email`   | 이메일 전송: `send()`                                 | `email:send` 권한 + 제공자가 구성된 경우 |
+
+컨텍스트 형태는 모든 훅과 라우트에서 동일합니다. 권한으로 제어되는 속성은 플러그인이 필요한 권한을 선언한 경우에만 존재합니다.
+
+## 권한
+
+권한은 플러그인 컨텍스트에서 어떤 API를 사용할 수 있는지 결정합니다:
+
+| 권한        | 접근 권한 부여                                                       |
+| ----------------- | ---------------------------------------------------------------------- |
+| `read:content`    | `ctx.content.get()`, `ctx.content.list()`                              |
+| `write:content`   | `ctx.content.create()`, `ctx.content.update()`, `ctx.content.delete()` |
+| `read:media`      | `ctx.media.get()`, `ctx.media.list()`                                  |
+| `write:media`     | `ctx.media.getUploadUrl()`, `ctx.media.upload()`, `ctx.media.delete()` |
+| `network:fetch`   | `ctx.http.fetch()` (`allowedHosts`로 제한됨)                      |
+| `network:fetch:any` | `ctx.http.fetch()` (제한 없음 — 사용자 구성 URL용)         |
+| `read:users`      | `ctx.users.get()`, `ctx.users.getByEmail()`, `ctx.users.list()`       |
+| `email:send`      | `ctx.email.send()` (제공자 플러그인 필요)                        |
+| `email:provide`   | `email:deliver` 독점 훅 등록 (전송 제공자)           |
+| `email:intercept` | `email:beforeSend` / `email:afterSend` 훅 등록                  |
+| `page:inject`     | `page:metadata` / `page:fragments` 훅 등록                      |
+
+<Aside type="tip">
+	`write:content`는 `read:content`를 포함합니다. 미디어도 마찬가지입니다. 필요한 것만 선언하세요.
+</Aside>
+
+## 등록
+
+Astro 설정에서 플러그인을 등록하세요:
+
+```
+typescript title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import { emdash } from "emdash/astro";
+import seoPlugin from "@emdash-cms/plugin-seo";
+import auditLogPlugin from "@emdash-cms/plugin-audit-log";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			plugins: [seoPlugin({ generateSitemap: true }), auditLogPlugin({ retentionDays: 90 })],
+		}),
+	],
+});
+```
+
+플러그인은 빌드 시점에 해석됩니다. 동일한 우선순위를 가진 훅의 경우 순서가 중요합니다—배열에서 앞에 위치한 플러그인이 먼저 실행됩니다.
+
+## 실행 모드
+
+EmDash는 두 가지 플러그인 실행 모드를 지원합니다:
+
+| 모드          | 설명                             | 플랫폼        |
+| ------------- | --------------------------------------- | --------------- |
+| **신뢰 모드**   | 플러그인이 전체 접근 권한으로 인-프로세스에서 실행됨 | 모든 플랫폼             |
+| **샌드박스 모드** | 플러그인이 격리된 V8 워커에서 실행됨      | Cloudflare 전용 |
+
+신뢰 모드(기본값)에서는, 권한은 문서화 수준입니다—플러그인은 모든 것에 접근할 수 있습니다. 샌드박스 모드에서는, 권한이 런타임 수준에서 강제됩니다.
+
+<Aside type="note">
+	샌드박스 실행은 Dynamic Worker Loader가 있는 Cloudflare Workers가 필요합니다. 다른 플랫폼은
+	신뢰 모드만 사용합니다. 각 플랫폼의 보안 보장에 대한 전체 비교는 [플러그인 샌드박스](/ko/plugins/sandbox/)를 참조하세요.
+</Aside>
+
+## 다음 단계
+
+<CardGrid>
+	<Card title="플러그인 생성" icon="add-document">
+		스토리지, 훅, 관리자 UI를 포함한 [첫 번째 플러그인을 빌드하세요](/ko/plugins/creating-plugins/).
+	</Card>
+	<Card title="사용 가능한 훅" icon="rocket">
+		콘텐츠, 미디어, 플러그인 생명주기를 위한 [모든 훅을 둘러보세요](/ko/plugins/hooks/).
+	</Card>
+	<Card title="플러그인 스토리지" icon="document">
+		[스토리지에 대해 알아보고](/ko/plugins/storage/) 플러그인 데이터를 쿼리하는 방법을 배우세요.
+	</Card>
+	<Card title="관리자 UI" icon="laptop">
+		[관리자 페이지를 추가하고](/ko/plugins/admin-ui/) 대시보드 위젯을 구성하세요.
+	</Card>
+	<Card title="샌드박스 보안" icon="warning">
+		Cloudflare 및 Node.js 배포 환경 전반의 [샌드박스 격리를 이해하세요](/ko/plugins/sandbox/).
+	</Card>
+</CardGrid>

@@ -1,0 +1,49 @@
+---
+title: WordPressからAstroへの移行（EmDash利用）
+description: EmDashを使用したWordPressからAstroへの移行パスについて理解しましょう。チームが移行を検討する理由、変更点、安全に移行するためのアプローチ方法を含みます。
+lastUpdated: 2026-04-07
+sidebar:
+  label: WordPressからAstro
+---
+
+
+WordPressからAstroへの移行では、通常2つの別々の疑問が生じます：
+
+1. フロントエンドをどのように近代化するか？
+2. 編集者にとって使いやすいCMSをどのように維持するか？
+
+EmDashが興味深いのは、この両方を同時に解決するからです。Astroはアプリケーションとレンダリング層となり、EmDashはWordPressチームが慣れ親しんだコンテンツ管理ワークフローを提供します。
+
+## チームがこの移行を検討する理由
+
+- フロントエンドアーキテクチャに対するより良い制御
+- よりモダンなTypeScriptベースの開発ワークフロー
+- 編集者に優しい公開コンセプトを維持できる能力
+- Astroを完全に別個のCMSで運用するよりも妥協が少ない
+
+## 実際に何が変わるか
+
+- テーマはAstroのレイアウトとコンポーネントになる
+- `WP_Query`はEmDashのコンテンツクエリ関数になる
+- WordPressの投稿タイプとタクソノミーは、EmDashのコレクションとタクソノミー構造にマッピングされる
+- コンテンツのインポートは、手動のコピー＆ペーストではなく、EmDashの移行ツールを通じて行われる
+
+## 通常、慣れ親しんだままのもの
+
+- 編集者は依然としてCMS UIで作業する
+- 投稿、ページ、タクソノミー、メディア、ナビゲーションは、認識可能な概念として残る
+- 移行計画は依然として、コンテンツ、リダイレクト、メディア、タクソノミーの整合性を中心に展開する
+
+## 推奨される移行順序
+
+1. パイロットAstroプロジェクトでEmDashを評価する
+2. [EmDash vs WordPress](/ja/emdash-vs-wordpress/) と [What Is EmDash?](/ja/what-is-emdash/) を確認する
+3. 代表的なWordPressエクスポートでコンテンツインポートをテストする
+4. リダイレクト、メディア処理、カスタムフィールドのマッピングを検証する
+5. 大規模な移行に着手する前に、より小さなサイトまたはセクションを1つ移動する
+
+## 次に進む
+
+- [Migrate from WordPress to EmDash](/ja/migration/from-wordpress/)
+- [EmDash for WordPress Developers](/ja/coming-from/wordpress/)
+- [FAQ](/ja/faq/)

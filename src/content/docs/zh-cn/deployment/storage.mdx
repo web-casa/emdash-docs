@@ -1,0 +1,241 @@
+---
+title: 存储选项
+description: 使用 R2、S3 或本地文件系统配置媒体存储。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 将上传的媒体文件（图片、文档、视频）存储在可配置的存储后端中。请根据您的部署平台和需求进行选择。
+
+## 概述
+
+| 存储方式        | 最佳适用场景       | 特性                         |
+| --------------- | ------------------ | ---------------------------- |
+| **R2 绑定**     | Cloudflare Workers | 零配置、快速                 |
+| **S3**          | 任意平台           | 签名上传、CDN 支持           |
+| **本地**        | 开发环境           | 简单的文件系统存储           |
+
+## Cloudflare R2 (绑定)
+
+部署到 Cloudflare Workers 时，使用 R2 绑定以获得最快的集成体验。
+
+```js title="astro.config.mjs"
+import emdash from "emdash/astro";
+import { r2 } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			storage: r2({ binding: "MEDIA" }),
+		}),
+	],
+});
+```
+
+### 配置
+
+| 选项        | 类型     | 描述                                   |
+| ----------- | -------- | -------------------------------------- |
+| `binding`   | `string` | 来自 `wrangler.jsonc` 的 R2 绑定名称   |
+| `publicUrl` | `string` | 存储桶的可选公共 URL                   |
+
+### 设置
+
+将 R2 绑定添加到您的 Wrangler 配置中：
+
+<Tabs>
+  <TabItem label="wrangler.jsonc">
+    ```jsonc
+    {
+      "r2_buckets": [
+        {
+          "binding": "MEDIA",
+          "bucket_name": "emdash-media"
+        }
+      ]
+    }
+    ```
+  </TabItem>
+  <TabItem label="wrangler.toml">
+    ```toml
+    [[r2_buckets]]
+    binding = "MEDIA"
+    bucket_name = "emdash-media"
+    ```
+  </TabItem>
+</Tabs>
+
+### 公共访问
+
+要为媒体文件生成公共 URL，请在您的 R2 存储桶上启用公共访问：
+
+1. 前往 Cloudflare 控制台 > R2 > 您的存储桶
+2. 在设置下启用公共访问
+3. 将公共 URL 添加到您的配置中：
+
+```js
+storage: r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev",
+});
+```
+
+<Aside type="tip">
+	将自定义域名连接到 R2，以获得类似 `https://media.example.com`.` 的品牌化 URL。
+</Aside>
+
+<Aside type="note">
+	R2 绑定不支持签名上传 URL。如果您需要客户端直接上传，请改用带有 R2 凭证的 S3 适配器。
+</Aside>
+
+## S3 兼容存储
+
+S3 适配器适用于 Cloudflare R2（通过 S3 API）、MinIO 以及其他 S3 兼容服务。
+
+```js title="astro.config.mjs"
+import emdash, { s3 } from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			storage: s3({
+				endpoint: process.env.S3_ENDPOINT,
+				bucket: process.env.S3_BUCKET,
+				accessKeyId: process.env.S3_ACCESS_KEY_ID,
+				secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+				region: "auto", // Optional, defaults to "auto"
+				publicUrl: process.env.S3_PUBLIC_URL, // Optional CDN URL
+			}),
+		}),
+	],
+});
+```
+
+### 配置
+
+| 选项                | 类型     | 描述                           |
+| ------------------- | -------- | ------------------------------ |
+| `endpoint`          | `string` | S3 端点 URL                    |
+| `bucket`            | `string` | 存储桶名称                     |
+| `accessKeyId`       | `string` | 访问密钥                       |
+| `secretAccessKey`   | `string` | 秘密密钥                       |
+| `region`            | `string` | 区域（默认：`"auto"`）         |
+| `publicUrl`         | `string` | 可选的 CDN 或公共 URL          |
+
+### 通过 S3 API 使用 R2
+
+使用带有 R2 的 S3 凭证以获得签名上传 URL 等功能：
+
+```js
+storage: s3({
+	endpoint: "https://<account-id>.r2.cloudflarestorage.com",
+	bucket: "emdash-media",
+	accessKeyId: process.env.R2_ACCESS_KEY_ID,
+	secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+	publicUrl: "https://pub-xxxx.r2.dev",
+});
+```
+
+在 Cloudflare 控制台的 R2 > 管理 R2 API 令牌下生成 R2 API 凭证。
+
+### MinIO
+
+```js
+storage: s3({
+	endpoint: "https://minio.example.com",
+	bucket: "emdash-media",
+	accessKeyId: process.env.MINIO_ACCESS_KEY,
+	secretAccessKey: process.env.MINIO_SECRET_KEY,
+	publicUrl: "https://minio.example.com/emdash-media",
+});
+```
+
+## 本地文件系统
+
+在开发环境中使用本地存储。文件存储在磁盘上的目录中。
+
+```js title="astro.config.mjs"
+import emdash, { local } from "emdash/astro";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+		}),
+	],
+});
+```
+
+### 配置
+
+| 选项        | 类型     | 描述                           |
+| ----------- | -------- | ------------------------------ |
+| `directory` | `string` | 用于文件存储的目录路径         |
+| `baseUrl`   | `string` | 用于提供文件服务的基础 URL     |
+
+`baseUrl` 应与 EmDash 的媒体文件端点 (`/_emdash/api/media/file`) 匹配，除非您配置了自定义的静态文件服务器。
+
+<Aside type="caution">
+	本地存储不支持签名上传 URL。文件通过服务器上传，对于大文件可能较慢。
+</Aside>
+
+## 基于环境的配置
+
+根据环境切换存储后端：
+
+```js title="astro.config.mjs"
+import emdash, { s3, local } from "emdash/astro";
+import { r2 } from "@emdash-cms/cloudflare";
+
+const storage = import.meta.env.PROD
+	? r2({ binding: "MEDIA" })
+	: local({
+			directory: "./uploads",
+			baseUrl: "/_emdash/api/media/file",
+		});
+
+export default defineConfig({
+	integrations: [emdash({ storage })],
+});
+```
+
+## 签名上传
+
+S3 适配器支持签名上传 URL，允许客户端直接上传到存储，而无需经过您的服务器。这提高了大文件上传的性能。
+
+使用 S3 适配器时，签名上传是自动启用的。管理界面在可用时会使用它们。
+
+支持签名上传的适配器：
+
+-   **S3**（包括通过 S3 API 的 R2）
+
+不支持签名上传的适配器：
+
+-   **R2 绑定**（请改用带有 R2 凭证的 S3 适配器）
+-   **本地**
+
+## 存储接口
+
+所有存储适配器都实现了相同的接口：
+
+```typescript
+interface Storage {
+	upload(options: {
+		key: string;
+		body: Buffer | Uint8Array | ReadableStream;
+		contentType: string;
+	}): Promise<UploadResult>;
+
+	download(key: string): Promise<DownloadResult>;
+	delete(key: string): Promise<void>;
+	exists(key: string): Promise<boolean>;
+	list(options?: ListOptions): Promise<ListResult>;
+	getSignedUploadUrl(options: SignedUploadOptions): Promise<SignedUploadUrl>;
+	getPublicUrl(key: string): string;
+}
+```
+
+这种一致性允许在不更改应用程序代码的情况下切换存储后端。

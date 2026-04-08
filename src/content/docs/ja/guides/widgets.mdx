@@ -1,0 +1,371 @@
+---
+title: ウィジェットエリア
+description: サイドバー、フッター、その他のテンプレート領域に動的なコンテンツブロックを追加します。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+ウィジェットエリアは、管理者がコンテンツブロックを配置できるテンプレート内の名前付き領域です。サイドバー、フッター列、プロモーションバナー、または編集者がコードに触れずに制御すべきセクションに使用します。
+
+## ウィジェットエリアのクエリ
+
+`getWidgetArea()` を使用して名前でウィジェットエリアを取得します：
+
+```astro title="src/layouts/Base.astro"
+---
+import { getWidgetArea } from "emdash";
+
+const sidebar = await getWidgetArea("sidebar");
+---
+
+{sidebar && sidebar.widgets.length > 0 && (
+  <aside class="sidebar">
+    {sidebar.widgets.map(widget => (
+      <div class="widget">
+        {widget.title && <h3>{widget.title}</h3>
+}
+        <!-- Render widget content -->
+      </div>
+    ))}
+  </aside>
+)}
+```
+
+ウィジェットエリアが存在しない場合、関数は `null` を返します。
+
+## ウィジェットエリアの構造
+
+ウィジェットエリアはメタデータとウィジェットの配列を含みます：
+
+```ts
+interface WidgetArea {
+	id: string;
+	name: string; // 一意の識別子 ("sidebar", "footer-1")
+	label: string; // 表示名 ("メインサイドバー")
+	description?: string;
+	widgets: Widget[];
+}
+
+interface Widget {
+	id: string;
+	type: "content" | "menu" | "component";
+	title?: string;
+	// Type-specific fields
+	content?: PortableTextBlock[]; // For content widgets
+	menuName?: string; // For menu widgets
+	componentId?: string; // For component widgets
+	componentProps?: Record<string, unknown>;
+}
+```
+
+## ウィジェットの種類
+
+EmDashは3種類のウィジェットをサポートしています：
+
+### コンテンツウィジェット
+
+Portable Textとして保存されたリッチテキストコンテンツ。`PortableText` コンポーネントを使用してレンダリングします：
+
+```astro
+---
+import { PortableText } from "emdash/ui";
+---
+
+{widget.type === "content" && widget.content && (
+  <div class="widget-content">
+    <PortableText value={widget.content} />
+  </div>
+)}
+```
+
+### メニューウィジェット
+
+ウィジェットエリア内にナビゲーションメニューを表示します：
+
+```astro
+---
+import { getMenu } from "emdash";
+
+const menu = widget.menuName ? await getMenu(widget.menuName) : null;
+---
+
+{widget.type === "menu" && menu && (
+  <nav class="widget-nav">
+    <ul>
+      {menu.items.map(item => (
+        <li><a href={item.url}>{item.label}</a>
+</li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+### コンポーネントウィジェット
+
+設定可能なプロパティを持つ登録済みコンポーネントをレンダリングします。EmDashには以下のコアコンポーネントが含まれています：
+
+| コンポーネントID        | 説明                     | プロパティ                                 |
+| ------------------- | ----------------------- | ------------------------------------- |
+| `core:recent-posts` | 最近の投稿リスト    | `count`, `showThumbnails`, `showDate` |
+| `core:categories`   | カテゴリーリスト           | `showCount`, `hierarchical`           |
+| `core:tags`         | タグクラウド               | `showCount`, `limit`                  |
+| `core:search`       | 検索フォーム             | `placeholder`                         |
+| `core:archives`     | 月別/年別アーカイブ | `type`, `limit`                       |
+
+## ウィジェットのレンダリング
+
+再利用可能なウィジェットレンダラーコンポーネントを作成します：
+
+```
+astro title="src/components/WidgetRenderer.astro"
+---
+import { PortableText } from "emdash/ui";
+import { getMenu } from "emdash";
+import type { Widget } from "emdash";
+
+// Import your widget components
+import RecentPosts from "../../guides/widgets/RecentPosts.astro";
+import Categories from "../../guides/widgets/Categories.astro";
+import TagCloud from "../../guides/widgets/TagCloud.astro";
+import SearchForm from "../../guides/widgets/SearchForm.astro";
+import Archives from "../../guides/widgets/Archives.astro";
+
+interface Props {
+  widget: Widget;
+}
+
+const { widget } = Astro.props;
+
+const componentMap: Record<string, any> = {
+  "core:recent-posts": RecentPosts,
+  "core:categories": Categories,
+  "core:tags": TagCloud,
+  "core:search": SearchForm,
+  "core:archives": Archives,
+};
+
+const menu = widget.type === "menu" && widget.menuName
+  ? await getMenu(widget.menuName)
+  : null;
+---
+
+<div class="widget">
+  {widget.title && <h3 class="widget-title">{widget.title}</h3>
+}
+
+  {widget.type === "content" && widget.content && (
+    <div class="widget-content">
+      <PortableText value={widget.content} />
+    </div>
+  )}
+
+  {widget.type === "menu" && menu && (
+    <nav class="widget-menu">
+      <ul>
+        {menu.items.map(item => (
+          <li><a href={item.url}>{item.label}</a>
+</li>
+        ))}
+      </ul>
+    </nav>
+  )}
+
+  {widget.type === "component" && widget.componentId && componentMap[widget.componentId] && (
+    <Fragment>
+      {(() => {
+        const Component = componentMap[widget.componentId!];
+        return <Component {...widget.componentProps} />;
+      })()}
+    </Fragment>
+  )}
+</div>
+```
+
+## ウィジェットコンポーネントの例
+
+### 最近の投稿ウィジェット
+
+```
+astro title="src/components/widgets/RecentPosts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+interface Props {
+  count?: number;
+  showThumbnails?: boolean;
+  showDate?: boolean;
+}
+
+const { count = 5, showThumbnails = false, showDate = true } = Astro.props;
+
+const { entries: posts } = await getEmDashCollection("posts", {
+  limit: count,
+  orderBy: { publishedAt: "desc" },
+});
+---
+
+<ul class="recent-posts">
+  {posts.map(post => (
+    <li>
+      {showThumbnails && post.data.featured_image && (
+        <img src={post.data.featured_image} alt="" class="thumbnail" />
+      )}
+      <a href={`/posts/${post.slug}`}>{post.data.title}</a>
+      {showDate && post.data.publishedAt && (
+        <time datetime={post.data.publishedAt.toISOString()}>
+          {post.data.publishedAt.toLocaleDateString()}
+        </time>
+      )}
+    </li>
+  ))}
+</ul>
+```
+
+### 検索ウィジェット
+
+```
+astro title="src/components/widgets/SearchForm.astro"
+---
+interface Props {
+  placeholder?: string;
+}
+
+const { placeholder = "Search..." } = Astro.props;
+---
+
+<form action="/search" method="get" class="search-form">
+  <input
+    type="search"
+    name="q"
+    placeholder={placeholder}
+    aria-label="Search"
+  />
+  <button type="submit">Search</button>
+</form>
+```
+
+## レイアウトでのウィジェットエリアの使用
+
+以下の例は、サイドバーウィジェットエリアを持つブログレイアウトを示しています：
+
+```
+astro title="src/layouts/BlogPost.astro"
+---
+import { getWidgetArea } from "emdash";
+import WidgetRenderer from "../../components/WidgetRenderer.astro";
+
+const sidebar = await getWidgetArea("sidebar");
+---
+
+<div class="layout">
+  <main class="content">
+    <slot />
+  </main>
+
+  {sidebar && sidebar.widgets.length > 0 && (
+    <aside class="sidebar">
+      {sidebar.widgets.map(widget => (
+        <WidgetRenderer widget={widget} />
+      ))}
+    </aside>
+  )}
+</div>
+
+<style>
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .layout {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+```
+
+## すべてのウィジェットエリアの一覧表示
+
+`getWidgetAreas()` を使用して、ウィジェットを含むすべてのウィジェットエリアを取得します：
+
+```ts
+import { getWidgetAreas } from "emdash";
+
+const areas = await getWidgetAreas();
+// ウィジェットが設定されたすべてのエリアを返します
+```
+
+## ウィジェットエリアの作成
+
+`/_emdash/admin/widgets` の管理インターフェースを通じて、または管理APIを使用してウィジェットエリアを作成します：
+
+```http
+POST /_emdash/api/widget-areas
+Content-Type: application/json
+
+{
+  "name": "footer-1",
+  "label": "Footer Column 1",
+  "description": "First column in the footer"
+}
+```
+
+コンテンツウィジェットを追加：
+
+```http
+POST /_emdash/api/widget-areas/footer-1/widgets
+Content-Type: application/json
+
+{
+  "type": "content",
+  "title": "私たちについて",
+  "content": [
+    {
+      "_type": "block",
+      "style": "normal",
+      "children": [{ "_type": "span", "text": "私たちのサイトへようこそ。" }]
+    }
+  ]
+}
+```
+
+コンポーネントウィジェットを追加：
+
+```http
+POST /_emdash/api/widget-areas/sidebar/widgets
+Content-Type: application/json
+
+{
+  "type": "component",
+  "title": "最近の投稿",
+  "componentId": "core:recent-posts",
+  "componentProps": { "count": 5, "showDate": true }
+}
+```
+
+## APIリファレンス
+
+### `getWidgetArea(name)`
+
+名前でウィジェットエリアをすべてのウィジェットとともに取得します。
+
+**パラメータ：**
+
+- `name` — ウィジェットエリアの一意の識別子（文字列）
+
+**戻り値：** `Promise<WidgetArea | null>`
+
+### `getWidgetAreas()`
+
+すべてのウィジェットエリアをウィジェットとともに一覧表示します。
+
+**戻り値：** `Promise<WidgetArea[]>`
+
+### `getWidgetComponents()`
+
+管理UIで利用可能なウィジェットコンポーネント定義を一覧表示します。
+
+**戻り値：** `WidgetComponentDef[]`

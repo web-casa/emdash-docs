@@ -1,0 +1,31 @@
+---
+import fs from "node:fs";
+import path from "node:path";
+
+import { faqItemsByLocale } from "../data/faq-items.js";
+import { DEFAULT_LOCALE, localeFromPath } from "../lib/locale.js";
+
+const currentLocale = localeFromPath(Astro.url.pathname);
+const localizedFaqFile =
+	currentLocale === DEFAULT_LOCALE
+		? null
+		: path.resolve("src/content/docs", currentLocale, "faq.mdx");
+const hasLocalizedFaq = localizedFaqFile ? fs.existsSync(localizedFaqFile) : true;
+const faqLocale = hasLocalizedFaq ? currentLocale : DEFAULT_LOCALE;
+const items = faqItemsByLocale[faqLocale] ?? faqItemsByLocale.root ?? [];
+
+const payload = {
+	"@context": "https://schema.org",
+	"@type": "FAQPage",
+	mainEntity: items.map((item) => ({
+		"@type": "Question",
+		name: item.question,
+		acceptedAnswer: {
+			"@type": "Answer",
+			text: item.answer,
+		},
+	})),
+};
+---
+
+<script type="application/ld+json" set:html={JSON.stringify(payload)} />

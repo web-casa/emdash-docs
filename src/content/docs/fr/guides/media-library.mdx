@@ -1,0 +1,495 @@
+---
+title: Bibliothèque Média
+description: Téléchargez et gérez des images et des fichiers dans EmDash.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+import mediaLibraryImg from "../../../../assets/screenshots/admin-media-library.png";
+
+EmDash inclut une médiathèque pour gérer les images, documents et autres fichiers. Ce guide couvre le téléversement, l'organisation et l'utilisation des médias dans votre contenu.
+
+## Accéder à la médiathèque
+
+Ouvrez la médiathèque depuis la barre latérale d'administration en cliquant sur **Médias**. La bibliothèque affiche tous les fichiers téléversés avec des aperçus, les noms de fichiers et les dates de téléversement.
+
+<img src={mediaLibraryImg.src} alt="EmDash media library showing image grid with upload button" />
+
+## Téléverser des fichiers
+
+### Depuis la médiathèque
+
+1. Cliquez sur **Médias** dans la barre latérale d'administration
+
+2. Cliquez sur **Téléverser** ou faites glisser des fichiers sur la zone de téléversement
+
+3. Sélectionnez un ou plusieurs fichiers depuis votre ordinateur
+
+4. Attendez que les téléversements se terminent
+
+### Depuis l'éditeur de contenu
+
+1. Dans l'éditeur de texte enrichi, cliquez sur le bouton image
+
+2. Cliquez sur **Téléverser** dans le sélecteur de médias
+
+3. Sélectionnez un fichier depuis votre ordinateur
+
+4. Ajoutez un texte alternatif et cliquez sur **Insérer**
+
+## Types de fichiers pris en charge
+
+EmDash prend en charge les types de fichiers web courants :
+
+| Catégorie  | Extensions                                                |
+| --------- | --------------------------------------------------------- |
+| Images    | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.avif`, `.svg` |
+| Documents | `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx` |
+| Vidéo     | `.mp4`, `.webm`, `.mov`                                   |
+| Audio     | `.mp3`, `.wav`, `.ogg`                                    |
+
+<Aside type="caution">
+	La taille maximale des fichiers dépend de votre configuration de stockage. La limite par défaut est de 10 Mo par fichier.
+</Aside>
+
+## Backends de stockage
+
+EmDash prend en charge plusieurs backends de stockage. Configurez le stockage dans votre configuration Astro :
+
+<Tabs>
+  <TabItem label="Local Storage">
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: local({
+        directory: "./uploads",
+        baseUrl: "/_emdash/api/media/file",
+      }),
+    }),
+  ],
+});
+```
+
+Les fichiers sont stockés dans le répertoire `./uploads`. Convient pour le développement et les déploiements sur un seul serveur.
+
+  </TabItem>
+  <TabItem label="Cloudflare R2">
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { r2 } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: r2({
+        binding: "MEDIA_BUCKET",
+        publicUrl: "https://media.example.com",
+      }),
+    }),
+  ],
+});
+```
+
+Nécessite un bucket R2 configuré dans `wrangler.jsonc` :
+
+```
+jsonc title="wrangler.jsonc"
+{
+	"r2_buckets": [
+		{
+			"binding": "MEDIA_BUCKET",
+			"bucket_name": "my-media-bucket",
+		},
+	],
+}
+```
+
+  </TabItem>
+  <TabItem label="S3-Compatible">
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { s3 } from "emdash/astro";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      storage: s3({
+        endpoint: "https://s3.amazonaws.com",
+        bucket: "my-media-bucket",
+        accessKeyId: process.env.S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+        region: "us-east-1",
+        publicUrl: "https://media.example.com",
+      }),
+    }),
+  ],
+});
+```
+
+Fonctionne avec Cloudflare R2 (via l'API S3), MinIO et d'autres services compatibles S3.
+
+  </TabItem>
+</Tabs>
+
+## Fonctionnement des téléversements
+
+EmDash utilise des URL signées pour des téléversements sécurisés :
+
+1. Le client demande une URL de téléversement à l'API
+
+2. Le serveur génère une URL signée avec expiration
+
+3. Le client téléverse directement vers le stockage en utilisant l'URL signée
+
+4. Le serveur enregistre les métadonnées du fichier dans la base de données
+
+Cette approche évite que les gros fichiers ne passent par votre serveur d'application et permet des téléversements directs vers le stockage cloud.
+
+<Aside>
+	Les liaisons R2 ne prennent pas en charge les URL pré-signées. Lorsque vous utilisez l'adaptateur de liaison R2, les téléversements passent par
+	votre Worker.
+</Aside>
+
+## Organiser les médias
+
+### Dossiers
+
+Créez des dossiers pour organiser vos médias :
+
+1. Cliquez sur **Nouveau dossier** dans la médiathèque
+
+2. Entrez un nom de dossier
+
+3. Cliquez sur **Créer**
+
+4. Faites glisser des fichiers dans les dossiers pour les organiser
+
+### Recherche
+
+Utilisez la boîte de recherche pour trouver des fichiers par nom. La recherche correspond aux noms de fichiers partiels.
+
+### Filtres
+
+Filtrez les médias par :
+
+- **Type** - Images, Documents, Vidéo, Audio
+- **Date** - Plage de dates de téléversement
+- **Dossier** - Dossier spécifique
+
+## Utiliser les médias dans le contenu
+
+### Dans l'éditeur de texte enrichi
+
+1. Placez votre curseur où vous voulez l'image
+
+2. Cliquez sur le bouton image dans la barre d'outils
+
+3. Sélectionnez une image depuis la médiathèque ou téléversez-en une nouvelle
+
+4. Entrez un texte alternatif
+
+5. Cliquez sur **Insérer**
+
+### En tant qu'image mise en avant
+
+1. Ouvrez une entrée de contenu dans l'éditeur
+
+2. Trouvez le champ **Image mise en avant** dans la barre latérale
+
+3. Cliquez sur **Sélectionner une image**
+
+4. Choisissez depuis la médiathèque ou téléversez
+
+5. Cliquez sur **Enregistrer**
+
+### Dans les champs personnalisés
+
+Pour les champs configurés comme types image ou fichier, cliquez sur le champ pour ouvrir le sélecteur de médias.
+
+## Afficher les médias dans les modèles
+
+Accédez aux URL des médias depuis vos données de contenu :
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <img
+    src={post.data.featured_image}
+    alt={post.data.featured_image_alt ?? ""}
+  />
+)}
+```
+
+### Images responsives
+
+Pour les images responsives, utilisez le composant Image d'Astro avec des URL externes :
+
+### Images responsives
+
+Pour les images responsives, utilisez le composant Image d'Astro avec des URL externes :
+
+```astro
+---
+import { Image } from "astro:assets";
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <Image
+    src={post.data.featured_image}
+    alt={post.data.featured_image_alt ?? ""}
+    width={800}
+    height={450}
+  />
+)}
+```
+
+<Aside type="tip">
+Configurez les domaines d'images autorisés dans `astro.config.mjs` pour utiliser le composant Image avec des URL externes :
+
+```js
+export default defineConfig({
+	image: {
+		domains: ["media.example.com"],
+	},
+});
+```
+
+</Aside>
+
+## Supprimer des médias
+
+1. Sélectionnez le(s) fichier(s) que vous souhaitez supprimer
+
+2. Cliquez sur **Supprimer**
+
+3. Confirmez la suppression
+
+<Aside type="caution">
+	La suppression de médias ne supprime pas les références dans votre contenu. Assurez-vous de mettre à jour ou de supprimer le contenu
+	qui utilise les fichiers supprimés.
+</Aside>
+
+## API Médias
+
+Accédez aux médias de manière programmatique en utilisant l'API d'administration.
+
+### Téléverser un fichier
+
+Téléversez des médias en tant que données de formulaire multipart :
+
+```bash
+POST /_emdash/api/media
+Content-Type: multipart/form-data
+Authorization: Bearer YOUR_API_TOKEN
+
+file=<binary file data>
+```
+
+Réponse :
+
+```json
+{
+	"success": true,
+	"data": {
+		"item": {
+			"id": "01ABC123",
+			"filename": "hero-image.jpg",
+			"mime_type": "image/jpeg",
+			"storage_key": "media/abc123/hero-image.jpg",
+			"width": 1200,
+			"height": 800
+		}
+	}
+}
+```
+
+### Lister les médias
+
+```bash
+GET /_emdash/api/media?prefix=images/&limit=20
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+### Supprimer des médias
+
+```bash
+DELETE /_emdash/api/media/images/hero.jpg
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+## Fournisseurs de médias
+
+En plus du stockage local, EmDash prend en charge des fournisseurs de médias externes pour l'hébergement spécialisé d'images et de vidéos. Les fournisseurs de médias apparaissent sous forme d'onglets dans le sélecteur de médias, permettant aux éditeurs de choisir parmi plusieurs sources.
+
+### Fournisseurs disponibles
+
+<Tabs>
+  <TabItem label="Cloudflare Images">
+[Cloudflare Images](https://developers.cloudflare.com/images/) fournit un hébergement d'images avec optimisation, redimensionnement et conversion de format automatiques.
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareImages } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      // ... database, storage config
+      mediaProviders: [
+        cloudflareImages({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_IMAGES_TOKEN,
+          // Optional: custom delivery domain
+          deliveryDomain: "images.example.com",
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+**Fonctionnalités :**
+- Parcourir et téléverser des images directement depuis l'administration
+- Optimisation et conversion de format d'image automatiques
+- Transformations basées sur l'URL (redimensionner, recadrer, formater)
+- Variantes flexibles pour les images responsives
+
+</TabItem>
+<TabItem label="Cloudflare Stream">
+[Cloudflare Stream](https://developers.cloudflare.com/stream/) fournit un hébergement vidéo avec streaming adaptatif HLS/DASH.
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareStream } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      // ... database, storage config
+      mediaProviders: [
+        cloudflareStream({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_STREAM_TOKEN,
+          // Optional: player settings
+          controls: true,
+          autoplay: false,
+          loop: false,
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+**Fonctionnalités :**
+- Parcourir, rechercher et téléverser des vidéos depuis l'administration
+- Streaming adaptatif HLS et DASH
+- Génération automatique de miniatures
+- Téléversement direct pour les gros fichiers
+
+</TabItem>
+</Tabs>
+
+### Utiliser plusieurs fournisseurs
+
+Vous pouvez configurer plusieurs fournisseurs. Chacun apparaît comme un onglet dans le sélecteur de médias :
+
+```
+js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash from "emdash/astro";
+import { cloudflareImages, cloudflareStream } from "@emdash-cms/cloudflare";
+
+export default defineConfig({
+  integrations: [
+    emdash({
+      database: d1({ binding: "DB" }),
+      storage: r2({ binding: "MEDIA" }),
+      mediaProviders: [
+        cloudflareImages({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_IMAGES_TOKEN,
+        }),
+        cloudflareStream({
+          accountId: import.meta.env.CF_ACCOUNT_ID,
+          apiToken: import.meta.env.CF_STREAM_TOKEN,
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+La médiathèque locale (onglet "Bibliothèque") est toujours disponible aux côtés de tout fournisseur configuré.
+
+### Rendu des médias des fournisseurs
+
+Utilisez le composant `Image` pour afficher les médias :
+
+```
+astro title="src/pages/posts/[slug].astro"
+---
+import { Image } from "emdash/ui";
+import { getEmDashEntry } from "emdash";
+
+const { entry: post } = await getEmDashEntry("posts", Astro.params.slug);
+---
+
+{post?.data.featured_image && (
+  <Image
+    image={post.data.featured_image}
+    width={800}
+    height={450}
+  />
+)}
+```
+
+Le composant effectue automatiquement :
+- La détection du fournisseur à partir de la valeur stockée
+- Le rendu d'un élément `<img>` optimisé
+- L'application d'optimisations spécifiques au fournisseur (par exemple, les transformations Cloudflare Images)
+
+### Type MediaValue
+
+Les champs média stockent un objet `MediaValue` contenant les informations du fournisseur :
+
+```ts
+interface MediaValue {
+  provider?: string;    // Provider ID, defaults to "local"
+  id: string;           // Provider-specific ID
+  src?: string;         // Direct URL (for local media or legacy data)
+  previewUrl?: string;  // Preview URL for admin display (external providers)
+  filename?: string;    // Original filename
+  mimeType?: string;    // MIME type
+  width?: number;       // Image/video width
+  height?: number;      // Image/video height
+  alt?: string;         // Alt text
+  meta?: Record<string, unknown>; // Provider-specific metadata
+}
+```
+
+Cela permet à EmDash d'afficher correctement le média, quel que soit son hébergement.
+
+## Prochaines étapes
+
+- [Travailler avec le contenu](/fr/guides/working-with-content/) - Utiliser des médias dans votre contenu
+- [Créer un blog](/fr/guides/create-a-blog/) - Ajouter des images aux articles de blog
+- [Interroger le contenu](/fr/guides/querying-content/) - Afficher des médias dans les modèles

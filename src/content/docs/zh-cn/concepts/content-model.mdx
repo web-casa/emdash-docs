@@ -1,0 +1,330 @@
+---
+title: 内容模型
+description: EmDash 采用数据库优先的内容模型——架构如何存储、在运行时修改以及查询。
+---
+
+import { Aside, Card, CardGrid, Steps } from "@astrojs/starlight/components";
+
+EmDash 采用**数据库优先的内容模型**，架构定义存储在数据库中，而非代码中。这是一个根本性的设计选择，它支持运行时架构修改和面向非开发人员的设置。
+
+## 架构即数据
+
+传统的 CMS（如 Strapi 或 Keystatic）要求你在代码中定义架构：
+
+```ts
+// Traditional approach - schema in code
+const posts = collection({
+	fields: {
+		title: text({ required: true }),
+		content: richText(),
+	},
+});
+```
+
+EmDash 将相同的信息存储在数据库表中：
+
+```sql
+-- _emdash_collections table
+INSERT INTO _emdash_collections (slug, label)
+VALUES ('posts', 'Blog Posts');
+
+-- _emdash_fields table
+INSERT INTO _emdash_fields (collection_id, slug, type, required)
+VALUES
+  ('coll_abc', 'title', 'string', true),
+  ('coll_abc', 'content', 'portableText', false);
+```
+
+两种方法定义了相同的内容结构。区别在于该结构存储的位置以及如何修改它。
+
+## 为何采用数据库优先？
+
+<CardGrid>
+	<Card title="运行时修改" icon="pencil">
+		无需更改代码或重新构建即可创建和编辑内容类型。非开发人员可以通过管理界面设计其数据模型。
+	</Card>
+	<Card title="真实的 SQL 列" icon="seti:db">
+		与 WordPress 的 EAV（实体-属性-值）模型不同，每个字段都对应一个真实的列。支持适当的索引、外键和查询优化。
+	</Card>
+	<Card title="自文档化" icon="document">
+		数据库工具可以直接检查架构。无需解析代码即可理解数据模型。
+	</Card>
+	<Card title="迁移路径" icon="right-arrow">
+		将架构导出为 JSON 以便进行版本控制。在新环境中导入架构。
+	</Card>
+</CardGrid>
+
+## 架构表
+
+两个系统表定义了你的内容结构：
+
+### 集合表
+
+```sql
+CREATE TABLE _emdash_collections (
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE NOT NULL,        -- "posts", "products"
+  label TEXT NOT NULL,              -- "Blog Posts"
+  label_singular TEXT,              -- "Post"
+  description TEXT,
+  icon TEXT,                        -- Lucide icon name
+  supports JSON,                    -- ["drafts", "revisions", "preview"]
+  source TEXT,                      -- How it was created
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+```
+
+`source` 字段追踪集合的创建方式：
+
+| 来源               | 描述                         |
+| ------------------ | ---------------------------- |
+| `manual`           | 通过管理界面创建             |
+| `template:blog`    | 由模板的种子文件创建         |
+| `import:wordpress` | 从 WordPress 导入            |
+| `discovered`       | 从现有数据自动发现           |
+
+### 字段表
+
+```sql
+CREATE TABLE _emdash_fields (
+  id TEXT PRIMARY KEY,
+  collection_id TEXT REFERENCES _emdash_collections(id),
+  slug TEXT NOT NULL,               -- Column name: "title", "price"
+  label TEXT NOT NULL,              -- Display label
+  type TEXT NOT NULL,               -- Field type
+  column_type TEXT NOT NULL,        -- SQLite type: TEXT, REAL, INTEGER, JSON
+  required INTEGER DEFAULT 0,
+  unique_field INTEGER DEFAULT 0,
+  default_value TEXT,               -- JSON-encoded default
+  validation JSON,                  -- Validation rules
+  widget TEXT,                      -- Custom widget identifier
+  options JSON,                     -- Widget options
+  sort_order INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(collection_id, slug)
+);
+```
+
+## 内容表
+
+每个集合都有其自己的表，表名以 `ec_` 为前缀。当你创建一个包含标题和价格字段的 "products" 集合时：
+
+```sql
+CREATE TABLE ec_products (
+  -- System columns (always present)
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
+  status TEXT DEFAULT 'draft',
+  author_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  published_at TEXT,
+  deleted_at TEXT,                  -- Soft delete
+  version INTEGER DEFAULT 1,        -- Optimistic locking
+
+  -- Content columns (from field definitions)
+  title TEXT NOT NULL,
+  price REAL
+);
+```
+
+<Aside type="tip">
+	系统列会自动添加到每个内容表中。你无需将它们定义为字段——它们始终存在。
+</Aside>
+
+## 运行时架构变更
+
+当你通过管理界面添加字段时，EmDash 会：
+
+<Steps>
+	1. 向 `_emdash_fields` 表中插入一条记录 2. 执行 `ALTER TABLE ec_collection ADD COLUMN column_name TYPE` 3. 重新生成用于验证的 Zod 架构
+</Steps>
+
+SQLite 在运行时支持以下 `ALTER TABLE` 操作：
+
+| 操作           | 是否支持                     |
+| -------------- | ---------------------------- |
+| 添加列         | 是                           |
+| 重命名列       | 是                           |
+| 删除列         | 是 (SQLite 3.35+)            |
+| 更改列类型     | 否 (需要重建表)              |
+
+对于类型更改，EmDash 会透明地处理表重建：创建新表 → 复制数据 → 删除旧表 → 重命名新表。
+
+## 架构与内容分离
+
+EmDash 保持清晰的分离：
+
+| 关注点       | 位置                       | 表                                      |
+| ------------ | -------------------------- | --------------------------------------- |
+| **架构**     | 系统表                     | `_emdash_collections`, `_emdash_fields` |
+| **内容**     | 每个集合的表               | `ec_posts`, `ec_products` 等            |
+| **媒体**     | 单独的表 + 存储            | `media` 表 + R2/S3                      |
+| **设置**     | 选项表                     | 带有 `site:` 前缀的 `options` 表        |
+
+这种分离意味着：
+
+- 架构可以独立于内容导出
+- 内容可以在不同架构之间迁移
+- 系统表永远不会被用户数据污染
+
+## 运行时验证
+
+EmDash 在启动时根据数据库字段定义构建 Zod 架构：
+
+```ts
+// Simplified example
+function buildSchema(fields: Field[]): ZodSchema {
+	const shape: Record<string, ZodType> = {};
+
+	for (const field of fields) {
+		let zodType = fieldTypeToZod(field.type);
+
+		if (field.required) {
+			zodType = zodType.required();
+		}
+
+		if (field.validation?.min !== undefined) {
+			zodType = zodType.min(field.validation.min);
+		}
+
+		shape[field.slug] = zodType;
+	}
+
+	return z.object(shape);
+}
+```
+
+每次创建和更新操作时，内容都会根据这些运行时架构进行验证。
+
+## TypeScript 集成
+
+从你的数据库架构生成 TypeScript 类型：
+
+```bash
+# Fetch schema from database, generate types
+npx emdash types
+```
+
+这会生成 `.emdash/types.ts`：
+
+```ts
+// .emdash/types.ts (generated)
+export interface Post {
+	title: string;
+	content: PortableTextBlock[];
+	excerpt?: string;
+	featuredImage?: string;
+}
+
+export interface Product {
+	title: string;
+	price: number;
+	quantity: number;
+}
+
+// Typed overloads for query functions
+declare module "emdash" {
+	export function getEmDashCollection(
+		type: "posts",
+	): Promise<{ entries: ContentEntry<Post>[]; error?: Error }>;
+
+	export function getEmDashEntry(
+		type: "products",
+		id: string,
+	): Promise<{ entry: ContentEntry<Product> | null; error?: Error; isPreview: boolean }>;
+}
+```
+
+<Aside type="note">
+	类型生成是可选的，但推荐使用。它可以为动态定义的集合提供自动完成和类型检查。
+</Aside>
+
+## 开发者与非开发者工作流
+
+**开发者**可以使用 CLI：
+
+```bash
+# Fetch schema, generate types
+npx emdash types
+
+# Export schema as JSON
+npx emdash export-seed > seed.json
+```
+
+**非开发者**可以完全使用管理界面：
+
+1. 在管理面板中打开 **内容类型**
+2. 点击 **添加集合**
+3. 通过可视化构建器定义字段
+4. 立即开始创建内容
+
+两种方法都会修改相同的底层数据库表。
+
+## 种子文件
+
+模板和导出使用 JSON 种子文件来实现可移植的架构定义：
+
+```json
+{
+	"version": "1",
+	"collections": [
+		{
+			"slug": "posts",
+			"label": "Blog Posts",
+			"labelSingular": "Post",
+			"supports": ["drafts", "revisions", "preview"],
+			"fields": [
+				{ "slug": "title", "type": "string", "required": true },
+				{ "slug": "content", "type": "portableText" },
+				{ "slug": "featuredImage", "type": "image" }
+			]
+		}
+	],
+	"taxonomies": [{ "name": "category", "label": "Categories", "hierarchical": true }],
+	"menus": [{ "name": "primary", "label": "Primary Navigation" }]
+}
+```
+
+以编程方式应用种子文件：
+
+```ts
+import { applySeed, validateSeed } from "emdash/seed";
+import seedData from "./.emdash/seed.json";
+
+// Validate first
+const { valid, errors } = validateSeed(seedData);
+
+// Apply (idempotent - safe to re-run)
+await applySeed(db, seedData, {
+	includeContent: true,
+	onConflict: "skip", // 'skip' | 'update' | 'error'
+});
+```
+
+## 与其他方法的比较
+
+| 方法        | 架构位置       | 运行时修改          | 类型安全            |
+| ----------- | -------------- | ------------------- | ------------------- |
+| **EmDash**  | 数据库         | 是 (完整)           | 从数据库生成        |
+| **WordPress** | PHP 代码 + EAV | 有限 (元字段)       | 无                  |
+| **Strapi**  | 代码文件       | 否 (需要重新构建)   | 在构建时生成        |
+| **Sanity**  | 代码文件       | 否 (架构必须部署)   | 内置                |
+| **Directus** | 数据库         | 是 (完整)           | 从数据库生成        |
+
+EmDash 遵循 Directus 模型：数据库优先，可选类型生成。这提供了最大的灵活性，同时在需要时仍支持类型安全的开发。
+
+## 后续步骤
+
+<CardGrid>
+	<Card title="集合" icon="document">
+		了解 [字段类型和验证](/zh-cn/concepts/collections/)。
+	</Card>
+	<Card title="管理面板" icon="setting">
+		探索 [管理架构](/zh-cn/concepts/admin-panel/)。
+	</Card>
+	<Card title="数据填充" icon="open-book">
+		使用 [种子文件](/zh-cn/themes/seed-files/) 设置站点。
+	</Card>
+</CardGrid>

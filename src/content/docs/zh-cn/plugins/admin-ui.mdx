@@ -1,0 +1,400 @@
+---
+title: 管理界面
+description: 向 EmDash 管理面板添加管理页面和仪表板小组件。
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+插件可以通过自定义页面和仪表板小组件来扩展管理面板。这些是 React 组件，与核心管理功能一同渲染。
+
+## 管理入口点
+
+带有管理界面的插件从一个 `admin` 入口点导出组件：
+
+```typescript title="src/admin.tsx"
+import { SEOSettingsPage } from "./components/SEOSettingsPage";
+import { SEODashboardWidget } from "./components/SEODashboardWidget";
+
+// Dashboard widgets
+export const widgets = {
+	"seo-overview": SEODashboardWidget,
+};
+
+// Admin pages
+export const pages = {
+	"/settings": SEOSettingsPage,
+};
+```
+
+在 `package.json` 中配置该入口点：
+
+```json title="package.json"
+{
+	"exports": {
+		".": "./dist/index.js",
+		"./admin": "./dist/admin.js"
+	}
+}
+```
+
+在您的插件定义中引用它：
+
+```typescript title="src/index.ts"
+definePlugin({
+	id: "seo",
+	version: "1.0.0",
+
+	admin: {
+		entry: "@my-org/plugin-seo/admin",
+		pages: [{ path: "/settings", label: "SEO Settings", icon: "settings" }],
+		widgets: [{ id: "seo-overview", title: "SEO Overview", size: "half" }],
+	},
+});
+```
+
+## 管理页面
+
+管理页面是接收插件上下文（通过钩子）的 React 组件。
+
+### 页面定义
+
+在 `admin.pages` 中定义页面：
+
+```typescript
+admin: {
+	pages: [
+		{
+			path: "/settings", // URL path (relative to plugin base)
+			label: "Settings", // Sidebar label
+			icon: "settings", // Icon name (optional)
+		},
+		{
+			path: "/reports",
+			label: "Reports",
+			icon: "chart",
+		},
+	];
+}
+```
+
+页面挂载在 `/_emdash/admin/plugins/<plugin-id>/<path>` 路径下。
+
+### 页面组件
+
+```typescript title="src/components/SettingsPage.tsx"
+import { useState, useEffect } from "react";
+import { usePluginAPI } from "@emdash-cms/admin";
+
+export function SettingsPage() {
+  const api = usePluginAPI();
+  const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get("settings").then(setSettings);
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    await api.post("settings/save", settings);
+    setSaving(false);
+  };
+
+  return (
+    <div>
+      <h1>Plugin Settings</h1>
+
+      <label>
+        Site Title
+        <input
+          type="text"
+          value={settings.siteTitle || ""}
+          onChange={(e) => setSettings({ ...settings, siteTitle: e.target.value })}
+        />
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={settings.enabled ?? true}
+          onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
+        />
+        Enabled
+      </label>
+
+      <button onClick={handleSave} disabled={saving}>
+        {saving ? "Saving..." : "Save Settings"}
+      </button>
+    </div>
+  );
+}
+```
+
+### 插件 API 钩子
+
+使用 `usePluginAPI()` 来调用您插件的路由：
+
+```typescript
+import { usePluginAPI } from "@emdash-cms/admin";
+
+function MyComponent() {
+	const api = usePluginAPI();
+
+	// GET request to plugin route
+	const data = await api.get("status");
+
+	// POST request with body
+	await api.post("settings/save", { enabled: true });
+
+	// With URL parameters
+	const result = await api.get("history?limit=50");
+}
+```
+
+该钩子会自动将插件 ID 前缀添加到路由 URL。
+
+## 仪表板小组件
+
+小组件显示在管理仪表板上，提供一目了然的信息。
+
+### 小组件定义
+
+在 `admin.widgets` 中定义小组件：
+
+```typescript
+admin: {
+	widgets: [
+		{
+			id: "seo-overview", // Unique widget ID
+			title: "SEO Overview", // Widget title (optional)
+			size: "half", // "full" | "half" | "third"
+		},
+	];
+}
+```
+
+### 小组件组件
+
+```typescript title="src/components/SEOWidget.tsx"
+import { useState, useEffect } from "react";
+import { usePluginAPI } from "@emdash-cms/admin";
+
+export function SEOWidget() {
+  const api = usePluginAPI();
+  const [data, setData] = useState({ score: 0, issues: [] });
+
+  useEffect(() => {
+    api.get("analyze").then(setData);
+  }, []);
+
+  return (
+    <div className="widget-content">
+      <div className="score">{data.score}%</div>
+      <ul>
+        {data.issues.map((issue, i) => (
+          <li key={i}>{issue.message}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### 小组件尺寸
+
+| 尺寸     | 描述                   |
+| -------- | ---------------------- |
+| `full`   | 仪表板全宽             |
+| `half`   | 仪表板半宽             |
+| `third`  | 仪表板三分之一宽度     |
+
+小组件会根据屏幕宽度自动换行。
+
+## 导出结构
+
+管理入口点导出两个对象：
+
+```typescript title="src/admin.tsx"
+import { SettingsPage } from "./components/SettingsPage";
+import { ReportsPage } from "./components/ReportsPage";
+import { StatusWidget } from "./components/StatusWidget";
+import { OverviewWidget } from "./components/OverviewWidget";
+
+// Pages keyed by path
+export const pages = {
+	"/settings": SettingsPage,
+	"/reports": ReportsPage,
+};
+
+// Widgets keyed by ID
+export const widgets = {
+	status: StatusWidget,
+	overview: OverviewWidget,
+};
+```
+
+<Aside type="caution">
+	`pages` 中的页面路径必须与 `admin.pages` 中的 `path` 值匹配。小组件的键必须与 `admin.widgets` 中的 `id` 值匹配。
+</Aside>
+
+## 使用管理组件
+
+EmDash 为常见模式提供了预构建的组件：
+
+```typescript
+import {
+  Card,
+  Button,
+  Input,
+  Select,
+  Toggle,
+  Table,
+  Pagination,
+  Alert,
+  Loading
+} from "@emdash-cms/admin";
+
+function SettingsPage() {
+  return (
+    <Card title="Settings">
+      <Input label="API Key" type="password" />
+      <Toggle label="Enabled" defaultChecked />
+      <Button variant="primary">Save</Button>
+    </Card>
+  );
+}
+```
+
+## 自动生成的设置界面
+
+如果您的插件只需要一个设置表单，可以使用 `admin.settingsSchema` 而无需自定义组件：
+
+```typescript
+admin: {
+  settingsSchema: {
+    apiKey: { type: "secret", label: "API Key" },
+    enabled: { type: "boolean", label: "Enabled", default: true }
+  }
+}
+```
+
+EmDash 会自动生成一个设置页面。仅在功能超出基本设置时才添加自定义页面。
+
+## 导航
+
+插件页面会出现在管理侧边栏的插件名称下。顺序与 `admin.pages` 数组匹配。
+
+```typescript
+admin: {
+	pages: [
+		{ path: "/settings", label: "Settings", icon: "settings" }, // First
+		{ path: "/history", label: "History", icon: "history" }, // Second
+		{ path: "/reports", label: "Reports", icon: "chart" }, // Third
+	];
+}
+```
+
+## 构建配置
+
+管理组件需要一个单独的构建入口点。配置您的打包工具：
+
+<Tabs>
+  <TabItem label="tsdown">
+```typescript title="tsdown.config.ts"
+export default {
+  entry: {
+    index: "src/index.ts",
+    admin: "src/admin.tsx"
+  },
+  format: "esm",
+  dts: true,
+  external: ["react", "react-dom", "emdash", "@emdash-cms/admin"]
+};
+```
+  </TabItem>
+  <TabItem label="tsup">
+```typescript title="tsup.config.ts"
+export default {
+  entry: ["src/index.ts", "src/admin.tsx"],
+  format: "esm",
+  dts: true,
+  external: ["react", "react-dom", "emdash", "@emdash-cms/admin"]
+};
+```
+  </TabItem>
+</Tabs>
+
+将 React 和 EmDash 管理依赖保持为外部依赖，以避免重复打包。
+
+## 插件启用/禁用
+
+当插件在管理界面中被禁用时：
+
+- 侧边栏链接被隐藏
+- 仪表板小组件不会被渲染
+- 管理页面返回 404
+- 后端钩子仍会执行（出于数据安全考虑）
+
+插件可以检查其启用状态：
+
+```typescript
+const enabled = await ctx.kv.get<boolean>("_emdash:enabled");
+```
+
+## 示例：完整的管理界面
+
+```typescript title="src/index.ts"
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "analytics",
+	version: "1.0.0",
+
+	capabilities: ["network:fetch"],
+	allowedHosts: ["api.analytics.example.com"],
+
+	storage: {
+		events: { indexes: ["type", "createdAt"] },
+	},
+
+	admin: {
+		entry: "@my-org/plugin-analytics/admin",
+		settingsSchema: {
+			trackingId: { type: "string", label: "Tracking ID" },
+			enabled: { type: "boolean", label: "Enabled", default: true },
+		},
+		pages: [
+			{ path: "/dashboard", label: "Dashboard", icon: "chart" },
+			{ path: "/settings", label: "Settings", icon: "settings" },
+		],
+		widgets: [{ id: "events-today", title: "Events Today", size: "third" }],
+	},
+
+	routes: {
+		stats: {
+			handler: async (ctx) => {
+				const today = new Date().toISOString().split("T")[0];
+				const count = await ctx.storage.events!.count({
+					createdAt: { gte: today },
+				});
+				return { today: count };
+			},
+		},
+	},
+});
+```
+
+```typescript title="src/admin.tsx"
+import { EventsWidget } from "./components/EventsWidget";
+import { DashboardPage } from "./components/DashboardPage";
+import { SettingsPage } from "./components/SettingsPage";
+
+export const widgets = {
+	"events-today": EventsWidget,
+};
+
+export const pages = {
+	"/dashboard": DashboardPage,
+	"/settings": SettingsPage,
+};
+```

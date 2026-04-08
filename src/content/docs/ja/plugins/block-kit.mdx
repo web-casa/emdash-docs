@@ -1,0 +1,144 @@
+---
+title: Block Kit
+description: サンドボックス化されたプラグイン管理ページとウィジェットのための宣言的UIブロック。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDashのBlock Kitにより、サンドボックス化されたプラグインは管理UIをJSONとして記述できます。ホストがブロックをレンダリングするため、プラグイン提供のJavaScriptがブラウザで実行されることはありません。
+
+<Aside>
+信頼されたプラグイン（`astro.config.ts`で宣言されたもの）は、引き続きカスタムReactコンポーネントを提供できます。Block Kitは、DOMアクセスを信頼できない、ランタイムインストールされるサンドボックス化プラグイン向けです。
+</Aside>
+
+<Aside type="tip">
+Block Kit要素は、[Portable Textブロック編集フィールド](/ja/plugins/creating-plugins/#portable-text-block-types)にも使用されます。プラグインがブロックタイプに`fields`を宣言すると、エディターはブロックデータ（URL、タイトル、パラメーターなど）を編集するためのBlock Kitフォームをレンダリングします。
+</Aside>
+
+## 仕組み
+
+1. ユーザーがプラグインの管理ページに移動します
+2. 管理パネルがプラグインの管理ルートに`page_load`インタラクションを送信します
+3. プラグインがブロックの配列を含む`BlockResponse`を返します
+4. 管理パネルが`BlockRenderer`コンポーネントを使用してブロックをレンダリングします
+5. ユーザーがインタラクション（ボタンクリック、フォーム送信）を行うと、管理パネルはインタラクションをプラグインに送り返します
+6. プラグインが新しいブロックを返し、このサイクルが繰り返されます
+
+```typescript
+// Plugin admin route handler
+routes: {
+  admin: {
+    handler: async (ctx, { request }) => {
+      const interaction = await request.json();
+
+      if (interaction.type === "page_load") {
+        return {
+          blocks: [
+            { type: "header", text: "My Plugin Settings" },
+            {
+              type: "form",
+              block_id: "settings",
+              fields: [
+                { type: "text_input", action_id: "api_url", label: "API URL" },
+                { type: "toggle", action_id: "enabled", label: "Enabled", initial_value: true },
+              ],
+              submit: { label: "Save", action_id: "save" },
+            },
+          ],
+        };
+      }
+
+      if (interaction.type === "form_submit" && interaction.action_id === "save") {
+        await ctx.kv.set("settings", interaction.values);
+        return {
+          blocks: [/* ... updated blocks ... */],
+          toast: { message: "Settings saved", type: "success" },
+        };
+      }
+    },
+  },
+}
+```
+
+## ブロックタイプ
+
+| タイプ | 説明 |
+|------|-------------|
+| `header` | 大きな太字の見出し |
+| `section` | オプションのアクセサリー要素付きテキスト |
+| `divider` | 水平線 |
+| `fields` | 2列のラベル/値グリッド |
+| `table` | フォーマット、ソート、ページネーション付きデータテーブル |
+| `actions` | ボタンとコントロールの水平行 |
+| `stats` | トレンドインジケーター付きダッシュボードメトリックカード |
+| `form` | 条件付き表示と送信機能を持つ入力フィールド |
+| `image` | キャプション付きブロックレベル画像 |
+| `context` | 小さな控えめなヘルプテキスト |
+| `columns` | ネストされたブロックを持つ2-3列レイアウト |
+
+## 要素タイプ
+
+| タイプ | 説明 |
+|------|-------------|
+| `button` | オプションの確認ダイアログ付きアクションボタン |
+| `text_input` | 単一行または複数行のテキスト入力 |
+| `number_input` | 最小値/最大値付き数値入力 |
+| `select` | ドロップダウン選択 |
+| `toggle` | オン/オフスイッチ |
+| `secret_input` | APIキーやトークン用のマスク入力 |
+
+## ビルダーヘルパー
+
+`@emdash-cms/blocks`パッケージは、よりクリーンなコードのためのビルダーヘルパーをエクスポートします：
+
+```typescript
+import { blocks, elements } from "@emdash-cms/blocks";
+
+const { header, form, section, stats } = blocks;
+const { textInput, toggle, select, button } = elements;
+
+return {
+  blocks: [
+	    header("SEO設定"),
+    form({
+      blockId: "settings",
+      fields: [
+	        textInput("site_title", "サイトタイトル", { initialValue: "私のサイト" }),
+	        toggle("generate_sitemap", "サイトマップを生成", { initialValue: true }),
+	        select("robots", "デフォルトのrobots設定", [
+          { label: "Index, Follow", value: "index,follow" },
+          { label: "No Index", value: "noindex,follow" },
+        ]),
+      ],
+      submit: { label: "Save", actionId: "save" },
+    }),
+  ],
+};
+```
+
+## 条件付きフィールド
+
+フォームフィールドは、他のフィールドの値に基づいて条件付きで表示できます：
+
+```json
+{
+  "type": "toggle",
+  "action_id": "auth_enabled",
+  "label": "Enable Authentication"
+}
+```
+
+```json
+{
+  "type": "secret_input",
+  "action_id": "api_key",
+  "label": "API Key",
+  "condition": { "field": "auth_enabled", "eq": true }
+}
+```
+
+`api_key`フィールドは、`auth_enabled`がオンに切り替えられた場合にのみ表示されます。条件はクライアント側で評価され、ラウンドトリップは発生しません。
+
+## 試してみる
+
+[Block Playground](https://emdash-blocks.cto.cloudflare.dev/)を使用して、インタラクティブにブロックレイアウトを構築およびテストできます。

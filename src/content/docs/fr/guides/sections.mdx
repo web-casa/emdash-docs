@@ -1,0 +1,264 @@
+---
+title: Sections
+description: Créez et utilisez des blocs de contenu réutilisables sur votre site.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Les sections sont des blocs de contenu réutilisables que les éditeurs peuvent insérer dans n'importe quel contenu via des commandes slash. Utilisez-les pour des modèles courants comme les appels à l'action, les témoignages, les grilles de fonctionnalités ou tout contenu apparaissant sur plusieurs pages.
+
+## Interroger les Sections
+
+### getSection
+
+Récupérer une seule section par son slug :
+
+```typescript
+import { getSection } from "emdash";
+
+const cta = await getSection("newsletter-cta");
+
+if (cta) {
+  console.log(cta.title);    // "Newsletter CTA"
+  console.log(cta.content);  // PortableTextBlock[]
+}
+```
+
+### getSections
+
+Récupérer plusieurs sections avec des filtres optionnels :
+
+```typescript
+import { getSections } from "emdash";
+
+// Obtenir toutes les sections
+const { items: all } = await getSections();
+
+// Filtrer par source
+const { items: themeSections } = await getSections({ source: "theme" });
+
+// Rechercher par titre/mots-clés
+const { items: results } = await getSections({ search: "newsletter" });
+```
+
+`getSections` renvoie `{ items: Section[], nextCursor?: string }` suivant le modèle de pagination standard.
+
+## Structure d'une Section
+
+```typescript
+interface Section {
+  id: string;
+  slug: string;
+  title: string;
+  description?: string;
+  keywords: string[];
+  content: PortableTextBlock[];
+  previewUrl?: string;
+  source: "theme" | "user" | "import";
+  themeId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+### Types de Source
+
+| Source   | Description                                      |
+| -------- | ------------------------------------------------ |
+| `theme`  | Définie dans le fichier seed, gérée par le thème |
+| `user`   | Créée par les éditeurs dans l'admin              |
+| `import` | Importée depuis WordPress (blocs réutilisables)  |
+
+## Utiliser les Sections dans le Contenu
+
+Les éditeurs insèrent des sections en utilisant la commande slash `/section` dans l'éditeur de texte enrichi :
+
+<Steps>
+
+1. Tapez `/section` (ou `/pattern`, `/block`, `/template`)
+
+2. Recherchez ou parcourez les sections disponibles
+
+3. Cliquez pour insérer le contenu de la section à la position du curseur
+
+</Steps>
+
+Le contenu Portable Text de la section est copié dans le document. Cela signifie :
+
+- Les modifications apportées à la section n'affectent pas le contenu déjà inséré
+- Les éditeurs peuvent personnaliser le contenu inséré
+- Le contenu reste autonome
+
+<Aside type="tip">
+  Pour un contenu qui doit rester synchronisé, envisagez d'utiliser des [Zones de Widgets](/fr/guides/widgets/) avec des widgets de composants à la place.
+</Aside>
+
+## Créer des Sections
+
+### Dans l'Interface d'Administration
+
+1. Naviguez vers **Sections** dans la barre latérale de l'admin
+
+2. Cliquez sur **Nouvelle Section**
+
+3. Remplissez :
+   - **Titre** - Nom d'affichage de la section
+   - **Slug** - Identifiant URL (généré automatiquement à partir du titre)
+   - **Description** - Texte d'aide pour les éditeurs
+
+4. Ajoutez du contenu en utilisant l'éditeur de texte enrichi
+
+5. Optionnellement, définissez des mots-clés pour une découverte plus facile
+
+### Via les Fichiers Seed
+
+Incluez des sections dans le fichier seed de votre thème :
+
+```json
+{
+  "sections": [
+    {
+      "slug": "hero-centered",
+      "title": "Centered Hero",
+      "description": "Full-width hero with centered heading and CTA",
+      "keywords": ["hero", "banner", "header"],
+      "content": [
+        {
+          "_type": "block",
+          "style": "h1",
+          "children": [{ "_type": "span", "text": "Bienvenue sur notre site" }]
+        },
+        {
+          "_type": "block",
+          "children": [{ "_type": "span", "text": "Your tagline goes here." }]
+        }
+      ]
+    },
+    {
+      "slug": "newsletter-cta",
+      "title": "Newsletter CTA",
+      "keywords": ["newsletter", "subscribe", "email"],
+      "content": [
+        {
+          "_type": "block",
+          "style": "h3",
+          "children": [{ "_type": "span", "text": "Subscribe to our newsletter" }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Via l'Import WordPress
+
+Les blocs réutilisables WordPress (type de publication `wp_block`) sont automatiquement importés comme sections :
+
+- La source est définie sur `"import"`
+- Le contenu Gutenberg est converti en Portable Text
+
+## Rendu des Sections par Programmation
+
+Pour le contenu de section rendu côté serveur en dehors de l'éditeur :
+
+```astro
+---
+import { getSection } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const newsletter = await getSection("newsletter-cta");
+---
+
+{newsletter && (
+  <aside class="cta-box">
+    <PortableText value={newsletter.content} />
+  </aside>
+)}
+```
+
+## Fonctionnalités de l'Interface d'Administration
+
+La bibliothèque des Sections (`/_emdash/admin/sections`) fournit :
+
+- **Vue en grille** avec aperçus des sections
+- **Recherche** par titre et mots-clés
+- **Filtre** par source
+- **Copie rapide** du slug dans le presse-papiers
+- **Édition** du contenu et des métadonnées de la section
+- **Suppression** avec confirmation (avertit pour les sections de thème)
+
+## Référence de l'API
+
+### `getSection(slug)`
+
+Récupère une section par son slug.
+
+**Paramètres :**
+- `slug` — L'identifiant unique de la section (chaîne de caractères)
+
+**Retourne :** `Promise<Section | null>`
+
+### `getSections(options?)`
+
+Liste les sections avec des filtres optionnels.
+
+**Paramètres :**
+- `options.source` — Filtrer par source : `"theme"`, `"user"`, ou `"import"`
+- `options.search` — Rechercher dans le titre et les mots-clés
+
+**Retourne :** `Promise<Section[]>`
+
+## API REST
+
+### Lister les Sections
+
+```http
+GET /_emdash/api/sections
+GET /_emdash/api/sections?source=theme
+GET /_emdash/api/sections?search=newsletter
+```
+
+### Obtenir une Section
+
+```http
+GET /_emdash/api/sections/newsletter-cta
+```
+
+### Créer une Section
+
+```http
+POST /_emdash/api/sections
+Content-Type: application/json
+
+{
+  "slug": "my-section",
+  "title": "My Section",
+  "description": "Optional description",
+  "keywords": ["keyword1", "keyword2"],
+  "content": [...]
+}
+```
+
+### Mettre à Jour une Section
+
+```http
+PUT /_emdash/api/sections/my-section
+Content-Type: application/json
+
+{
+  "title": "Updated Title",
+  "content": [...]
+}
+```
+
+### Supprimer une Section
+
+```http
+DELETE /_emdash/api/sections/my-section
+```
+
+## Prochaines Étapes
+
+- [Travailler avec le Contenu](/fr/guides/working-with-content/) - Découvrir l'éditeur de texte enrichi
+- [Zones de Widgets](/fr/guides/widgets/) - Pour un contenu dynamique synchronisé
+- [Import de Contenu](/fr/migration/content-import/) - Importer des blocs réutilisables WordPress

@@ -1,0 +1,624 @@
+---
+title: CLI 参考
+description: EmDash CMS 的命令行接口。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash CLI 提供了用于管理 EmDash CMS 实例的命令 —— 包括数据库设置、类型生成、内容 CRUD、模式管理、媒体管理等。
+
+## 安装
+
+CLI 包含在 `emdash` 包中：
+
+```bash
+npm install emdash
+```
+
+使用 `npx emdash` 运行命令，或将脚本添加到 `package.json`。为简洁起见，二进制文件也可作为 `em` 使用。
+
+## 认证
+
+与正在运行的 EmDash 实例通信的命令（除 `init`、`seed`、`export-seed` 和 `auth secret` 之外的所有命令）按以下顺序解析认证：
+
+1. **`--token` 标志** —— 命令行上的显式令牌
+2. **`EMDASH_TOKEN` 环境变量**
+3. **存储的凭据**，来自 `~/.config/emdash/auth.json`（由 `emdash login` 保存）
+4. **开发绕过** —— 如果 URL 是 localhost 且没有可用的令牌，则通过开发绕过端点自动认证
+
+大多数命令接受 `--url`（默认 `http://localhost:4321`）和 `--token` 标志。当目标是本地开发服务器时，不需要令牌。
+
+## 通用标志
+
+这些标志在所有远程命令上都可用：
+
+| 标志        | 别名 | 描述                     | 默认值                 |
+| ----------- | ---- | ------------------------ | ---------------------- |
+| `--url`     | `-u` | EmDash 实例 URL        | `http://localhost:4321` |
+| `--token`   | `-t` | 认证令牌                 | 来自环境变量/存储的凭据 |
+| `--json`    |      | 输出为 JSON（用于管道）  | 根据 TTY 自动检测       |
+
+## 输出
+
+当标准输出是 TTY 时，CLI 会使用 consola 美化打印结果。当被管道传输或设置了 `--json` 时，它会将原始 JSON 输出到标准输出 —— 适用于 `jq` 或其他工具。
+
+## 命令
+
+### `emdash init`
+
+使用核心模式和可选的模板数据初始化数据库。
+
+```bash
+npx emdash init [options]
+```
+
+#### 选项
+
+| 选项          | 别名 | 描述                 | 默认值            |
+| ------------- | ---- | -------------------- | ----------------- |
+| `--database`  | `-d` | 数据库文件路径       | `./data.db`       |
+| `--cwd`       |      | 工作目录             | 当前目录          |
+| `--force`     | `-f` | 重新运行模式和种子   | `false`           |
+
+#### 行为
+
+1. 从 `package.json` 读取 `emdash` 配置
+2. 如果需要，创建数据库文件
+3. 运行核心迁移（创建系统表）
+4. 如果已配置，运行模板 `schema.sql`
+5. 如果已配置，运行模板 `seed.sql`
+
+<Aside>
+	如果数据库已包含集合，`init` 将跳过模式和种子，除非使用了 `--force`。
+</Aside>
+
+### `emdash dev`
+
+启动开发服务器并自动设置数据库。
+
+```bash
+npx emdash dev [options]
+```
+
+#### 选项
+
+| 选项          | 别名 | 描述                                 | 默认值            |
+| ------------- | ---- | ------------------------------------ | ----------------- |
+| `--database`  | `-d` | 数据库文件路径                       | `./data.db`       |
+| `--types`     | `-t` | 在启动前从远程生成类型               | `false`           |
+| `--port`      | `-p` | 开发服务器端口                       | `4321`            |
+| `--cwd`       |      | 工作目录                             | 当前目录          |
+
+#### 示例
+
+```bash
+# Start dev server
+npx emdash dev
+
+# Custom port
+npx emdash dev --port 3000
+
+# Generate types from remote before starting
+npx emdash dev --types
+```
+
+#### 行为
+
+1. 检查并运行待处理的数据库迁移
+2. 如果设置了 `--types`，则从远程实例生成 TypeScript 类型（URL 来自 `EMDASH_URL` 环境变量或 `package.json` 中的 `emdash.url`）
+3. 启动 Astro 开发服务器，并设置 `EMDASH_DATABASE_URL`
+
+### `emdash types`
+
+从正在运行的 EmDash 实例的模式生成 TypeScript 类型。
+
+```bash
+npx emdash types [options]
+```
+
+#### 选项
+
+| 选项        | 别名 | 描述                   | 默认值                 |
+| ----------- | ---- | ---------------------- | ---------------------- |
+| `--url`     | `-u` | EmDash 实例 URL      | `http://localhost:4321` |
+| `--token`   | `-t` | 认证令牌               | 来自环境变量/存储的凭据 |
+| `--output`  | `-o` | 类型输出路径           | `.emdash/types.ts`   |
+| `--cwd`     |      | 工作目录               | 当前目录               |
+
+#### 示例
+
+```bash
+# Generate types from local dev server
+npx emdash types
+
+# Generate from remote instance
+npx emdash types --url https://my-site.pages.dev
+
+# Custom output path
+npx emdash types --output src/types/emdash.ts
+```
+
+#### 行为
+
+1. 从实例获取模式
+2. 生成 TypeScript 类型定义
+3. 将类型写入输出文件
+4. 同时写入 `schema.json` 以供参考
+
+### `emdash login`
+
+使用 OAuth 设备流登录到 EmDash 实例。
+
+```bash
+npx emdash login [options]
+```
+
+#### 选项
+
+| 选项    | 别名 | 描述                | 默认值                 |
+| ------- | ---- | ------------------- | ---------------------- |
+| `--url` | `-u` | EmDash 实例 URL   | `http://localhost:4321` |
+
+#### 行为
+
+1. 从实例发现认证端点
+2. 如果是 localhost 且未配置认证，则自动使用开发绕过
+3. 否则启动 OAuth 设备流 —— 显示代码并打开浏览器
+4. 轮询授权，然后将凭据保存到 `~/.config/emdash/auth.json`
+
+保存的凭据会自动用于所有后续针对同一实例的命令。
+
+### `emdash logout`
+
+注销并移除存储的凭据。
+
+```bash
+npx emdash logout [options]
+```
+
+#### 选项
+
+| 选项    | 别名 | 描述                | 默认值                 |
+| ------- | ---- | ------------------- | ---------------------- |
+| `--url` | `-u` | EmDash 实例 URL   | `http://localhost:4321` |
+
+### `emdash whoami`
+
+显示当前认证的用户。
+
+```bash
+npx emdash whoami [options]
+```
+
+#### 选项
+
+| 选项       | 别名 | 描述                | 默认值                 |
+| ---------- | ---- | ------------------- | ---------------------- |
+| `--url`    | `-u` | EmDash 实例 URL   | `http://localhost:4321` |
+| `--token`  | `-t` | 认证令牌            | 来自环境变量/存储的凭据 |
+| `--json`   |      | 输出为 JSON         |                        |
+
+显示电子邮件、姓名、角色、认证方法和实例 URL。
+
+### `emdash content`
+
+管理内容项。所有子命令都通过 `EmDashClient` 使用远程 API。
+
+#### `content list <collection>`
+
+```bash
+npx emdash content list posts
+npx emdash content list posts --status published --limit 10
+```
+
+| 选项       | 描述           |
+| ---------- | -------------- |
+| `--status` | 按状态过滤     |
+| `--limit`  | 最大项目数     |
+| `--cursor` | 分页游标       |
+
+#### `content get <collection> <id>`
+
+```bash
+npx emdash content get posts 01ABC123
+npx emdash content get posts 01ABC123 --raw
+```
+
+| 选项    | 描述                                     |
+| ------- | ---------------------------------------- |
+| `--raw` | 返回原始 Portable Text（跳过 Markdown 转换） |
+
+响应包含一个 `_rev` 令牌 —— 将其传递给 `content update` 以证明您已看到要覆盖的内容。
+
+#### `content create <collection>`
+
+```bash
+npx emdash content create posts --data '{"title": "Hello"}'
+npx emdash content create posts --file post.json --slug hello-world
+cat post.json | npx emdash content create posts --stdin
+```
+
+| 选项       | 描述                     |
+| ---------- | ------------------------ |
+| `--data`   | 包含内容数据的 JSON 字符串 |
+| `--file`   | 从 JSON 文件读取数据     |
+| `--stdin`  | 从标准输入读取数据       |
+| `--slug`   | 内容 slug                |
+| `--status` | 初始状态（草稿、已发布）   |
+
+通过 `--data`、`--file` 或 `--stdin` 中的**恰好一个**提供数据。
+
+#### `content update <collection> <id>`
+
+类似于需要先读取再写入的文件编辑器 —— 您必须提供先前 `get` 中的 `_rev` 令牌，以证明您已看到当前状态。这可以防止意外覆盖您尚未看到的更改。
+
+```bash
+# 1. Read the item, note the _rev
+npx emdash content get posts 01ABC123
+
+# 2. Update with the _rev from step 1
+npx emdash content update posts 01ABC123 \
+  --rev MToyMDI2LTAyLTE0... \
+  --data '{"title": "Updated"}'
+```
+
+| 选项     | 描述                           |
+| -------- | ------------------------------ |
+| `--rev`  | 来自 `get` 的修订令牌（必需）   |
+| `--data` | 包含内容数据的 JSON 字符串     |
+| `--file` | 从 JSON 文件读取数据           |
+
+如果项目自您 `get` 后已更改，服务器将返回 409 Conflict —— 请重新读取并重试。
+
+#### `content delete <collection> <id>`
+
+```bash
+npx emdash content delete posts 01ABC123
+```
+
+软删除内容项（移至回收站）。
+
+#### `content publish <collection> <id>`
+
+```bash
+npx emdash content publish posts 01ABC123
+```
+
+#### `content unpublish <collection> <id>`
+
+```bash
+npx emdash content unpublish posts 01ABC123
+```
+
+#### `content schedule <collection> <id>`
+
+```bash
+npx emdash content schedule posts 01ABC123 --at 2026-03-01T09:00:00Z
+```
+
+| 选项  | 描述                     |
+| ----- | ------------------------ |
+| `--at` | ISO 8601 日期时间（必需） |
+
+#### `content restore <collection> <id>`
+
+```bash
+npx emdash content restore posts 01ABC123
+```
+
+恢复已删除到回收站的内容项。
+
+### `emdash schema`
+
+管理集合和字段。
+
+#### `schema list`
+
+```bash
+npx emdash schema list
+```
+
+列出所有集合。
+
+#### `schema get <collection>`
+
+```bash
+npx emdash schema get posts
+```
+
+显示集合及其所有字段。
+
+#### `schema create <collection>`
+
+```bash
+npx emdash schema create articles --label Articles
+npx emdash schema create articles --label Articles --label-singular Article --description "Blog articles"
+```
+
+| 选项               | 描述                 |
+| ------------------ | -------------------- |
+| `--label`          | 集合标签（必需）     |
+| `--label-singular` | 单数标签             |
+| `--description`    | 集合描述             |
+
+#### `schema delete <collection>`
+
+```bash
+npx emdash schema delete articles
+npx emdash schema delete articles --force
+```
+
+| 选项     | 描述         |
+| -------- | ------------ |
+| `--force` | 跳过确认提示 |
+
+除非设置了 `--force`，否则会提示确认。
+
+#### `schema add-field <collection> <field>`
+
+```bash
+npx emdash schema add-field posts body --type portableText --label "Body Content"
+npx emdash schema add-field posts featured --type boolean --required
+```
+
+| 选项        | 描述                                                                                          |
+| ----------- | --------------------------------------------------------------------------------------------- |
+| `--type`    | 字段类型：string, text, number, integer, boolean, datetime, image, reference, portableText, json（必需） |
+| `--label`   | 字段标签（默认为字段 slug）                                                                   |
+| `--required` | 字段是否必需                                                                                  |
+
+#### `schema remove-field <collection> <field>`
+
+```bash
+npx emdash schema remove-field posts featured
+```
+
+### `emdash media`
+
+管理媒体项。
+
+#### `media list`
+
+```bash
+npx emdash media list
+npx emdash media list --mime image/png --limit 20
+```
+
+| 选项       | 描述           |
+| ---------- | -------------- |
+| `--mime`   | 按 MIME 类型过滤 |
+| `--limit`  | 项目数量       |
+| `--cursor` | 分页游标       |
+
+#### `media upload <file>`
+
+```bash
+npx emdash media upload ./photo.jpg
+npx emdash media upload ./photo.jpg --alt "A sunset" --caption "Taken in Bristol"
+```
+
+| 选项        | 描述     |
+| ----------- | -------- |
+| `--alt`     | 替代文本 |
+| `--caption` | 标题文本 |
+
+#### `media get <id>`
+
+```bash
+npx emdash media get 01MEDIA123
+```
+
+#### `media delete <id>`
+
+```bash
+npx emdash media delete 01MEDIA123
+```
+
+### `emdash search`
+
+跨内容进行全文搜索。
+
+```bash
+npx emdash search "hello world"
+npx emdash search "hello" --collection posts --limit 5
+```
+
+| 选项             | 别名 | 描述           |
+| ---------------- | ---- | -------------- |
+| `--collection`   | `-c` | 按集合过滤     |
+| `--limit`        | `-l` | 最大结果数     |
+
+### `emdash taxonomy`
+
+管理分类法和术语。
+
+#### `taxonomy list`
+
+```bash
+npx emdash taxonomy list
+```
+
+#### `taxonomy terms <name>`
+
+```bash
+npx emdash taxonomy terms categories
+npx emdash taxonomy terms tags --limit 50
+```
+
+| 选项       | 别名 | 描述       |
+| ---------- | ---- | ---------- |
+| `--limit`  | `-l` | 最大术语数 |
+| `--cursor` |      | 分页游标   |
+
+#### `taxonomy add-term <taxonomy>`
+
+```bash
+npx emdash taxonomy add-term categories --name "Tech" --slug tech
+npx emdash taxonomy add-term categories --name "Frontend" --parent 01PARENT123
+```
+
+| 选项       | 描述                                     |
+| ---------- | ---------------------------------------- |
+| `--name`   | 术语标签（必需）                         |
+| `--slug`   | 术语 slug（默认为 slug 化的名称）        |
+| `--parent` | 父术语 ID（用于分层分类法）              |
+
+### `emdash menu`
+
+管理导航菜单。
+
+#### `menu list`
+
+```bash
+npx emdash menu list
+```
+
+#### `menu get <name>`
+
+```bash
+npx emdash menu get primary
+```
+
+返回菜单及其所有项目。
+
+### `emdash seed`
+
+将种子文件应用到数据库。此命令直接在本地 SQLite 文件上工作（无需运行服务器）。
+
+```bash
+npx emdash seed [path] [options]
+```
+
+#### 参数
+
+| 参数   | 描述         | 默认值               |
+| ------ | ------------ | -------------------- |
+| `path` | 种子文件路径 | `.emdash/seed.json` |
+
+#### 选项
+
+| 选项               | 别名 | 描述                                 | 默认值                     |
+| ------------------ | ---- | ------------------------------------ | -------------------------- |
+| `--database`       | `-d` | 数据库文件路径                       | `./data.db`                |
+| `--cwd`            |      | 工作目录                             | 当前目录                   |
+| `--validate`       |      | 仅验证，不应用                       | `false`                    |
+| `--no-content`     |      | 跳过示例内容                         | `false`                    |
+| `--on-conflict`    |      | 冲突处理：skip, update, error        | `skip`                     |
+| `--uploads-dir`    |      | 媒体上传目录                         | `.emdash/uploads`        |
+| `--media-base-url` |      | 媒体文件的基础 URL                   | `/_emdash/api/media/file` |
+| `--base-url`       |      | 站点基础 URL（用于绝对媒体 URL）     |                            |
+
+#### 种子文件解析
+
+命令按以下顺序查找种子文件：
+
+1. 位置参数（如果提供）
+2. `.emdash/seed.json`（约定）
+3. 来自 `package.json` 中 `emdash.seed` 字段的路径
+
+### `emdash export-seed`
+
+将数据库模式和内容导出为种子文件。直接在本地 SQLite 文件上工作。
+
+```bash
+npx emdash export-seed [options] > seed.json
+```
+
+#### 选项
+
+| 选项             | 别名 | 描述                                          | 默认值           |
+| ---------------- | ---- | --------------------------------------------- | ---------------- |
+| `--database`     | `-d` | 数据库文件路径                                | `./data.db`      |
+| `--cwd`          |      | 工作目录                                      | 当前目录         |
+| `--with-content` |      | 包含内容（全部或逗号分隔的集合）              |                  |
+| `--no-pretty`    |      | 禁用 JSON 格式化                              | `false`          |
+
+#### 输出格式
+
+导出的种子文件包括：
+
+-   **设置**：站点标题、标语、社交链接
+-   **集合**：所有集合定义及其字段
+-   **分类法**：分类法定义和术语
+-   **菜单**：导航菜单及其项目
+-   **小部件区域**：小部件区域和小部件
+-   **内容**（如果请求）：包含 `$media` 引用和 `$ref:` 语法以实现可移植性的条目
+
+### `emdash auth secret`
+
+为您的部署生成安全的认证密钥。
+
+```bash
+npx emdash auth secret
+```
+
+输出适合 `EMDASH_AUTH_SECRET` 的随机密钥。
+
+## 生成的文件
+
+### `.emdash/types.ts`
+
+由 `emdash types` 生成的 TypeScript 接口：
+
+```ts
+// Generated by EmDash CLI
+// Do not edit manually - run `emdash types` to regenerate
+
+import type { PortableTextBlock } from "emdash";
+
+export interface Post {
+	id: string;
+	title: string;
+	content: PortableTextBlock[];
+	publishedAt: Date | null;
+}
+```
+
+### `.emdash/schema.json`
+
+用于工具的原始模式导出：
+
+```json
+{
+  "version": "a1b2c3d4",
+  "collections": [
+    {
+      "slug": "posts",
+      "label": "Posts",
+      "fields": [...]
+    }
+  ]
+}
+```
+
+## 环境变量
+
+| 变量                    | 描述                              |
+| ----------------------- | --------------------------------- |
+| `EMDASH_DATABASE_URL` | 数据库 URL（由 `dev` 自动设置）    |
+| `EMDASH_TOKEN`        | 用于远程操作的认证令牌              |
+| `EMDASH_URL`          | `types` 和 `dev --types` 的默认远程 URL |
+| `EMDASH_AUTH_SECRET`  | 用于通行密钥认证的密钥              |
+| `EMDASH_PREVIEW_SECRET` | 用于预览令牌生成的密钥              |
+
+## 包脚本
+
+```json
+{
+	"scripts": {
+		"dev": "emdash dev",
+		"init": "emdash init",
+		"types": "emdash types",
+		"seed": "emdash seed",
+		"export-seed": "emdash export-seed",
+		"db:reset": "rm -f data.db && emdash init"
+	}
+}
+```
+
+## 退出代码
+
+| 代码 | 描述                              |
+| ---- | --------------------------------- |
+| `0`  | 成功                              |
+| `1`  | 错误（配置、网络、数据库）        |

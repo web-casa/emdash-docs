@@ -1,0 +1,401 @@
+---
+title: EmDash für WordPress-Entwickler
+description: Erfahren Sie, wie EmDash WordPress-Konzepte wie Beiträge, Taxonomien, Menüs, Widgets und WP_Query auf Astro und TypeScript abbildet.
+lastUpdated: 2026-04-07
+---
+
+import { Aside, Card, CardGrid, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash überführt vertraute WordPress-Konzepte wie Beiträge, Seiten, Taxonomien, Menüs, Widgets und Mediathek in einen modernen Astro-Stack. Die redaktionelle Logik bleibt dabei gut wiedererkennbar.
+
+Wenn Sie Plattformen vor einer Migration vergleichen, lesen Sie [EmDash vs WordPress](/de/emdash-vs-wordpress/) und [WordPress zu Astro mit EmDash](/de/wordpress-to-astro-with-emdash/).
+
+## Was bleibt vertraut
+
+Die Konzepte, die Sie von WordPress kennen, sind erstklassige Funktionen in EmDash:
+
+- **Collections** funktionieren wie benutzerdefinierte Inhaltstypen: Sie definieren die Struktur und fragen sie anschließend in Templates ab
+- **Taxonomien** funktionieren auf die gleiche Weise – hierarchisch (wie Kategorien) und flach (wie Tags)
+- **Menüs** mit Drag-and-Drop-Sortierung und verschachtelten Elementen
+- **Widget-Bereiche** für Sidebars und dynamische Inhaltsbereiche
+- **Mediathek** mit Upload, Organisation und Bildverwaltung
+- **Admin-Oberfläche**, die Redakteure nutzen können, ohne Code zu berühren
+
+<Aside type="tip">
+	Sie müssen React oder ein bestimmtes JavaScript-Framework nicht kennen. Astro-Komponenten verwenden HTML mit
+	einfachen Template-Ausdrücken – näher an PHP-Templates als an React.
+</Aside>
+
+## Was ist anders
+
+Die Implementierung ändert sich, aber das mentale Modell bleibt gleich:
+
+<CardGrid>
+	<Card title="TypeScript statt PHP" icon="seti:typescript">
+		Templates sind Astro-Komponenten. Die Syntax ist sauberer, aber das Konzept ist dasselbe: Server-Code,
+		der HTML ausgibt.
+	</Card>
+	<Card title="Content-APIs statt WP_Query" icon="document">
+		Abfragefunktionen wie `getEmDashCollection()` ersetzen `WP_Query`. Kein SQL, nur Funktionsaufrufe.
+	</Card>
+	<Card title="Dateibasiertes Routing" icon="puzzle">
+		Dateien in `src/pages/` werden zu URLs. Keine Rewrite-Regeln oder Template-Hierarchie zum Auswendiglernen.
+	</Card>
+	<Card title="Komponenten statt Template-Parts" icon="rocket">
+		Importieren und verwenden Sie Komponenten. Gleiche Idee wie `get_template_part()`, bessere Organisation.
+	</Card>
+</CardGrid>
+
+## Kurzreferenz
+
+| WordPress              | EmDash                             | Anmerkungen                             |
+| ---------------------- | ------------------------------------ | --------------------------------- |
+| Custom Post Types      | Collections                          | Über Admin-UI oder API definieren        |
+| `WP_Query`             | `getEmDashCollection()`            | Filter, Limits, Taxonomie-Abfragen |
+| `get_post()`           | `getEmDashEntry()`                 | Gibt Eintrag oder null zurück             |
+| Categories/Tags        | Taxonomies                           | Hierarchische Unterstützung erhalten    |
+| `register_nav_menus()` | `getMenu()`                          | Erstklassige Menüunterstützung          |
+| `register_sidebar()`   | `getWidgetArea()`                    | Erstklassige Widget-Bereiche          |
+| `bloginfo('name')`     | `getSiteSetting("title")`            | Site-Settings-API                 |
+| `the_content()`        | `<PortableText />`                   | Strukturierte Inhaltsdarstellung      |
+| Shortcodes             | Portable Text blocks                 | Benutzerdefinierte Komponenten                 |
+| `add_action/filter()`  | Plugin hooks                         | `content:beforeSave`, etc.        |
+| `wp_options`           | `ctx.kv`                             | Key-Value-Speicher                 |
+| Theme directory        | `src/` directory                     | Komponenten, Layouts, Seiten        |
+| `functions.php`        | `astro.config.mjs` + EmDash config | Build- und Laufzeitkonfiguration          |
+
+## Content-APIs
+
+### Collections abfragen
+
+WordPress-Abfragen verwenden `WP_Query` oder Hilfsfunktionen. EmDash verwendet typisierte Abfragefunktionen.
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="archive.php"
+<?php
+$posts = new WP_Query([
+  'post_type' => 'post',
+  'posts_per_page' => 10,
+  'post_status' => 'publish',
+  'category_name' => 'news',
+]);
+
+while ($posts->have_posts()) :
+$posts->the_post();
+?>
+
+  <h2><?php the_title(); ?></h2>
+  <?php the_excerpt(); ?>
+<?php endwhile; ?>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```astro title="src/pages/posts/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+status: "published",
+limit: 10,
+where: { category: "news" },
+});
+
+---
+
+{posts.map((post) => (
+
+  <article>
+    <h2>{post.data.title}</h2>
+    <p>{post.data.excerpt}</p>
+  </article>
+))}
+```
+	</TabItem>
+</Tabs>
+
+### Einen einzelnen Eintrag abrufen
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="single.php"
+<?php
+$post = get_post($id);
+?>
+<article>
+  <h1><?php echo $post->post_title; ?></h1>
+  <?php echo apply_filters('the_content', $post->post_content); ?>
+</article>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+
+if (!post) return Astro.redirect("/404");
+
+<article>
+  <h1>{post.data.title}</h1>
+  <PortableText value={post.data.content} />
+</article>
+```
+	</TabItem>
+</Tabs>
+
+## Template-Hierarchie
+
+WordPress verwendet eine Template-Hierarchie, um auszuwählen, welche Datei eine Seite rendert. Astro verwendet explizites, dateibasiertes Routing.
+
+| WordPress-Template         | EmDash-Äquivalent                 |
+| --------------------------- | ----------------------------------- |
+| `index.php`                 | `src/pages/index.astro`             |
+| `single.php`                | `src/pages/posts/[slug].astro`      |
+| `single-{type}.php`         | `src/pages/{type}/[slug].astro`     |
+| `page.php`                  | `src/pages/pages/[slug].astro`      |
+| `archive.php`               | `src/pages/posts/index.astro`       |
+| `archive-{type}.php`        | `src/pages/{type}/index.astro`      |
+| `category.php`              | `src/pages/categories/[slug].astro` |
+| `tag.php`                   | `src/pages/tags/[slug].astro`       |
+| `search.php`                | `src/pages/search.astro`            |
+| `404.php`                   | `src/pages/404.astro`               |
+| `header.php` / `footer.php` | `src/layouts/Base.astro`            |
+| `sidebar.php`               | `src/components/Sidebar.astro`      |
+
+<Aside type="tip">
+	Astros Routing ist expliziter als die Hierarchie von WordPress. Jede Route ist eine Datei. Dynamische
+	Segmente verwenden die `[param]`-Syntax.
+</Aside>
+
+## Template Parts → Komponenten
+
+WordPress Template Parts werden zu Astro-Komponenten:
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="functions.php / template"
+// In template:
+get_template_part('template-parts/content', 'post');
+
+// template-parts/content-post.php:
+
+<article class="post">
+  <h2><?php the_title(); ?></h2>
+  <?php the_excerpt(); ?>
+</article>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```astro title="src/components/PostCard.astro"
+---
+const { post } = Astro.props;
+---
+
+<article class="post">
+	<h2>{post.data.title}</h2>
+	<p>{post.data.excerpt}</p>
+</article>
+```
+
+```astro title="src/pages/index.astro"
+---
+import PostCard from "../../components/PostCard.astro";
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts } = await getEmDashCollection("posts");
+---
+
+{posts.map((post) => <PostCard {post} />)}
+```
+
+    </TabItem>
+
+</Tabs>
+
+## Menüs
+
+EmDash bietet erstklassige Menüunterstützung mit automatischer URL-Auflösung:
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="header.php"
+<?php
+wp_nav_menu([
+  'theme_location' => 'primary',
+  'container' => 'nav',
+]);
+?>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```astro title="src/components/Header.astro"
+---
+import { getMenu } from "emdash";
+
+const menu = await getMenu("primary");
+
+<nav>
+  <ul>
+    {menu?.items.map((item) => (
+      <li>
+        <a href={item.url}>{item.label}</a>
+      </li>
+    ))}
+  </ul>
+</nav>
+```
+	</TabItem>
+</Tabs>
+
+Menüs werden über die Admin-Oberfläche, Seed-Dateien oder WordPress-Import erstellt.
+
+## Widget-Bereiche
+
+Widget-Bereiche funktionieren wie Sidebars in WordPress:
+
+<Tabs>
+	<TabItem label="WordPress">
+```php title="sidebar.php"
+<?php if (is_active_sidebar('sidebar-1')) : ?>
+  <aside>
+    <?php dynamic_sidebar('sidebar-1'); ?>
+  </aside>
+<?php endif; ?>
+```
+	</TabItem>
+	<TabItem label="EmDash">
+```astro title="src/components/Sidebar.astro"
+---
+import { getWidgetArea } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const sidebar = await getWidgetArea("sidebar");
+
+{sidebar && (
+
+  <aside>
+    {sidebar.widgets.map((widget) => {
+      if (widget.type === "content") {
+        return <PortableText value={widget.content} />;
+      }
+      // Andere Widget-Typen behandeln
+    })}
+  </aside>
+)}
+```
+	</TabItem>
+</Tabs>
+
+## Website-Einstellungen
+
+Website-Optionen und Customizer-Einstellungen werden auf `getSiteSetting()` abgebildet:
+
+| WordPress                   | EmDash                       |
+| --------------------------- | ------------------------------ |
+| `bloginfo('name')`          | `getSiteSetting("title")`      |
+| `bloginfo('description')`   | `getSiteSetting("tagline")`    |
+| `get_custom_logo()`         | `getSiteSetting("logo")`       |
+| `get_option('date_format')` | `getSiteSetting("dateFormat")` |
+| `home_url()`                | `Astro.site`                   |
+
+```ts
+import { getSiteSetting } from "emdash";
+
+const title = await getSiteSetting("title");
+const logo = await getSiteSetting("logo"); // Gibt { mediaId, alt, url } zurück
+```
+
+## Taxonomien
+
+Taxonomien funktionieren konzeptionell gleich – hierarchisch (wie Kategorien) oder flach (wie Tags):
+
+```ts
+import { getTaxonomyTerms, getEntryTerms, getTerm } from "emdash";
+
+// Alle Kategorien abrufen
+const categories = await getTaxonomyTerms("categories");
+
+// Einen bestimmten Begriff abrufen
+const news = await getTerm("categories", "news");
+
+// Begriffe für einen Beitrag abrufen
+const postCategories = await getEntryTerms("posts", postId, "categories");
+```
+
+## Hooks → Plugin-System
+
+WordPress-Hooks (`add_action`, `add_filter`) werden zu EmDash-Plugin-Hooks:
+
+| WordPress Hook  | EmDash Hook           | Zweck                         |
+| --------------- | ----------------------- | ---------------------------- |
+| `save_post`     | `content:beforeSave`    | Inhalt vor dem Speichern ändern |
+| `the_content`   | PortableText components | Gerenderten Inhalt transformieren |
+| `pre_get_posts` | Query options           | Abfragen filtern               |
+| `wp_head`       | Layout `<head>`         | Head-Inhalt hinzufügen         |
+| `wp_footer`     | Layout before `</body>` | Footer-Inhalt hinzufügen       |
+
+## Was ist bei EmDash besser
+
+<CardGrid>
+	<Card title="Typsicherheit" icon="seti:typescript">
+		Durchgängig TypeScript. Sammlungen, Abfragen und Komponenten sind vollständig typisiert. Kein Raten mehr bei
+		Feldnamen oder Rückgabetypen.
+	</Card>
+	<Card title="Leistung" icon="rocket">
+		Kein PHP-Overhead. Standardmäßig statische Generierung. Server-Rendering bei Bedarf. Bereit für
+		Edge-Deployment.
+	</Card>
+	<Card title="Moderne DX" icon="laptop">
+		Hot Module Replacement. Komponentenbasierte Architektur. Moderne Tools (Vite, TypeScript, ESLint).
+	</Card>
+	<Card title="Git-basierte Deployments" icon="github">
+		Code und Templates in Git. Inhalt in der Datenbank. Kein FTP, keine Dateiberechtigungen, keine
+		gehackten Websites.
+	</Card>
+</CardGrid>
+
+### Vorschau-Links
+
+EmDash generiert sichere Vorschau-URLs mit HMAC-signierten Tokens. Inhaltseditoren können Entwürfe ohne Anmeldung in der Produktion vorschauen – einen Link teilen, keine Zugangsdaten.
+
+### Keine Plugin-Konflikte
+
+WordPress-Plugin-Konflikte verschwinden. EmDash-Plugins laufen in isolierten Kontexten mit expliziten APIs. Keine globale Zustandsverschmutzung.
+
+## Erfahrung für Inhaltseditoren
+
+Inhaltseditoren verwenden das EmDash-Admin-Oberfläche, ähnlich wie wp-admin:
+
+- **Dashboard** mit aktuellen Aktivitäten
+- **Sammlungslisten** mit Suche, Filter und Massenaktionen
+- **Rich-Editor** für Inhalte (Portable Text, nicht Gutenberg)
+- **Medienbibliothek** mit Drag-and-Drop-Upload
+- **Menü-Builder** mit Drag-and-Drop-Sortierung
+- **Widget-Bereich-Editor** für Sidebar-Inhalte
+
+Die Bearbeitungserfahrung ist vertraut. Die darunterliegende Technologie ist modern.
+
+## Migrationspfad
+
+EmDash importiert WordPress-Inhalte direkt:
+
+1. Von WordPress exportieren (Werkzeuge → Exportieren)
+2. Die `.xml`-Datei im EmDash-Admin hochladen
+3. Beitragstypen auf Sammlungen abbilden
+4. Inhalte und Medien importieren
+
+Beiträge, Seiten, Taxonomien, Menüs und Medien werden übertragen. Gutenberg-Blöcke werden in Portable Text konvertiert. Benutzerdefinierte Felder werden analysiert und abgebildet.
+
+Siehe die [WordPress-Migrationsanleitung](/de/migration/from-wordpress/) für vollständige Anweisungen.
+
+## Nächste Schritte
+
+- **[Erste Schritte](/de/getting-started/)** – Richten Sie Ihre erste EmDash-Website ein
+- **[Inhalte abfragen](/de/guides/querying-content/)** – Tiefere Einblicke in Content-APIs
+- **[Taxonomien](/de/guides/taxonomies/)** – Kategorien, Tags und benutzerdefinierte Taxonomien
+- **[Menüs](/de/guides/menus/)** – Navigationsmenüs
+- **[Von WordPress migrieren](/de/migration/from-wordpress/)** – Bestehende Inhalte importieren

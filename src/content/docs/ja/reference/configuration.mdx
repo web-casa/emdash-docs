@@ -1,0 +1,495 @@
+---
+title: 設定リファレンス
+description: EmDash設定オプションの完全なリファレンスです。
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDashは、統合用の`astro.config.mjs`とコンテンツコレクション用の`src/live.config.ts`の2つのファイルを通じて設定されます。
+
+## Astro統合
+
+EmDashをAstro統合として設定します：
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local, r2, s3 } from "emdash/astro";
+import { sqlite, libsql, d1 } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+			plugins: [],
+		}),
+	],
+});
+```
+
+## 統合オプション
+
+### `database`
+
+**必須。** データベースアダプターの設定。
+
+```js
+// SQLite (Node.js)
+database: sqlite({ url: "file:./data.db" });
+
+// PostgreSQL
+database: postgres({ connectionString: process.env.DATABASE_URL });
+
+// libSQL
+database: libsql({
+	url: process.env.LIBSQL_DATABASE_URL,
+	authToken: process.env.LIBSQL_AUTH_TOKEN,
+});
+
+// Cloudflare D1 (import from @emdash-cms/cloudflare)
+database: d1({ binding: "DB" });
+```
+
+詳細は[データベースオプション](/ja/deployment/database/)を参照してください。
+
+### `storage`
+
+**必須。** メディアストレージアダプターの設定。
+
+```js
+// Local filesystem (development)
+storage: local({
+	directory: "./uploads",
+	baseUrl: "/_emdash/api/media/file",
+});
+
+// R2 binding (Cloudflare Workers)
+storage: r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev", // optional
+});
+
+// S3互換 (任意のプラットフォーム)
+storage: s3({
+	endpoint: "https://s3.amazonaws.com",
+	bucket: "my-bucket",
+	accessKeyId: process.env.S3_ACCESS_KEY_ID,
+	secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+	region: "us-east-1", // optional, default: "auto"
+	publicUrl: "https://cdn.example.com", // optional
+});
+```
+
+詳細は[ストレージオプション](/ja/deployment/storage/)を参照してください。
+
+### `plugins`
+
+**オプション。** EmDashプラグインの配列。
+
+```js
+import seoPlugin from "@emdash-cms/plugin-seo";
+
+plugins: [seoPlugin()];
+```
+
+### `auth`
+
+**オプション。** 認証設定。
+
+```js
+auth: {
+  // Self-signup configuration
+  selfSignup: {
+    domains: ["example.com"],
+    defaultRole: 20, // Contributor
+  },
+  
+  // OAuth providers
+  oauth: {
+    github: {
+      clientId: process.env.GITHUB_CLIENT_ID,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET,
+    },
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    },
+  },
+  
+  // Session configuration
+  session: {
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+    sliding: true, // Reset expiry on activity
+  },
+  
+  // OR use Cloudflare Access (exclusive mode)
+  cloudflareAccess: {
+    teamDomain: "myteam.cloudflareaccess.com",
+    audience: "your-app-audience-tag",
+    autoProvision: true,
+    defaultRole: 30,
+    syncRoles: false,
+    roleMapping: {
+      "Admins": 50,
+      "Editors": 40,
+    },
+  },
+}
+```
+
+#### `auth.selfSignup`
+
+ユーザーのメールドメインが許可されている場合、自己登録を許可します。
+
+| オプション        | タイプ       | デフォルト | 説明               |
+| ------------- | ---------- | ------- | ------------------------- |
+| `domains`     | `string[]` | `[]`    | 許可されたメールドメイン     |
+| `defaultRole` | `number`   | `20`    | 自己登録ユーザーのロール     |
+
+```js
+selfSignup: {
+  domains: ["example.com", "acme.org"],
+  defaultRole: 20, // Contributor
+}
+```
+
+#### `auth.oauth`
+
+OAuthログインプロバイダーを設定します。
+
+```js
+oauth: {
+  github: {
+    clientId: process.env.GITHUB_CLIENT_ID,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET,
+  },
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  },
+}
+```
+
+#### `auth.session`
+
+セッション設定。
+
+| オプション    | タイプ      | デフォルト           | 説明                    |
+| --------- | --------- | ----------------- | ------------------------------ |
+| `maxAge`  | `number`  | `2592000` (30d)   | セッションの有効期間（秒）    |
+| `sliding` | `boolean` | `true`            | アクティビティ時に有効期限をリセット       |
+
+#### `auth.cloudflareAccess`
+
+パスキーの代わりにCloudflare Accessを認証プロバイダーとして使用します。
+
+| オプション          | タイプ      | デフォルト  | 説明                    |
+| --------------- | --------- | -------- | ------------------------------ |
+| `teamDomain`    | `string`  | required | あなたのAccessチームドメイン        |
+| `audience`      | `string`  | required | アプリケーションオーディエンス (AUD) タグ |
+| `autoProvision` | `boolean` | `true`   | 初回ログイン時にユーザーを作成    |
+| `defaultRole`   | `number`  | `30`     | 新規ユーザーのデフォルトロール     |
+| `syncRoles`     | `boolean` | `false`  | 各ログイン時にロールを更新      |
+| `roleMapping`   | `object`  | —        | IdPグループをロールにマッピング        |
+
+<Aside>
+	`cloudflareAccess`が設定されている場合、それが排他的な認証方法になります。パスキー、OAuth、
+	マジックリンク、および自己登録は無効になります。
+</Aside>
+
+### `passkeyPublicOrigin`
+
+**オプション。** 完全な**ブラウザ向けオリジン**（スキーム + ホスト + オプションポート、**パスなし**）を渡すことで、WebAuthnの**`rpId`**と**`origin`**がユーザーのブラウザが`clientData.origin`で送信するものと一致するようにします。
+
+デフォルトでは、パスキーは**`Astro.url`** / **`request.url`**に従います。**TLS終端リバースプロキシ**の背後では、アプリは内部ホップで**`http://`**`**を参照することが多く、タブは**`https://`**,`**であるか、再構築されたホストが公開名と一致しないため、パスキー検証が失敗します。`passkeyPublicOrigin`をユーザーがアドレスバーに入力するオリジン（例：`https://cms.example.com``または`https://cms.example.com:8443``）に設定してください。
+
+この統合は、ロード時にこの値を**検証**します：**`http:`**または**`https:`**プロトコルを持つ有効なURLでなければならず、**`origin`**に正規化されます。
+
+```js
+emdash({
+	database: sqlite({ url: "file:./data.db" }),
+	storage: local({
+		directory: "./uploads",
+		baseUrl: "/_emdash/api/media/file",
+	}),
+	passkeyPublicOrigin: "https://cms.example.com",
+});
+```
+
+#### リバースプロキシとパスキー
+
+Astroは、公開ホストが許可されている場合にのみ**`X-Forwarded-*`**を反映します。ユーザーがアクセスするホスト名（およびスキーム）に対して[**`security.allowedDomains`**](https://docs.astro.build/en/reference/configuration-reference/#securityalloweddomains)を設定してください。**`astro dev`**では、Viteがプロキシの**`Host`**ヘッダーを受け入れるように、一致する**`vite.server.allowedHosts`**を追加してください。
+
+まず**`allowedDomains`**（および転送ヘッダー）を修正することを推奨します。再構築されたURLが**依然として**ブラウザのオリジンと異なる場合（典型的にはTLSが前面で終端され、上流リクエストが**`http://`**`**のままである場合）に**`passkeyPublicOrigin`**を使用してください。
+
+前面にTLSがある場合、開発サーバーをループバックにバインドする（**`astro dev --host 127.0.0.1`**）ことがしばしば十分です：プロキシはローカルで接続し、**`passkeyPublicOrigin`**は公開HTTPSオリジンと一致します。
+
+<Aside type="caution">
+	非デフォルトポートを使用する場合、リバースプロキシは**ポートを考慮した**`Host` / `X-Forwarded-Host`を転送する必要があります。プロキシがポートを削除すると、**`rpId`**とAstroの再構築URLが誤る可能性があります。
+</Aside>
+
+```
+js title="astro.config.mjs (excerpt)"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	security: {
+		allowedDomains: [
+			{ hostname: "cms.example.com", protocol: "https" },
+			{ hostname: "cms.example.com", protocol: "http" },
+		],
+	},
+	vite: {
+		server: {
+			allowedHosts: ["cms.example.com"],
+		},
+	},
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+			passkeyPublicOrigin: "https://cms.example.com",
+		}),
+	],
+});
+```
+
+## データベースアダプター
+
+`emdash/db`からインポートします：
+
+```js
+import { sqlite, libsql, postgres, d1 } from "emdash/db";
+```
+
+### `sqlite(config)`
+
+better-sqlite3を使用するSQLiteデータベース。
+
+| オプション | タイプ     | 説明                   |
+| ------ | -------- | ----------------------------- |
+| `url`  | `string` | `file:`プレフィックス付きのファイルパス |
+
+```js
+sqlite({ url: "file:./data.db" });
+```
+
+### `libsql(config)`
+
+libSQLデータベース。
+
+| オプション      | タイプ     | 説明                           |
+| ----------- | -------- | ------------------------------------- |
+| `url`       | `string` | データベースURL                          |
+| `authToken` | `string` | 認証トークン（ローカルファイルの場合はオプション） |
+
+```js
+libsql({
+	url: process.env.LIBSQL_DATABASE_URL,
+	authToken: process.env.LIBSQL_AUTH_TOKEN,
+});
+```
+
+### `postgres(config)`
+
+接続プーリングを備えたPostgreSQLデータベース。
+
+| オプション             | タイプ      | 説明                          |
+| ------------------ | --------- | ------------------------------------ |
+| `connectionString` | `string`  | PostgreSQL接続URL            |
+| `host`             | `string`  | データベースホスト                        |
+| `port`             | `number`  | データベースポート                        |
+| `database`         | `string`  | データベース名                        |
+| `user`             | `string`  | データベースユーザー                        |
+| `password`         | `string`  | データベースパスワード                    |
+| `ssl`              | `boolean` | SSLを有効化                           |
+| `pool.min`         | `number`  | 最小プールサイズ（デフォルト: 0）       |
+| `pool.max`         | `number`  | 最大プールサイズ（デフォルト: 10）      |
+
+```js
+postgres({ connectionString: process.env.DATABASE_URL });
+```
+
+### `d1(config)`
+
+Cloudflare D1データベース。`@emdash-cms/cloudflare`からインポートします。
+
+| オプション           | 型       | デフォルト              | 説明                                         |
+| ---------------- | -------- | -------------------- | --------------------------------------------------- |
+| `binding`        | `string` | —                    | `wrangler.jsonc` からの D1 バインディング名               |
+| `session`        | `string` | `"disabled"`         | 読み取りレプリカモード: `"disabled"`、`"auto"`、または `"primary-first"` |
+| `bookmarkCookie` | `string` | `"__ec_d1_bookmark"` | セッションブックマーク用の Cookie 名                   |
+
+```js
+// Basic
+d1({ binding: "DB" });
+
+// 読み取りレプリカを使用する場合
+d1({ binding: "DB", session: "auto" });
+```
+
+`session` が `"auto"` または `"primary-first"` の場合、EmDash は D1 Sessions API を使用して読み取りクエリを近くのレプリカにルーティングします。認証済みユーザーはブックマークベースの「読み取り時書き込み一貫性」を取得します。詳細は [データベースオプション — 読み取りレプリカ](/ja/deployment/database/#read-replicas) を参照してください。
+
+<Aside type="caution">
+	D1 は Wrangler CLI によるマイグレーションが必要です。DDL ステートメントは実行時には許可されません。
+</Aside>
+
+## ストレージアダプター
+
+`emdash/astro` からインポート:
+
+```js
+import emdash, { local, r2, s3 } from "emdash/astro";
+```
+
+### `local(config)`
+
+ローカルファイルシステムストレージ。
+
+| オプション      | 型       | 説明                |
+| ----------- | -------- | -------------------------- |
+| `directory` | `string` | ディレクトリパス             |
+| `baseUrl`   | `string` | ファイル配信用のベース URL |
+
+```js
+local({
+	directory: "./uploads",
+	baseUrl: "/_emdash/api/media/file",
+});
+```
+
+### `r2(config)`
+
+Cloudflare R2 バインディング。
+
+| オプション      | 型       | 説明         |
+| ----------- | -------- | ------------------- |
+| `binding`   | `string` | R2 バインディング名     |
+| `publicUrl` | `string` | オプションの公開 URL |
+
+```js
+r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev",
+});
+```
+
+### `s3(config)`
+
+S3 互換ストレージ。
+
+| オプション            | 型       | 説明                |
+| ----------------- | -------- | -------------------------- |
+| `endpoint`        | `string` | S3 エンドポイント URL            |
+| `bucket`          | `string` | バケット名                |
+| `accessKeyId`     | `string` | アクセスキー                 |
+| `secretAccessKey` | `string` | シークレットキー                 |
+| `region`          | `string` | リージョン (デフォルト: `"auto"`) |
+| `publicUrl`       | `string` | オプションの CDN URL           |
+
+```js
+s3({
+	endpoint: "https://xxx.r2.cloudflarestorage.com",
+	bucket: "media",
+	accessKeyId: process.env.R2_ACCESS_KEY_ID,
+	secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+	publicUrl: "https://cdn.example.com",
+});
+```
+
+## ライブコレクション
+
+`src/live.config.ts` で EmDash ローダーを設定:
+
+```
+ts title="src/live.config.ts"
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({
+		loader: emdashLoader(),
+	}),
+};
+```
+
+### ローダーオプション
+
+`emdashLoader()` 関数はオプションの設定を受け付けます:
+
+```ts
+emdashLoader({
+	// Currently no options - reserved for future use
+});
+```
+
+## 環境変数
+
+EmDash は以下の環境変数を尊重します:
+
+| 変数名                  | 説明                              |
+| ------------------------- | ---------------------------------------- |
+| `EMDASH_DATABASE_URL`   | データベース URL を上書き                    |
+| `EMDASH_AUTH_SECRET`    | パスキー認証用のシークレット        |
+| `EMDASH_PREVIEW_SECRET` | プレビュートークン生成用のシークレット      |
+| `EMDASH_URL`            | スキーマ同期用のリモート EmDash URL      |
+
+認証シークレットを生成するには:
+
+```bash
+npx emdash auth secret
+```
+
+## package.json 設定
+
+`package.json` 内のオプション設定:
+
+```
+json title="package.json"
+{
+	"emdash": {
+			"label": "私のブログテンプレート",
+			"description": "すっきりしたミニマルなブログテンプレート",
+		"seed": ".emdash/seed.json",
+		"url": "https://my-site.pages.dev",
+		"preview": "https://emdash-blog.pages.dev"
+	}
+}
+```
+
+| オプション        | 説明                        |
+| ------------- | ---------------------------------- |
+| `label`       | 表示用のテンプレート名          |
+| `description` | テンプレートの説明               |
+| `seed`        | シード JSON ファイルへのパス             |
+| `url`         | スキーマ同期用のリモート URL         |
+| `preview`     | テンプレートプレビュー用のデモサイト URL |
+
+## TypeScript 設定
+
+EmDash は `.emdash/types.ts` に型を生成します。`tsconfig.json` に追加:
+
+```
+json title="tsconfig.json"
+{
+	"compilerOptions": {
+		"paths": {
+			"@emdash-cms/types": ["./.emdash/types.ts"]
+		}
+	}
+}
+```
+
+型を生成するには:
+
+```bash
+npx emdash types
+```

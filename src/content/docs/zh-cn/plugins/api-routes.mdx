@@ -1,0 +1,470 @@
+---
+title: 插件 API 路由
+description: 从您的插件暴露 REST 端点，供管理界面和外部集成使用。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+插件可以为其管理界面组件或外部集成暴露 API 路由。路由接收完整的插件上下文，并可以访问存储、KV、内容和媒体。
+
+<Aside type="note">
+	API 路由是**仅限受信任插件**的功能。沙盒插件无法定义自定义 REST 端点。请改用 Block Kit 管理页面和钩子。
+</Aside>
+
+## 定义路由
+
+在 `routes` 对象中定义路由：
+
+```typescript
+import { definePlugin } from "emdash";
+import { z } from "astro/zod";
+
+export default definePlugin({
+	id: "forms",
+	version: "1.0.0",
+
+	storage: {
+		submissions: {
+			indexes: ["formId", "status", "createdAt"],
+		},
+	},
+
+	routes: {
+		// Simple route
+		status: {
+			handler: async (ctx) => {
+				return { ok: true, plugin: ctx.plugin.id };
+			},
+		},
+
+		// Route with input validation
+		submissions: {
+			input: z.object({
+				formId: z.string().optional(),
+				limit: z.number().default(50),
+				cursor: z.string().optional(),
+			}),
+			handler: async (ctx) => {
+				const { formId, limit, cursor } = ctx.input;
+
+				const result = await ctx.storage.submissions!.query({
+					where: formId ? { formId } : undefined,
+					orderBy: { createdAt: "desc" },
+					limit,
+					cursor,
+				});
+
+				return {
+					items: result.items,
+					cursor: result.cursor,
+					hasMore: result.hasMore,
+				};
+			},
+		},
+	},
+});
+```
+
+## 路由 URL
+
+路由挂载在 `/_emdash/api/plugins/<plugin-id>/<route-name>`：
+
+| 插件 ID | 路由名称        | URL                                        |
+| --------- | --------------- | ------------------------------------------ |
+| `forms`   | `status`        | `/_emdash/api/plugins/forms/status`      |
+| `forms`   | `submissions`   | `/_emdash/api/plugins/forms/submissions` |
+| `seo`     | `settings/save` | `/_emdash/api/plugins/seo/settings/save` |
+
+路由名称可以包含斜杠以表示嵌套路径。
+
+## 路由处理器
+
+处理器接收一个包含插件上下文以及请求特定数据的 `RouteContext`：
+
+```typescript
+interface RouteContext extends PluginContext {
+	input: TInput; // Validated input (from body or query params)
+	request: Request; // Original Request object
+}
+```
+
+### 返回值
+
+返回任何可 JSON 序列化的值：
+
+```typescript
+// Object
+return { success: true, data: items };
+
+// Array
+return items;
+
+// Primitive
+return 42;
+```
+
+<Aside type="note">
+	路由始终返回 JSON。响应具有 `Content-Type: application/json`。
+</Aside>
+
+### 错误
+
+抛出错误以返回错误响应：
+
+```typescript
+handler: async (ctx) => {
+	const item = await ctx.storage.items!.get(ctx.input.id);
+
+	if (!item) {
+		throw new Error("Item not found");
+		// Returns: { "error": "Item not found" } with 500 status
+	}
+
+	return item;
+};
+```
+
+对于自定义状态码，抛出一个 `Response`：
+
+```typescript
+handler: async (ctx) => {
+	const item = await ctx.storage.items!.get(ctx.input.id);
+
+	if (!item) {
+		throw new Response(JSON.stringify({ error: "Not found" }), {
+			status: 404,
+			headers: { "Content-Type": "application/json" },
+		});
+	}
+
+	return item;
+};
+```
+
+## 输入验证
+
+使用 Zod 模式来验证和解析输入：
+
+```typescript
+import { z } from "astro/zod";
+
+routes: {
+  create: {
+    input: z.object({
+      title: z.string().min(1).max(200),
+      email: z.string().email(),
+      priority: z.enum(["low", "medium", "high"]).default("medium"),
+      tags: z.array(z.string()).optional()
+    }),
+    handler: async (ctx) => {
+      // ctx.input is typed and validated
+      const { title, email, priority, tags } = ctx.input;
+
+      await ctx.storage.items!.put(`item_${Date.now()}`, {
+        title,
+        email,
+        priority,
+        tags: tags ?? [],
+        createdAt: new Date().toISOString()
+      });
+
+      return { success: true };
+    }
+  }
+}
+```
+
+无效的输入会返回一个包含验证详情的 400 错误。
+
+### 输入源
+
+输入从以下位置解析：
+
+1. **POST/PUT/PATCH** — 请求体（JSON）
+2. **GET/DELETE** — URL 查询参数
+
+```typescript
+// POST /plugins/forms/create
+// Body: { "title": "Hello", "email": "user@example.com" }
+
+// GET /plugins/forms/list?limit=20&status=pending
+```
+
+## HTTP 方法
+
+路由响应所有 HTTP 方法。检查 `ctx.request.method` 以进行不同的处理：
+
+```typescript
+routes: {
+  item: {
+    input: z.object({
+      id: z.string()
+    }),
+    handler: async (ctx) => {
+      const { id } = ctx.input;
+
+      switch (ctx.request.method) {
+        case "GET":
+          return await ctx.storage.items!.get(id);
+
+        case "DELETE":
+          await ctx.storage.items!.delete(id);
+          return { deleted: true };
+
+        default:
+          throw new Response("Method not allowed", { status: 405 });
+      }
+    }
+  }
+}
+```
+
+## 访问请求
+
+完整的 `Request` 对象可用于高级用例：
+
+```typescript
+handler: async (ctx) => {
+	const { request } = ctx;
+
+	// Headers
+	const auth = request.headers.get("Authorization");
+
+	// URL parameters
+	const url = new URL(request.url);
+	const page = url.searchParams.get("page");
+
+	// Method
+	if (request.method !== "POST") {
+		throw new Response("POST required", { status: 405 });
+	}
+
+	// Body (if not using input schema)
+	const body = await request.json();
+};
+```
+
+## 常见模式
+
+### 设置路由
+
+暴露和更新插件设置：
+
+```typescript
+routes: {
+  settings: {
+    handler: async (ctx) => {
+      const settings = await ctx.kv.list("settings:");
+      const result: Record<string, unknown> = {};
+
+      for (const entry of settings) {
+        result[entry.key.replace("settings:", "")] = entry.value;
+      }
+
+      return result;
+    }
+  },
+
+  "settings/save": {
+    input: z.object({
+      enabled: z.boolean().optional(),
+      apiKey: z.string().optional(),
+      maxItems: z.number().optional()
+    }),
+    handler: async (ctx) => {
+      const input = ctx.input;
+
+      for (const [key, value] of Object.entries(input)) {
+        if (value !== undefined) {
+          await ctx.kv.set(`settings:${key}`, value);
+        }
+      }
+
+      return { success: true };
+    }
+  }
+}
+```
+
+### 分页列表
+
+返回带有基于游标导航的分页结果：
+
+```typescript
+routes: {
+  list: {
+    input: z.object({
+      limit: z.number().min(1).max(100).default(50),
+      cursor: z.string().optional(),
+      status: z.string().optional()
+    }),
+    handler: async (ctx) => {
+      const { limit, cursor, status } = ctx.input;
+
+      const result = await ctx.storage.items!.query({
+        where: status ? { status } : undefined,
+        orderBy: { createdAt: "desc" },
+        limit,
+        cursor
+      });
+
+      return {
+        items: result.items.map(item => ({
+          id: item.id,
+          ...item.data
+        })),
+        cursor: result.cursor,
+        hasMore: result.hasMore
+      };
+    }
+  }
+}
+```
+
+### 外部 API 代理
+
+代理请求到外部服务（需要 `network:fetch` 能力）：
+
+```typescript
+definePlugin({
+	id: "weather",
+	version: "1.0.0",
+
+	capabilities: ["network:fetch"],
+	allowedHosts: ["api.weather.example.com"],
+
+	routes: {
+		forecast: {
+			input: z.object({
+				city: z.string(),
+			}),
+			handler: async (ctx) => {
+				const apiKey = await ctx.kv.get<string>("settings:apiKey");
+
+				if (!apiKey) {
+					throw new Error("API key not configured");
+				}
+
+				const response = await ctx.http!.fetch(
+					`https://api.weather.example.com/forecast?city=${ctx.input.city}`,
+					{
+						headers: { "X-API-Key": apiKey },
+					},
+				);
+
+				if (!response.ok) {
+					throw new Error(`Weather API error: ${response.status}`);
+				}
+
+				return response.json();
+			},
+		},
+	},
+});
+```
+
+### 操作端点
+
+触发一次性操作：
+
+```typescript
+routes: {
+	sync: {
+		handler: async (ctx) => {
+			ctx.log.info("Starting sync...");
+
+			const startTime = Date.now();
+			let synced = 0;
+
+			// Do work...
+			const items = await fetchExternalItems(ctx);
+			for (const item of items) {
+				await ctx.storage.items!.put(item.id, item);
+				synced++;
+			}
+
+			const duration = Date.now() - startTime;
+			ctx.log.info("Sync complete", { synced, duration });
+
+			return {
+				success: true,
+				synced,
+				duration,
+			};
+		};
+	}
+}
+```
+
+## 从管理界面调用路由
+
+在管理组件中使用 `usePluginAPI()` 钩子：
+
+```typescript
+import { usePluginAPI } from "@emdash-cms/admin";
+
+function SettingsPage() {
+	const api = usePluginAPI();
+
+	const handleSave = async (settings) => {
+		await api.post("settings/save", settings);
+	};
+
+	const loadSettings = async () => {
+		return api.get("settings");
+	};
+}
+```
+
+该钩子会自动将插件 ID 前缀添加到路由 URL。
+
+## 从外部调用路由
+
+路由可通过其完整 URL 访问：
+
+```bash
+# GET request
+curl https://your-site.com/_emdash/api/plugins/forms/submissions?limit=10
+
+# POST request
+curl -X POST https://your-site.com/_emdash/api/plugins/forms/create \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Hello", "email": "user@example.com"}'
+```
+
+<Aside type="caution">
+	插件路由没有内置的身份验证。对于公共端点，请实现您自己的身份验证检查。对于仅限管理员的路由，管理员会话中间件提供保护。
+</Aside>
+
+## 路由上下文参考
+
+```typescript
+interface RouteContext<TInput = unknown> extends PluginContext {
+	/** Validated input from request body or query params */
+	input: TInput;
+
+	/** Original request object */
+	request: Request;
+
+	/** Plugin metadata */
+	plugin: { id: string; version: string };
+
+	/** Plugin storage collections */
+	storage: Record<string, StorageCollection>;
+
+	/** Key-value store */
+	kv: KVAccess;
+
+	/** Content access (if capability declared) */
+	content?: ContentAccess;
+
+	/** Media access (if capability declared) */
+	media?: MediaAccess;
+
+	/** HTTP client (if capability declared) */
+	http?: HttpAccess;
+
+	/** Structured logger */
+	log: LogAccess;
+}
+```

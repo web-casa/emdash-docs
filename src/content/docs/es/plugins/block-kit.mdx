@@ -1,0 +1,144 @@
+---
+title: Block Kit
+description: Bloques de interfaz de usuario declarativos para páginas de administración de complementos y widgets en entornos aislados.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+El Block Kit de EmDash permite que los plugins en sandbox describan su interfaz de administración como JSON. El host renderiza los bloques: nunca se ejecuta en el navegador JavaScript proporcionado por el plugin.
+
+<Aside>
+Los plugins de confianza (declarados en `astro.config.ts`) aún pueden incluir componentes personalizados de React. Block Kit es para plugins en sandbox instalados en tiempo de ejecución que no pueden ser confiables con acceso al DOM.
+</Aside>
+
+<Aside type="tip">
+Los elementos de Block Kit también se utilizan para [campos de edición de bloques de texto portátil](/es/plugins/creating-plugins/#portable-text-block-types). Cuando un plugin declara `fields` en un tipo de bloque, el editor renderiza un formulario de Block Kit para editar los datos del bloque (URL, título, parámetros, etc.).
+</Aside>
+
+## Cómo funciona
+
+1. El usuario navega a la página de administración de un plugin
+2. El administrador envía una interacción `page_load` a la ruta de administración del plugin
+3. El plugin devuelve un `BlockResponse` que contiene un array de bloques
+4. El administrador renderiza los bloques usando el componente `BlockRenderer`
+5. Cuando el usuario interactúa (hace clic en un botón, envía un formulario), el administrador envía la interacción de vuelta al plugin
+6. El plugin devuelve nuevos bloques, y el ciclo se repite
+
+```typescript
+// Manejador de la ruta de administración del plugin
+routes: {
+  admin: {
+    handler: async (ctx, { request }) => {
+      const interaction = await request.json();
+
+      if (interaction.type === "page_load") {
+        return {
+          blocks: [
+            { type: "header", text: "Ajustes del plugin" },
+            {
+              type: "form",
+              block_id: "settings",
+              fields: [
+                { type: "text_input", action_id: "api_url", label: "URL de la API" },
+                { type: "toggle", action_id: "enabled", label: "Activado", initial_value: true },
+              ],
+              submit: { label: "Guardar", action_id: "save" },
+            },
+          ],
+        };
+      }
+
+      if (interaction.type === "form_submit" && interaction.action_id === "save") {
+        await ctx.kv.set("settings", interaction.values);
+        return {
+          blocks: [/* ... bloques actualizados ... */],
+          toast: { message: "Ajustes guardados", type: "success" },
+        };
+      }
+    },
+  },
+}
+```
+
+## Tipos de bloques
+
+| Tipo | Descripción |
+|------|-------------|
+| `header` | Encabezado grande en negrita |
+| `section` | Texto con elemento accesorio opcional |
+| `divider` | Regla horizontal |
+| `fields` | Cuadrícula de etiqueta/valor de dos columnas |
+| `table` | Tabla de datos con formato, ordenación, paginación |
+| `actions` | Fila horizontal de botones y controles |
+| `stats` | Tarjetas de métricas de panel con indicadores de tendencia |
+| `form` | Campos de entrada con visibilidad condicional y envío |
+| `image` | Imagen a nivel de bloque con pie de foto |
+| `context` | Texto de ayuda pequeño y atenuado |
+| `columns` | Diseño de 2-3 columnas con bloques anidados |
+
+## Tipos de elementos
+
+| Tipo | Descripción |
+|------|-------------|
+| `button` | Botón de acción con diálogo de confirmación opcional |
+| `text_input` | Entrada de texto de una línea o múltiples líneas |
+| `number_input` | Entrada numérica con mínimo/máximo |
+| `select` | Selección desplegable |
+| `toggle` | Interruptor de encendido/apagado |
+| `secret_input` | Entrada enmascarada para claves de API y tokens |
+
+## Ayudantes de construcción
+
+El paquete `@emdash-cms/blocks` exporta ayudantes de construcción para un código más limpio:
+
+```typescript
+import { blocks, elements } from "@emdash-cms/blocks";
+
+const { header, form, section, stats } = blocks;
+const { textInput, toggle, select, button } = elements;
+
+return {
+  blocks: [
+    header("Configuración de SEO"),
+    form({
+      blockId: "settings",
+      fields: [
+        textInput("site_title", "Título del sitio", { initialValue: "Mi sitio" }),
+        toggle("generate_sitemap", "Generar mapa del sitio", { initialValue: true }),
+        select("robots", "Robots por defecto", [
+          { label: "Index, Follow", value: "index,follow" },
+          { label: "No indexar", value: "noindex,follow" },
+        ]),
+      ],
+      submit: { label: "Guardar", actionId: "save" },
+    }),
+  ],
+};
+```
+
+## Campos condicionales
+
+Los campos del formulario pueden mostrarse condicionalmente según los valores de otros campos:
+
+```json
+{
+  "type": "toggle",
+  "action_id": "auth_enabled",
+  "label": "Activar autenticación"
+}
+```
+
+```json
+{
+  "type": "secret_input",
+  "action_id": "api_key",
+  "label": "Clave API",
+  "condition": { "field": "auth_enabled", "eq": true }
+}
+```
+
+El campo `api_key` solo aparece cuando `auth_enabled` está activado. Las condiciones se evalúan en el lado del cliente sin ida y vuelta al servidor.
+
+## Pruébalo
+
+Usa el [Block Playground](https://emdash-blocks.cto.cloudflare.dev/) para construir y probar diseños de bloques de forma interactiva.

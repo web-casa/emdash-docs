@@ -1,0 +1,454 @@
+---
+title: 移植 WordPress 主题
+description: 使用结构化方法将 WordPress 主题转换为 EmDash 主题
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+WordPress 主题可以系统地转换为 EmDash 主题。视觉设计、内容结构和动态功能都可以通过一个三阶段方法进行迁移。
+
+<Aside type="tip" title="AI 辅助移植">
+	AI 编码代理擅长处理像模板移植这样的机械转换。将你的 WordPress 主题文件连同本指南中的概念映射表提供给代理，它可以生成一个 Astro 组件的可靠初稿。审查并优化输出结果——代理处理繁琐的部分，而你专注于质量。
+</Aside>
+
+## 三阶段方法
+
+<Steps>
+
+1. **设计提取**
+
+    从 WordPress 主题中提取 CSS 变量、字体、颜色和布局模式。分析实时网站以捕获计算后的样式和响应式断点。
+
+2. **模板转换**
+
+    将 PHP 模板转换为 Astro 组件。将 WordPress 模板层次结构映射到 Astro 路由，并将模板标签转换为 EmDash API 调用。
+
+3. **动态功能**
+
+    将导航菜单、小工具区域、分类法和站点设置移植到其对应的 EmDash 等效项。创建一个种子文件来捕获完整的内容模型。
+
+</Steps>
+
+## 阶段 1：设计提取
+
+### 定位 CSS 和设计令牌
+
+| 文件          | 用途                                     |
+| ------------- | ------------------------------------------ |
+| `style.css`   | 包含主题头部信息的主样式表          |
+| `assets/css/` | 额外的样式表                     |
+| `theme.json`  | 区块主题 (WP 5.9+) - 结构化令牌 |
+
+### 提取设计令牌
+
+| WordPress 模式 | EmDash 变量  |
+| ----------------- | ------------------ |
+| 正文字体族  | `--font-body`      |
+| 标题字体      | `--font-heading`   |
+| 主色调     | `--color-primary`  |
+| 背景色        | `--color-base`     |
+| 文本颜色        | `--color-contrast` |
+| 内容宽度     | `--content-width`  |
+
+### 创建基础布局
+
+使用提取的 CSS 变量、页头/页脚结构、字体加载和响应式断点创建 `src/layouts/Base.astro`：
+
+```astro title="src/layouts/Base.astro"
+---
+import { getSiteSettings, getMenu } from "emdash";
+import "../styles/global.css";
+
+const { title, description } = Astro.props;
+const settings = await getSiteSettings();
+const primaryMenu = await getMenu("primary");
+const pageTitle = title ? `${title} | ${settings.title}` : settings.title;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <header>
+      {settings.logo ? (
+        <img src={settings.logo.url} alt={settings.title} />
+      ) : (
+        <span>{settings.title}</span>
+      )}
+      <nav>
+        {primaryMenu?.items.map((item) => (
+          <a href={item.url}>{item.label}</a>
+        ))}
+      </nav>
+    </header>
+    <main><slot /></main>
+  </body>
+</html>
+```
+
+## 阶段 2：模板转换
+
+### 模板层次结构映射
+
+| WordPress 模板          | Astro 路由                         |
+| --------------------------- | ----------------------------------- |
+| `index.php`                 | `src/pages/index.astro`             |
+| `single.php`                | `src/pages/posts/[slug].astro`      |
+| `single-{post_type}.php`    | `src/pages/{type}/[slug].astro`     |
+| `page.php`                  | `src/pages/[...slug].astro`         |
+| `archive.php`               | `src/pages/posts/index.astro`       |
+| `category.php`              | `src/pages/categories/[slug].astro` |
+| `tag.php`                   | `src/pages/tags/[slug].astro`       |
+| `search.php`                | `src/pages/search.astro`            |
+| `404.php`                   | `src/pages/404.astro`               |
+| `header.php` / `footer.php` | 作为 `src/layouts/Base.astro` 的一部分    |
+| `sidebar.php`               | `src/components/Sidebar.astro`      |
+
+### 模板标签映射
+
+| WordPress 函数            | EmDash 等效项                          |
+| ----------------------------- | -------------------------------------------- |
+| `have_posts()` / `the_post()` | `getEmDashCollection()`                    |
+| `get_post()`                  | `getEmDashEntry()`                         |
+| `the_title()`                 | `post.data.title`                            |
+| `the_content()`               | `<PortableText value={post.data.content} />` |
+| `the_excerpt()`               | `post.data.excerpt`                          |
+| `the_permalink()`             | `/posts/${post.slug}`                        |
+| `the_post_thumbnail()`        | `post.data.featured_image`                   |
+| `get_the_date()`              | `post.data.publishedAt`                      |
+| `get_the_category()`          | `getEntryTerms(coll, id, "categories")`      |
+| `get_the_tags()`              | `getEntryTerms(coll, id, "tags")`            |
+
+### 转换主循环
+
+<Tabs>
+<TabItem label="WordPress">
+```php title="archive.php"
+<?php while (have_posts()) : the_post(); ?>
+  <article>
+    <h2><a href="<?php the_permalink(); ?>"><?php the_title(); ?></a></h2>
+    <?php the_excerpt(); ?>
+  </article>
+<?php endwhile; ?>
+```
+</TabItem>
+<TabItem label="EmDash">
+```astro title="src/pages/posts/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import Base from "../../layouts/Base.astro";
+
+const { entries: posts } = await getEmDashCollection("posts", {
+where: { status: "published" },
+orderBy: { publishedAt: "desc" },
+});
+
+---
+
+<Base title="Blog">
+  {posts.map((post) => (
+    <article>
+      <h2><a href={`/posts/${post.slug}`}>{post.data.title}</a></h2>
+      <p>{post.data.excerpt}</p>
+    </article>
+  ))}
+</Base>
+```
+</TabItem>
+</Tabs>
+
+### 转换单篇文章模板
+
+<Tabs>
+<TabItem label="WordPress">
+```php title="single.php"
+<?php get_header(); ?>
+<article>
+  <h1><?php the_title(); ?></h1>
+  <?php the_content(); ?>
+  <div class="post-meta">
+    Posted in: <?php the_category(', '); ?>
+  </div>
+</article>
+<?php get_footer(); ?>
+```
+</TabItem>
+<TabItem label="EmDash">
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEntryTerms } from "emdash";
+import { PortableText } from "emdash/ui";
+import Base from "../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+	const { entries: posts } = await getEmDashCollection("posts");
+	return posts.map((post) => ({
+		params: { slug: post.slug },
+		props: { post },
+	}));
+}
+
+const { post } = Astro.props;
+const categories = await getEntryTerms("posts", post.id, "categories");
+
+---
+
+<Base title={post.data.title}>
+  <article>
+    <h1>{post.data.title}</h1>
+    <PortableText value={post.data.content} />
+    <div class="post-meta">
+      Posted in: {categories.map((cat) => (
+        <a href={`/categories/${cat.slug}`}>{cat.label}</a>
+      ))}
+    </div>
+  </article>
+</Base>
+```
+</TabItem>
+</Tabs>
+
+### 转换模板部件
+
+WordPress 的 `get_template_part()` 调用变为 Astro 组件导入。`template-parts/content-post.php` 部分模板变为一个 `PostCard.astro` 组件，你可以在循环中导入并渲染它。
+
+## 阶段 3：动态功能
+
+### 导航菜单
+
+在 `functions.php` 中识别菜单并创建对应的 EmDash 菜单：
+
+```astro title="src/components/PrimaryNav.astro"
+---
+import { getMenu } from "emdash";
+
+const menu = await getMenu("primary");
+---
+
+{menu && (
+  <nav class="primary-nav">
+    <ul>
+      {menu.items.map((item) => (
+        <li>
+          <a href={item.url} aria-current={Astro.url.pathname === item.url ? "page" : undefined}>
+            {item.label}
+          </a>
+          {item.children.length > 0 && (
+            <ul class="submenu">
+              {item.children.map((child) => (
+                <li><a href={child.url}>{child.label}</a></li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+```
+
+### 小工具区域（侧边栏）
+
+识别主题中的小工具区域并渲染它们：
+
+```astro title="src/components/Sidebar.astro"
+---
+import { getWidgetArea, getMenu } from "emdash";
+import { PortableText } from "emdash/ui";
+import RecentPosts from "./widgets/RecentPosts.astro";
+
+const sidebar = await getWidgetArea("sidebar");
+const widgetComponents = { "core:recent-posts": RecentPosts };
+---
+
+{sidebar && sidebar.widgets.length > 0 && (
+  <aside class="sidebar">
+    {sidebar.widgets.map(async (widget) => (
+      <div class="widget">
+        {widget.title && <h3>{widget.title}</h3>}
+        {widget.type === "content" && <PortableText value={widget.content} />}
+        {widget.type === "menu" && (
+          <nav>
+            {await getMenu(widget.menuName).then((m) =>
+              m?.items.map((item) => <a href={item.url}>{item.label}</a>)
+            )}
+          </nav>
+        )}
+        {widget.type === "component" && widgetComponents[widget.componentId] && (
+          <Fragment>
+            {(() => {
+              const Component = widgetComponents[widget.componentId];
+              return <Component {...widget.componentProps} />;
+            })()}
+          </Fragment>
+        )}
+      </div>
+    ))}
+  </aside>
+)}
+```
+
+### 小工具类型映射
+
+| WordPress 小工具 | EmDash 小工具类型             |
+| ---------------- | -------------------------------- |
+| 文本/自定义 HTML | `type: "content"`                |
+| 自定义菜单      | `type: "menu"`                   |
+| 近期文章     | `component: "core:recent-posts"` |
+| 分类目录       | `component: "core:categories"`   |
+| 标签云        | `component: "core:tag-cloud"`    |
+| 搜索           | `component: "core:search"`       |
+
+### 分类法
+
+查询主题中注册的分类法：
+
+```astro title="src/pages/genres/[slug].astro"
+---
+import { getTaxonomyTerms, getEntriesByTerm } from "emdash";
+import Base from "../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+  const genres = await getTaxonomyTerms("genre");
+  return genres.map((genre) => ({
+    params: { slug: genre.slug },
+    props: { genre },
+  }));
+}
+
+const { genre } = Astro.props;
+const books = await getEntriesByTerm("books", "genre", genre.slug);
+---
+
+<Base title={genre.label}>
+  <h1>{genre.label}</h1>
+  {books.map((book) => (
+    <article>
+      <h2><a href={`/books/${book.slug}`}>{book.data.title}</a></h2>
+    </article>
+  ))}
+</Base>
+```
+
+### 站点设置映射
+
+| WordPress 定制器 | EmDash 设置 |
+| -------------------- | ---------------- |
+| 站点标题           | `title`          |
+| 副标题              | `tagline`        |
+| 站点图标            | `favicon`        |
+| 自定义 Logo          | `logo`           |
+| 每页文章数       | `postsPerPage`   |
+
+## 简码到 Portable Text
+
+WordPress 简码变为 Portable Text 自定义区块：
+
+<Tabs>
+<TabItem label="WordPress">
+```php title="functions.php"
+add_shortcode('gallery', function($atts) {
+  $ids = explode(',', $atts['ids']);
+  return '<div class="gallery">...</div>';
+});
+```
+</TabItem>
+<TabItem label="EmDash">
+```astro title="src/components/blocks/Gallery.astro"
+---
+const { images } = Astro.props;
+---
+
+<div class="gallery">
+	{images.map((img) => (
+		<img src={img.url} alt={img.alt || ""} loading="lazy" />
+	))}
+</div>
+```
+
+使用 PortableText 注册：
+
+```astro
+<PortableText value={content} components={{ gallery: Gallery }} />
+```
+
+</TabItem>
+</Tabs>
+
+## 种子文件结构
+
+在种子文件中捕获完整的内容模型。包括设置、分类法、菜单和小工具区域：
+
+```json title=".emdash/seed.json"
+{
+	"$schema": "https://emdashcms.com/seed.schema.json",
+	"version": "1",
+	"meta": { "name": "Ported Theme" },
+	"settings": { "title": "My Site", "tagline": "Welcome", "postsPerPage": 10 },
+	"taxonomies": [
+		{
+			"name": "category",
+			"label": "Categories",
+			"hierarchical": true,
+			"collections": ["posts"]
+		}
+	],
+	"menus": [
+		{
+			"name": "primary",
+			"label": "Primary Navigation",
+			"items": [
+				{ "type": "custom", "label": "Home", "url": "/" },
+				{ "type": "custom", "label": "Blog", "url": "/posts" }
+			]
+		}
+	],
+	"widgetAreas": [
+		{
+			"name": "sidebar",
+			"label": "Main Sidebar",
+			"widgets": [
+				{
+					"type": "component",
+					"componentId": "core:recent-posts",
+					"props": { "count": 5 }
+				}
+			]
+		}
+	]
+}
+```
+
+有关完整规范，请参阅 [种子文件格式](/zh-cn/themes/seed-files/)。
+
+## 移植检查清单
+
+**阶段 1 (设计)：** CSS 变量已提取，字体加载正常，配色方案匹配，响应式断点工作正常。
+
+**阶段 2 (模板)：** 首页、单篇文章、归档页和 404 页面均能正确渲染。
+
+**阶段 3 (动态)：** 站点设置已配置，菜单功能正常，分类法可查询，小工具区域正常渲染，种子文件完整。
+
+## 边缘情况
+
+### 子主题
+
+如果主题有父主题（检查 `style.css` 中的 `Template:`），请先分析父主题，然后应用子主题的覆盖。
+
+### 区块主题 (FSE)
+
+WordPress 5.9+ 的区块主题使用 `theme.json` 存储设计令牌，使用 `templates/*.html` 存储区块标记。将区块标记转换为 Astro 组件，并从 `theme.json` 中提取令牌。
+
+### 页面构建器
+
+使用 Elementor、Divi 或类似工具构建的内容存储在文章元数据中，而非主题文件中。这些内容通过 WXR 导入，而非主题移植。将主题移植的重点放在外壳上——页面构建器内容在导入后通过 Portable Text 渲染。
+
+## 后续步骤
+
+-   **[创建主题](/zh-cn/themes/creating-themes/)** — 构建可分发的 EmDash 主题
+-   **[种子文件格式](/zh-cn/themes/seed-files/)** — 完整的种子文件规范
+-   **[从 WordPress 迁移](/zh-cn/migration/from-wordpress/)** — 导入 WordPress 内容

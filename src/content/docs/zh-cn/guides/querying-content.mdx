@@ -1,0 +1,405 @@
+---
+title: 查询内容
+description: 在模板中使用 getEmDashCollection 和 getEmDashEntry 来检索内容。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+EmDash 提供了查询函数，用于在您的 Astro 页面和组件中检索内容。这些函数遵循 Astro 的 [实时内容集合](https://docs.astro.build/en/reference/experimental-flags/live-content-collections/) 模式，返回带有错误处理的结构化结果。
+
+## 查询函数
+
+EmDash 导出两个主要的查询函数：
+
+| 函数                | 用途                                 | 返回类型                       |
+| ----------------------- | -------------------------------------- | ----------------------------- |
+| `getEmDashCollection` | 检索某个内容类型的所有条目 | `{ entries, error }`          |
+| `getEmDashEntry`      | 通过 ID 或 slug 检索单个条目  | `{ entry, error, isPreview }` |
+
+从 `emdash` 导入它们：
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+```
+
+## 获取所有条目
+
+使用 `getEmDashCollection` 检索某个内容类型的所有条目：
+
+```astro title="src/pages/posts.astro"
+---
+import { getEmDashCollection } from "emdash";
+
+const { entries: posts, error } = await getEmDashCollection("posts");
+
+if (error) {
+  console.error("Failed to load posts:", error);
+}
+---
+
+<ul>
+  {posts.map((post) => (
+    <li>{post.data.title}</li>
+  ))}
+</ul>
+```
+
+<Aside>
+  解构语法 `{ entries: posts }` 将 `entries` 重命名为 `posts` 以使代码更清晰。直接使用 `{ entries }` 也可以。
+</Aside>
+
+### 按语言区域过滤
+
+当 [启用了 i18n](/zh-cn/guides/internationalization/) 时，按语言区域过滤以检索特定语言的内容：
+
+```ts
+// French posts
+const { entries: frenchPosts } = await getEmDashCollection("posts", {
+	locale: "fr",
+	status: "published",
+});
+
+// Use the current request locale
+const { entries: localizedPosts } = await getEmDashCollection("posts", {
+	locale: Astro.currentLocale,
+	status: "published",
+});
+```
+
+对于单个条目，将 `locale` 作为第三个参数传递：
+
+```ts
+const { entry: post } = await getEmDashEntry("posts", "my-post", {
+	locale: Astro.currentLocale,
+});
+```
+
+当省略 `locale` 时，它默认为请求的当前语言区域。如果请求的语言区域没有翻译，则会遵循 [回退链](/zh-cn/guides/internationalization/#fallback-chain)。
+
+### 按状态过滤
+
+仅检索已发布或草稿内容：
+
+```ts
+// Only published posts
+const { entries: published } = await getEmDashCollection("posts", {
+	status: "published",
+});
+
+// Only drafts
+const { entries: drafts } = await getEmDashCollection("posts", {
+	status: "draft",
+});
+```
+
+<Aside type="tip">
+	对于面向公众的页面，始终使用 `status: "published"` 进行过滤。草稿内容应仅在管理界面或预览模式下可访问。
+</Aside>
+
+### 限制结果数量
+
+限制返回的条目数量：
+
+```ts
+// Get the 5 most recent posts
+const { entries: recentPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	limit: 5,
+});
+```
+
+### 按分类法过滤
+
+按类别、标签或自定义分类法术语过滤条目：
+
+```ts
+// Posts in the "news" category
+const { entries: newsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: "news" },
+});
+
+// Posts with the "javascript" tag
+const { entries: jsPosts } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { tag: "javascript" },
+});
+
+// Posts matching any of multiple terms
+const { entries: featuredNews } = await getEmDashCollection("posts", {
+	status: "published",
+	where: { category: ["news", "featured"] },
+});
+```
+
+当为单个分类法提供多个值时，`where` 过滤器使用 OR 逻辑。
+
+### 错误处理
+
+当可靠性很重要时，请务必检查错误：
+
+```ts
+const { entries: posts, error } = await getEmDashCollection("posts");
+
+if (error) {
+	// Log and handle gracefully
+	console.error("Failed to load posts:", error);
+	return new Response("Server error", { status: 500 });
+}
+```
+
+## 获取单个条目
+
+使用 `getEmDashEntry` 通过其 ID 或 slug 检索一个条目：
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+import { PortableText } from "emdash/ui";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!post) {
+  return Astro.redirect("/404");
+}
+---
+
+<article>
+  <h1>{post.data.title}</h1>
+  <PortableText value={post.data.content} />
+</article>
+```
+
+### 条目返回类型
+
+`getEmDashEntry` 返回一个结果对象：
+
+```ts
+interface EntryResult<T> {
+	entry: ContentEntry<T> | null; // null if not found
+	error?: Error; // Only set for actual errors (not "not found")
+	isPreview: boolean; // true if viewing preview/draft content
+}
+
+interface ContentEntry<T> {
+	id: string;
+	data: T;
+	edit: EditProxy; // Visual editing annotations
+}
+```
+
+`entry` 内的 `data` 对象包含为该内容类型定义的所有字段。`edit` 代理提供可视化编辑注解（见下文）。
+
+## 预览模式
+
+EmDash 通过中间件自动处理预览。当 URL 包含有效的 `_preview` 令牌时，中间件会验证它并设置请求上下文。然后，您的查询函数无需任何特殊参数即可提供草稿内容：
+
+```astro title="src/pages/posts/[...slug].astro"
+---
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+
+// No special preview handling needed — middleware does it automatically
+const { entry, isPreview, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!entry) {
+  return Astro.redirect("/404");
+}
+---
+
+{isPreview && (
+  <div class="preview-banner">
+    Viewing preview. This content is not published.
+  </div>
+)}
+
+<article>
+  <h1>{entry.data.title}</h1>
+  <PortableText value={entry.data.content} />
+</article>
+```
+
+<Aside>
+	在环境变量中设置 `EMDASH_PREVIEW_SECRET`。管理界面会生成包含 HMAC 签名的 `_preview` 令牌的预览 URL。
+</Aside>
+
+## 可视化编辑
+
+查询函数返回的每个条目都包含一个 `edit` 代理，用于注解您的模板。将其展开到元素上，以便为经过身份验证的编辑者启用内联编辑：
+
+```astro
+<article {...entry.edit}>
+  <h1 {...entry.edit.title}>{entry.data.title}</h1>
+  <div {...entry.edit.content}>
+    <PortableText value={entry.data.content} />
+  </div>
+</article>
+```
+
+在编辑模式下，`{...entry.edit.title}` 会生成一个 `data-emdash-ref` 属性，可视化编辑工具栏使用该属性来启用内联编辑。在生产环境中，代理展开不会产生任何输出——零运行时成本。
+
+<Aside type="tip">
+	对于字符串和文本字段，内联编辑使用 `contenteditable`。对于 Portable Text 字段，它会注入一个 TipTap 编辑器。对于图像字段，它会打开一个媒体库弹出窗口。
+</Aside>
+
+## 排序结果
+
+`getEmDashCollection` 不保证排序顺序。在您的模板中对结果进行排序：
+
+```ts
+const { entries: posts } = await getEmDashCollection("posts", {
+	status: "published",
+});
+
+// Sort by publication date, newest first
+const sorted = posts.sort(
+	(a, b) => (b.data.publishedAt?.getTime() ?? 0) - (a.data.publishedAt?.getTime() ?? 0),
+);
+```
+
+### 常见排序模式
+
+```ts
+// Alphabetical by title
+posts.sort((a, b) => a.data.title.localeCompare(b.data.title));
+
+// By custom order field
+posts.sort((a, b) => (a.data.order ?? 0) - (b.data.order ?? 0));
+
+// Random order
+posts.sort(() => Math.random() - 0.5);
+```
+
+## TypeScript 类型
+
+为您的集合生成 TypeScript 类型：
+
+```bash
+npx emdash types
+```
+
+这将创建 `.emdash/types.ts`，其中包含每个集合的接口。使用它们以获得类型安全：
+
+```ts
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+import type { Post } from "../.emdash/types";
+
+// Type-safe collection query
+const { entries: posts } = await getEmDashCollection<Post>("posts");
+// posts is ContentEntry<Post>[]
+
+// Type-safe entry query
+const { entry: post } = await getEmDashEntry<Post>("posts", "my-post");
+// post is ContentEntry<Post> | null
+```
+
+## 静态渲染与服务器渲染
+
+EmDash 内容适用于静态渲染和服务器渲染的页面。
+
+### 静态（预渲染）
+
+对于静态页面，使用 `getStaticPaths` 在构建时生成路由：
+
+```astro title="src/pages/posts/[slug].astro"
+---
+import { getEmDashCollection, getEmDashEntry } from "emdash";
+
+export async function getStaticPaths() {
+  const { entries: posts } = await getEmDashCollection("posts", {
+    status: "published",
+  });
+
+  return posts.map((post) => ({
+    params: { slug: post.data.slug },
+  }));
+}
+
+const { slug } = Astro.params;
+const { entry: post } = await getEmDashEntry("posts", slug);
+---
+```
+
+### 服务器渲染
+
+对于服务器渲染的页面，直接查询内容：
+
+```astro title="src/pages/posts/[slug].astro"
+---
+export const prerender = false;
+
+import { getEmDashEntry } from "emdash";
+
+const { slug } = Astro.params;
+const { entry: post, error } = await getEmDashEntry("posts", slug);
+
+if (error) {
+  return new Response("Server error", { status: 500 });
+}
+
+if (!post) {
+  return new Response(null, { status: 404 });
+}
+---
+```
+
+<Aside type="tip">
+	服务器渲染可以立即显示内容更改而无需重新构建。对于频繁更新的内容，请使用它。
+</Aside>
+
+## 性能考虑
+
+### 缓存
+
+EmDash 使用 Astro 的实时内容集合，它会自动处理缓存。对于服务器渲染的页面，请考虑添加 HTTP 缓存头：
+
+```astro
+---
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+});
+
+// Cache for 5 minutes
+Astro.response.headers.set("Cache-Control", "public, max-age=300");
+---
+```
+
+### 避免冗余查询
+
+查询一次并将数据传递给组件：
+
+```astro title="src/pages/index.astro"
+---
+import { getEmDashCollection } from "emdash";
+import PostList from "../components/PostList.astro";
+import Sidebar from "../components/Sidebar.astro";
+
+// Query once
+const { entries: posts } = await getEmDashCollection("posts", {
+  status: "published",
+});
+
+const featured = posts.filter((p) => p.data.featured);
+const recent = posts.slice(0, 5);
+---
+
+<PostList posts={featured} />
+<Sidebar posts={recent} />
+```
+
+## 后续步骤
+
+- [创建博客](/zh-cn/guides/create-a-blog/) - 构建一个完整的博客
+- [分类法](/zh-cn/guides/taxonomies/) - 按类别和标签过滤
+- [处理内容](/zh-cn/guides/working-with-content/) - 管理界面的 CRUD 操作
+- [国际化](/zh-cn/guides/internationalization/) - 多语言内容和翻译

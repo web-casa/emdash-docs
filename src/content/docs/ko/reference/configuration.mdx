@@ -1,0 +1,495 @@
+---
+title: 설정 참조
+description: EmDash 설정 옵션에 대한 완전한 참조입니다.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+EmDash는 두 개의 파일을 통해 구성됩니다: 통합을 위한 `astro.config.mjs`와 콘텐츠 컬렉션을 위한 `src/live.config.ts`입니다.
+
+## Astro 통합
+
+EmDash를 Astro 통합으로 구성합니다:
+
+```js title="astro.config.mjs"
+import { defineConfig } from "astro/config";
+import emdash, { local, r2, s3 } from "emdash/astro";
+import { sqlite, libsql, d1 } from "emdash/db";
+
+export default defineConfig({
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+			plugins: [],
+		}),
+	],
+});
+```
+
+## 통합 옵션
+
+### `database`
+
+**필수.** 데이터베이스 어댑터 구성입니다.
+
+```js
+// SQLite (Node.js)
+database: sqlite({ url: "file:./data.db" });
+
+// PostgreSQL
+database: postgres({ connectionString: process.env.DATABASE_URL });
+
+// libSQL
+database: libsql({
+	url: process.env.LIBSQL_DATABASE_URL,
+	authToken: process.env.LIBSQL_AUTH_TOKEN,
+});
+
+// Cloudflare D1 (@emdash-cms/cloudflare에서 임포트)
+database: d1({ binding: "DB" });
+```
+
+자세한 내용은 [데이터베이스 옵션](/ko/deployment/database/)을 참조하세요.
+
+### `storage`
+
+**필수.** 미디어 저장소 어댑터 구성입니다.
+
+```js
+// Local filesystem (development)
+storage: local({
+	directory: "./uploads",
+	baseUrl: "/_emdash/api/media/file",
+});
+
+// R2 바인딩 (Cloudflare Workers)
+storage: r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev", // optional
+});
+
+// S3 호환 (모든 플랫폼)
+storage: s3({
+	endpoint: "https://s3.amazonaws.com",
+	bucket: "my-bucket",
+	accessKeyId: process.env.S3_ACCESS_KEY_ID,
+	secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+	region: "us-east-1", // optional, default: "auto"
+	publicUrl: "https://cdn.example.com", // optional
+});
+```
+
+자세한 내용은 [저장소 옵션](/ko/deployment/storage/)을 참조하세요.
+
+### `plugins`
+
+**선택 사항.** EmDash 플러그인 배열입니다.
+
+```js
+import seoPlugin from "@emdash-cms/plugin-seo";
+
+plugins: [seoPlugin()];
+```
+
+### `auth`
+
+**선택 사항.** 인증 구성입니다.
+
+```js
+auth: {
+  // Self-signup configuration
+  selfSignup: {
+    domains: ["example.com"],
+    defaultRole: 20, // Contributor
+  },
+  
+  // OAuth providers
+  oauth: {
+    github: {
+      clientId: process.env.GITHUB_CLIENT_ID,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET,
+    },
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    },
+  },
+  
+  // Session configuration
+  session: {
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+    sliding: true, // Reset expiry on activity
+  },
+  
+  // OR use Cloudflare Access (exclusive mode)
+  cloudflareAccess: {
+    teamDomain: "myteam.cloudflareaccess.com",
+    audience: "your-app-audience-tag",
+    autoProvision: true,
+    defaultRole: 30,
+    syncRoles: false,
+    roleMapping: {
+      "Admins": 50,
+      "Editors": 40,
+    },
+  },
+}
+```
+
+#### `auth.selfSignup`
+
+사용자의 이메일 도메인이 허용된 경우 자체 등록을 허용합니다.
+
+| 옵션        | 타입       | 기본값 | 설명               |
+| ------------- | ---------- | ------- | ------------------------- |
+| `domains`     | `string[]` | `[]`    | 허용된 이메일 도메인     |
+| `defaultRole` | `number`   | `20`    | 자체 등록 사용자의 역할     |
+
+```js
+selfSignup: {
+  domains: ["example.com", "acme.org"],
+  defaultRole: 20, // Contributor
+}
+```
+
+#### `auth.oauth`
+
+OAuth 로그인 공급자를 구성합니다.
+
+```js
+oauth: {
+  github: {
+    clientId: process.env.GITHUB_CLIENT_ID,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET,
+  },
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  },
+}
+```
+
+#### `auth.session`
+
+세션 구성입니다.
+
+| 옵션    | 타입      | 기본값           | 설명                    |
+| --------- | --------- | ----------------- | ------------------------------ |
+| `maxAge`  | `number`  | `2592000` (30일)   | 세션 수명(초 단위)    |
+| `sliding` | `boolean` | `true`            | 활동 시 만료 시간 재설정       |
+
+#### `auth.cloudflareAccess`
+
+패스키 대신 Cloudflare Access를 인증 공급자로 사용합니다.
+
+| 옵션          | 타입      | 기본값  | 설명                    |
+| --------------- | --------- | -------- | ------------------------------ |
+| `teamDomain`    | `string`  | 필수 | 귀하의 Access 팀 도메인        |
+| `audience`      | `string`  | 필수 | 애플리케이션 대상 (AUD) 태그 |
+| `autoProvision` | `boolean` | `true`   | 첫 로그인 시 사용자 생성    |
+| `defaultRole`   | `number`  | `30`     | 새 사용자의 기본 역할     |
+| `syncRoles`     | `boolean` | `false`  | 각 로그인 시 역할 업데이트      |
+| `roleMapping`   | `object`  | —        | IdP 그룹을 역할에 매핑        |
+
+<Aside>
+	`cloudflareAccess`가 구성되면, 이는 독점적인 인증 방법이 됩니다. 패스키, OAuth,
+	매직 링크 및 자체 등록은 비활성화됩니다.
+</Aside>
+
+### `passkeyPublicOrigin`
+
+**선택 사항.** 완전한 **브라우저가 접근하는 오리진**(스킴 + 호스트 + 선택적 포트, **경로 없음**)을 전달하여 WebAuthn **`rpId`** 및 **`origin`**이 사용자 브라우저가 `clientData.origin`에서 보내는 것과 일치하도록 합니다.
+
+기본적으로 패스키는 **`Astro.url`** / **`request.url`**을 따릅니다. **TLS 종료 리버스 프록시** 뒤에서 앱은 종종 내부 홉에서 **`http://`**을 보는 반면, 브라우저 탭은 **`https://`**,이거나 재구성된 호스트가 공개 이름과 일치하지 않아 패스키 검증이 실패합니다. `passkeyPublicOrigin`을 사용자가 주소창에 입력하는 오리진(예: `https://cms.example.com` 또는 `https://cms.example.com:8443`)으로 설정하세요.
+
+통합은 로드 시 이 값을 **검증**합니다: 유효한 URL이어야 하며 **`http:`** 또는 **`https:`** 프로토콜을 가져야 하고 **`origin`**으로 정규화됩니다.
+
+```js
+emdash({
+	database: sqlite({ url: "file:./data.db" }),
+	storage: local({
+		directory: "./uploads",
+		baseUrl: "/_emdash/api/media/file",
+	}),
+	passkeyPublicOrigin: "https://cms.example.com",
+});
+```
+
+#### 리버스 프록시와 패스키
+
+Astro는 공개 호스트가 허용된 경우에만 **`X-Forwarded-*`**를 반영합니다. 사용자가 접속하는 호스트명(및 스킴)에 대해 [**`security.allowedDomains`**](https://docs.astro.build/en/reference/configuration-reference/#securityalloweddomains)을 구성하세요. **`astro dev`**에서는 Vite가 프록시 **`Host`** 헤더를 수락하도록 일치하는 **`vite.server.allowedHosts`**를 추가하세요.
+
+**`allowedDomains`**(및 전달된 헤더)를 먼저 수정하는 것을 선호하세요; 재구성된 URL이 **여전히** 브라우저 오리진과 다를 때(일반적으로 TLS가 앞단에서 종료되고 업스트림 요청이 **`http://`**로 유지될 때) **`passkeyPublicOrigin`**을 사용하세요.
+
+TLS가 앞단에 있을 때, 개발 서버를 루프백에 바인딩(**`astro dev --host 127.0.0.1`**)하는 것만으로도 충분한 경우가 많습니다: 프록시는 로컬로 연결하는 반면 **`passkeyPublicOrigin`**은 공개 HTTPS 오리진과 일치합니다.
+
+<Aside type="caution">
+	비기본 포트를 사용할 때는 리버스 프록시가 **포트를 인식하는** `Host` / `X-Forwarded-Host`를 전달해야 합니다. 프록시가 포트를 제거하면 **`rpId`**와 Astro의 재구성된 URL이 잘못될 수 있습니다.
+</Aside>
+
+```
+js title="astro.config.mjs (excerpt)"
+import { defineConfig } from "astro/config";
+import emdash, { local } from "emdash/astro";
+import { sqlite } from "emdash/db";
+
+export default defineConfig({
+	security: {
+		allowedDomains: [
+			{ hostname: "cms.example.com", protocol: "https" },
+			{ hostname: "cms.example.com", protocol: "http" },
+		],
+	},
+	vite: {
+		server: {
+			allowedHosts: ["cms.example.com"],
+		},
+	},
+	integrations: [
+		emdash({
+			database: sqlite({ url: "file:./data.db" }),
+			storage: local({
+				directory: "./uploads",
+				baseUrl: "/_emdash/api/media/file",
+			}),
+			passkeyPublicOrigin: "https://cms.example.com",
+		}),
+	],
+});
+```
+
+## 데이터베이스 어댑터
+
+`emdash/db`에서 임포트합니다:
+
+```js
+import { sqlite, libsql, postgres, d1 } from "emdash/db";
+```
+
+### `sqlite(config)`
+
+better-sqlite3를 사용하는 SQLite 데이터베이스입니다.
+
+| 옵션 | 타입     | 설명                   |
+| ------ | -------- | ----------------------------- |
+| `url`  | `string` | `file:` 접두사가 있는 파일 경로 |
+
+```js
+sqlite({ url: "file:./data.db" });
+```
+
+### `libsql(config)`
+
+libSQL 데이터베이스입니다.
+
+| 옵션      | 타입     | 설명                           |
+| ----------- | -------- | ------------------------------------- |
+| `url`       | `string` | 데이터베이스 URL                          |
+| `authToken` | `string` | 인증 토큰 (로컬 파일의 경우 선택 사항) |
+
+```js
+libsql({
+	url: process.env.LIBSQL_DATABASE_URL,
+	authToken: process.env.LIBSQL_AUTH_TOKEN,
+});
+```
+
+### `postgres(config)`
+
+연결 풀링이 있는 PostgreSQL 데이터베이스입니다.
+
+| 옵션             | 타입      | 설명                          |
+| ------------------ | --------- | ------------------------------------ |
+| `connectionString` | `string`  | PostgreSQL 연결 URL            |
+| `host`             | `string`  | 데이터베이스 호스트                        |
+| `port`             | `number`  | 데이터베이스 포트                        |
+| `database`         | `string`  | 데이터베이스 이름                        |
+| `user`             | `string`  | 데이터베이스 사용자                        |
+| `password`         | `string`  | 데이터베이스 비밀번호                    |
+| `ssl`              | `boolean` | SSL 활성화                           |
+| `pool.min`         | `number`  | 최소 풀 크기 (기본값: 0)       |
+| `pool.max`         | `number`  | 최대 풀 크기 (기본값: 10)      |
+
+```js
+postgres({ connectionString: process.env.DATABASE_URL });
+```
+
+### `d1(config)`
+
+Cloudflare D1 데이터베이스입니다. `@emdash-cms/cloudflare`에서 임포트합니다.
+
+| 옵션             | 유형       | 기본값                | 설명                                                 |
+| ---------------- | -------- | -------------------- | --------------------------------------------------- |
+| `binding`        | `string` | —                    | `wrangler.jsonc`의 D1 바인딩 이름                    |
+| `session`        | `string` | `"disabled"`         | 읽기 복제 모드: `"disabled"`, `"auto"`, `"primary-first"` |
+| `bookmarkCookie` | `string` | `"__ec_d1_bookmark"` | 세션 북마크용 쿠키 이름                              |
+
+```js
+// Basic
+d1({ binding: "DB" });
+
+// 읽기 복제본과 함께
+d1({ binding: "DB", session: "auto" });
+```
+
+`session`이 `"auto"` 또는 `"primary-first"`일 때, EmDash는 D1 세션 API를 사용하여 읽기 쿼리를 가까운 복제본으로 라우팅합니다. 인증된 사용자는 북마크 기반의 읽기-쓰기 일관성을 얻습니다. 자세한 내용은 [데이터베이스 옵션 — 읽기 복제본](/ko/deployment/database/#read-replicas)을 참조하세요.
+
+<Aside type="caution">
+	D1는 Wrangler CLI를 통한 마이그레이션이 필요합니다. 런타임에서 DDL 문은 허용되지 않습니다.
+</Aside>
+
+## 스토리지 어댑터
+
+`emdash/astro`에서 가져오기:
+
+```js
+import emdash, { local, r2, s3 } from "emdash/astro";
+```
+
+### `local(config)`
+
+로컬 파일 시스템 스토리지.
+
+| 옵션        | 유형       | 설명                     |
+| ----------- | -------- | -------------------------- |
+| `directory` | `string` | 디렉터리 경로               |
+| `baseUrl`   | `string` | 파일 제공용 기본 URL       |
+
+```js
+local({
+	directory: "./uploads",
+	baseUrl: "/_emdash/api/media/file",
+});
+```
+
+### `r2(config)`
+
+Cloudflare R2 바인딩.
+
+| 옵션        | 유형       | 설명                 |
+| ----------- | -------- | ------------------- |
+| `binding`   | `string` | R2 바인딩 이름       |
+| `publicUrl` | `string` | 선택적 공개 URL      |
+
+```js
+r2({
+	binding: "MEDIA",
+	publicUrl: "https://pub-xxxx.r2.dev",
+});
+```
+
+### `s3(config)`
+
+S3 호환 스토리지.
+
+| 옵션              | 유형       | 설명                     |
+| ----------------- | -------- | -------------------------- |
+| `endpoint`        | `string` | S3 엔드포인트 URL          |
+| `bucket`          | `string` | 버킷 이름                  |
+| `accessKeyId`     | `string` | 액세스 키                  |
+| `secretAccessKey` | `string` | 시크릿 키                  |
+| `region`          | `string` | 리전 (기본값: `"auto"`)   |
+| `publicUrl`       | `string` | 선택적 CDN URL             |
+
+```js
+s3({
+	endpoint: "https://xxx.r2.cloudflarestorage.com",
+	bucket: "media",
+	accessKeyId: process.env.R2_ACCESS_KEY_ID,
+	secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+	publicUrl: "https://cdn.example.com",
+});
+```
+
+## 라이브 컬렉션
+
+`src/live.config.ts`에서 EmDash 로더 구성:
+
+```
+ts title="src/live.config.ts"
+import { defineLiveCollection } from "astro:content";
+import { emdashLoader } from "emdash/runtime";
+
+export const collections = {
+	_emdash: defineLiveCollection({
+		loader: emdashLoader(),
+	}),
+};
+```
+
+### 로더 옵션
+
+`emdashLoader()` 함수는 선택적 구성을 허용합니다:
+
+```ts
+emdashLoader({
+	// Currently no options - reserved for future use
+});
+```
+
+## 환경 변수
+
+EmDash는 다음 환경 변수를 준수합니다:
+
+| 변수                      | 설명                              |
+| ------------------------- | ---------------------------------------- |
+| `EMDASH_DATABASE_URL`   | 데이터베이스 URL 재정의                  |
+| `EMDASH_AUTH_SECRET`    | 패스키 인증용 시크릿                      |
+| `EMDASH_PREVIEW_SECRET` | 미리보기 토큰 생성용 시크릿              |
+| `EMDASH_URL`            | 스키마 동기화용 원격 EmDash URL        |
+
+인증 시크릿 생성:
+
+```bash
+npx emdash auth secret
+```
+
+## package.json 구성
+
+`package.json`의 선택적 구성:
+
+```
+json title="package.json"
+{
+	"emdash": {
+			"label": "내 블로그 템플릿",
+			"description": "깔끔하고 미니멀한 블로그 템플릿",
+		"seed": ".emdash/seed.json",
+		"url": "https://my-site.pages.dev",
+		"preview": "https://emdash-blog.pages.dev"
+	}
+}
+```
+
+| 옵션          | 설명                        |
+| ------------- | ---------------------------------- |
+| `label`       | 표시용 템플릿 이름                |
+| `description` | 템플릿 설명                       |
+| `seed`        | 시드 JSON 파일 경로               |
+| `url`         | 스키마 동기화용 원격 URL          |
+| `preview`     | 템플릿 미리보기용 데모 사이트 URL |
+
+## TypeScript 구성
+
+EmDash는 `.emdash/types.ts`에 타입을 생성합니다. `tsconfig.json`에 추가:
+
+```
+json title="tsconfig.json"
+{
+	"compilerOptions": {
+		"paths": {
+			"@emdash-cms/types": ["./.emdash/types.ts"]
+		}
+	}
+}
+```
+
+타입 생성:
+
+```bash
+npx emdash types
+```

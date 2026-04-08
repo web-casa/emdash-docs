@@ -1,0 +1,359 @@
+---
+title: プラグインストレージ
+description: インデックス付きクエリでドキュメントコレクション内のプラグインデータを永続化します。
+---
+
+import { Aside, Tabs, TabItem } from "@astrojs/starlight/components";
+
+プラグインは、データベースマイグレーションを記述することなく、ドキュメントコレクションに独自のデータを保存できます。プラグイン定義でコレクションとインデックスを宣言すると、EmDashが自動的にスキーマを処理します。
+
+## ストレージの宣言
+
+`definePlugin()` 内でストレージコレクションを定義します：
+
+```typescript
+import { definePlugin } from "emdash";
+
+export default definePlugin({
+	id: "forms",
+	version: "1.0.0",
+
+	storage: {
+		submissions: {
+			indexes: [
+				"formId", // Single-field index
+				"status",
+				"createdAt",
+				["formId", "createdAt"], // Composite index
+				["status", "createdAt"],
+			],
+		},
+		forms: {
+			indexes: ["slug"],
+		},
+	},
+
+	// ...
+});
+```
+
+`storage` 内の各キーはコレクション名です。`indexes` 配列は効率的にクエリ可能なフィールドをリストします。
+
+<Aside type="note">
+	ストレージはプラグインにスコープされます。`forms` プラグイン内の `submissions` コレクションは、他のプラグインの `submissions` とは完全に
+	分離されています。
+</Aside>
+
+## ストレージコレクション API
+
+フックとルート内で `ctx.storage` 経由でコレクションにアクセスします：
+
+```typescript
+"content:afterSave": async (event, ctx) => {
+  const { submissions } = ctx.storage;
+
+  // CRUD 操作
+  await submissions.put("sub_123", { formId: "contact", email: "user@example.com" });
+  const item = await submissions.get("sub_123");
+  const exists = await submissions.exists("sub_123");
+  await submissions.delete("sub_123");
+}
+```
+
+### 完全な API リファレンス
+
+```typescript
+interface StorageCollection<T = unknown> {
+	// Basic CRUD
+	get(id: string): Promise<T | null>;
+	put(id: string, data: T): Promise<void>;
+	delete(id: string): Promise<boolean>;
+	exists(id: string): Promise<boolean>;
+
+	// バッチ操作
+	getMany(ids: string[]): Promise<Map<string, T>>;
+	putMany(items: Array<{ id: string; data: T }>): Promise<void>;
+	deleteMany(ids: string[]): Promise<number>;
+
+	// クエリ (インデックス付きフィールドのみ)
+	query(options?: QueryOptions): Promise<PaginatedResult<{ id: string; data: T }>>;
+	count(where?: WhereClause): Promise<number>;
+}
+```
+
+## データのクエリ
+
+`query()` を使用して条件に一致するドキュメントを取得します。クエリはページネーションされた結果を返します。
+
+```typescript
+const result = await ctx.storage.submissions.query({
+	where: {
+		formId: "contact",
+		status: "pending",
+	},
+	orderBy: { createdAt: "desc" },
+	limit: 20,
+});
+
+// result.items - { id, data } の配列
+// result.cursor - ページネーションカーソル (さらに結果がある場合)
+// result.hasMore - さらにページがあるかどうかを示すブール値
+```
+
+### クエリオプション
+
+```typescript
+interface QueryOptions {
+	where?: WhereClause;
+	orderBy?: Record<string, "asc" | "desc">;
+	limit?: number; // Default 50, max 1000
+	cursor?: string; // For pagination
+}
+```
+
+### Where 句演算子
+
+これらの演算子を使用して、インデックス付きフィールドでフィルタリングします：
+
+<Tabs>
+  <TabItem label="完全一致">
+```typescript
+where: {
+  status: "pending",        // Exact string match
+  count: 5,                 // Exact number match
+  archived: false           // Exact boolean match
+}
+```
+  </TabItem>
+  <TabItem label="範囲">
+```typescript
+where: {
+  createdAt: { gte: "2024-01-01" },     // 以上
+  score: { gt: 50, lte: 100 }           // 間 (排他的/包括的)
+}
+
+// 利用可能: gt, gte, lt, lte
+
+````
+  </TabItem>
+  <TabItem label="In">
+```typescript
+where: {
+  status: { in: ["pending", "approved"] }
+}
+````
+
+  </TabItem>
+  <TabItem label="前方一致">
+```typescript
+where: {
+  slug: { startsWith: "blog-" }
+}
+```
+  </TabItem>
+</Tabs>
+
+### 順序付け
+
+インデックス付きフィールドで結果を並べ替えます：
+
+```typescript
+orderBy: {
+	createdAt: "desc";
+} // Newest first
+orderBy: {
+	score: "asc";
+} // Lowest first
+```
+
+<Aside type="caution">
+	クエリと順序付けはインデックス付きフィールドでのみ可能です。インデックスが付いていないフィールドでのクエリはエラーをスローします。これにより、
+	意図しない全テーブルスキャンを防ぎます。
+</Aside>
+
+## ページネーション
+
+結果はページネーションされます。追加のページを取得するには `cursor` を使用します：
+
+```typescript
+async function getAllSubmissions(ctx: PluginContext) {
+	const allItems = [];
+	let cursor: string | undefined;
+
+	do {
+		const result = await ctx.storage.submissions!.query({
+			orderBy: { createdAt: "desc" },
+			limit: 100,
+			cursor,
+		});
+
+		allItems.push(...result.items);
+		cursor = result.cursor;
+	} while (cursor);
+
+	return allItems;
+}
+```
+
+### PaginatedResult
+
+```typescript
+interface PaginatedResult<T> {
+	items: T[];
+	cursor?: string; // Pass to next query for more results
+	hasMore: boolean; // True if more pages exist
+}
+```
+
+## ドキュメントのカウント
+
+条件に一致するドキュメントをカウントします：
+
+```typescript
+// Count all
+const total = await ctx.storage.submissions!.count();
+
+// フィルター付きカウント
+const pending = await ctx.storage.submissions!.count({
+	status: "pending",
+});
+```
+
+## バッチ操作
+
+一括操作には、バッチメソッドを使用します：
+
+```typescript
+// Get multiple by ID
+const items = await ctx.storage.submissions!.getMany(["sub_1", "sub_2", "sub_3"]);
+// Returns Map<string, T>
+
+// 複数保存
+await ctx.storage.submissions!.putMany([
+	{ id: "sub_1", data: { formId: "contact", status: "new" } },
+	{ id: "sub_2", data: { formId: "contact", status: "new" } },
+]);
+
+// 複数削除
+const deletedCount = await ctx.storage.submissions!.deleteMany(["sub_1", "sub_2"]);
+```
+
+## インデックス設計
+
+クエリパターンに基づいてインデックスを選択します：
+
+| クエリパターン                            | 必要なインデックス                         |
+| ---------------------------------------- | ------------------------------------ |
+| `formId` でフィルター                       | `"formId"`                           |
+| `formId` でフィルター、`createdAt` で並べ替え | `["formId", "createdAt"]`            |
+| `createdAt` のみで並べ替え                | `"createdAt"`                        |
+| `status` と `formId` でフィルター          | `"status"` と `"formId"` (別々) |
+
+複合インデックスは、最初のフィールドでフィルタリングし、オプションで2番目のフィールドで並べ替えるクエリをサポートします：
+
+```typescript
+// With index ["formId", "createdAt"]:
+
+// これは動作します：
+query({ where: { formId: "contact" }, orderBy: { createdAt: "desc" } });
+
+// これも動作します (フィルターのみ)：
+query({ where: { formId: "contact" } });
+
+// これは複合インデックスを使用しません (フィールド順序が異なります)：
+query({ where: { createdAt: { gte: "2024-01-01" } } });
+```
+
+## 型安全性
+
+ストレージコレクションに型を付けて、より良い IntelliSense を実現します：
+
+```typescript
+interface Submission {
+	formId: string;
+	email: string;
+	data: Record<string, unknown>;
+	status: "pending" | "approved" | "spam";
+	createdAt: string;
+}
+
+definePlugin({
+	id: "forms",
+	version: "1.0.0",
+
+	storage: {
+		submissions: {
+			indexes: ["formId", "status", "createdAt"],
+		},
+	},
+
+	hooks: {
+		"content:afterSave": async (event, ctx) => {
+			// 型付きコレクションにキャスト
+			const submissions = ctx.storage.submissions as StorageCollection<Submission>;
+
+			const submission: Submission = {
+				formId: "contact",
+				email: "user@example.com",
+				data: { message: "Hello" },
+				status: "pending",
+				createdAt: new Date().toISOString(),
+			};
+
+			await submissions.put(`sub_${Date.now()}`, submission);
+		},
+	},
+});
+```
+
+## ストレージ vs コンテンツ vs KV
+
+ユースケースに適したストレージメカニズムを使用します：
+
+| ユースケース                                           | ストレージ                               |
+| -------------------------------------------------- | ------------------------------------- |
+| プラグイン運用データ (ログ、送信、キャッシュ) | `ctx.storage`                         |
+| ユーザー設定可能な設定                         | `ctx.kv` と `settings:` プレフィックス      |
+| 内部プラグイン状態                              | `ctx.kv` と `state:` プレフィックス         |
+| 管理 UI で編集可能なコンテンツ                       | サイトコレクション (プラグインストレージではありません) |
+
+<Aside type="tip">
+	プラグインストレージは、プラグインが所有し内部で管理するデータ用です。コンテンツ編集者が管理 UI でデータを表示または編集する必要がある場合は、代わりにサイトコレクションを作成してください。
+</Aside>
+
+## 実装の詳細
+
+内部では、プラグインストレージは単一のデータベーステーブルを使用します：
+
+```sql
+CREATE TABLE _plugin_storage (
+  plugin_id TEXT NOT NULL,
+  collection TEXT NOT NULL,
+  id TEXT NOT NULL,
+  data JSON NOT NULL,
+  created_at TEXT,
+  updated_at TEXT,
+  PRIMARY KEY (plugin_id, collection, id)
+);
+```
+
+EmDash は宣言されたフィールドに対して式インデックスを作成します：
+
+```sql
+CREATE INDEX idx_forms_submissions_formId
+  ON _plugin_storage(json_extract(data, '$.formId'))
+  WHERE plugin_id = 'forms' AND collection = 'submissions';
+```
+
+この設計により、以下が提供されます：
+
+- **マイグレーション不要** — スキーマはプラグインコード内に存在
+- **移植性** — D1、libSQL、SQLite で動作
+- **分離性** — プラグインは自身のデータのみにアクセス可能
+- **安全性** — SQL インジェクションなし、検証済みクエリ
+
+## インデックスの追加
+
+プラグイン更新でインデックスを追加すると、EmDash は次回起動時に自動的に作成します。これは安全です — データマイグレーションなしでインデックスを追加できます。
+
+インデックスを削除すると、EmDash はそれらを削除します。インデックスが付いていないフィールドでのクエリは、検証エラーで失敗します。
