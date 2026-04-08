@@ -8,6 +8,7 @@
     "start": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
+    "deploy:cf": "pnpm build && wrangler deploy",
     "test": "node --test tests/*.test.mjs",
     "generate:og-image": "node ./scripts/generate-og-image.mjs",
     "normalize:terminology": "node ./scripts/normalize-terminology.mjs",

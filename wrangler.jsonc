@@ -3,19 +3,24 @@
 	"compatibility_date": "2026-03-01",
 	"routes": [
 		{
-			"pattern": "docs.emdashcms.com",
+			"pattern": "docs.hiemdash.com",
 			"custom_domain": true,
-			"zone_name": "emdashcms.com",
+			"zone_name": "hiemdash.com",
 		},
 	],
 	"compatibility_flags": ["global_fetch_strictly_public", "nodejs_compat"],
-	"name": "docs",
+	"name": "hiemdash-docs",
 	"main": "@astrojs/cloudflare/entrypoints/server",
 	"assets": {
 		"directory": "./dist",
 		"binding": "ASSETS",
 	},
+	"vars": {
+		"SITE_URL": "https://docs.hiemdash.com",
+	},
 	"observability": {
 		"enabled": true,
 	},
+	"preview_urls": false,
+	"workers_dev": false,
 }
