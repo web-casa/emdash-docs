@@ -31,6 +31,15 @@ const sidebarTranslations = {
 		fr: "Aller plus loin",
 		de: "Mehr erfahren",
 	},
+	Other: {
+		"zh-CN": "其他",
+		ja: "その他",
+		ko: "기타",
+		es: "Otros",
+		pt: "Outros",
+		fr: "Autres",
+		de: "Weitere",
+	},
 	"Coming From...": {
 		"zh-CN": "从这些平台迁移",
 		ja: "他のプラットフォームから移行",
@@ -244,6 +253,12 @@ const sidebar = [
 			{ slug: "reference/mcp-server" },
 		],
 	},
+	{
+		label: "Other",
+		translations: sidebarTranslations.Other,
+		collapsed: true,
+		items: [{ slug: "links" }],
+	},
 ];
 
 // https://astro.build/config
@@ -269,7 +284,9 @@ export default defineConfig({
 				},
 			],
 			components: {
+				Header: "./src/components/Header.astro",
 				Head: "./src/components/Head.astro",
+				Footer: "./src/components/Footer.astro",
 			},
 			customCss: ["./src/styles/custom.css"],
 			sidebar,

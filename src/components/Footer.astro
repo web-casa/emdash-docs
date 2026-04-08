@@ -1,0 +1,157 @@
+---
+import EditLink from "virtual:starlight/components/EditLink";
+import LastUpdated from "virtual:starlight/components/LastUpdated";
+import Pagination from "virtual:starlight/components/Pagination";
+import config from "virtual:starlight/user-config";
+import { Icon } from "@astrojs/starlight/components";
+import { getLocalePath, localeFromPath } from "../lib/locale.js";
+
+const pathname = Astro.url.pathname;
+const locale = localeFromPath(pathname);
+const localeHomePath = getLocalePath(locale);
+const normalizedPath = pathname.endsWith("/") ? pathname : `${pathname}/`;
+const showFeatured = normalizedPath === localeHomePath;
+const featuredLabel =
+	{
+		"zh-cn": "已收录 / 推荐于",
+		ja: "掲載・紹介",
+		ko: "추천 및 수록",
+		es: "Destacado en",
+		pt: "Destaque em",
+		fr: "Mis en avant sur",
+		de: "Empfohlen auf",
+	}[locale] ?? "Featured on";
+
+const badges = [
+	{
+		href: "https://hicyou.com/",
+		src: "https://hicyou.com/badge/featured-light.svg",
+		alt: "Featured on Hicyou",
+	},
+	{
+		href: "https://www.aat.ee/",
+		src: "https://www.aat.ee/images/badges/top1-light.svg",
+		alt: "Featured on AAT",
+	},
+	{
+		href: "https://www.mf8.biz/",
+		src: "https://www.mf8.biz/badge/badge_light.svg",
+		alt: "已收录于 米饭粑",
+	},
+	{
+		href: "https://bigkr.com/",
+		src: "https://bigkr.com/badge/badge_light.svg",
+		alt: "Featured on BigKr",
+	},
+];
+---
+
+<footer class="sl-flex">
+	<div class="meta sl-flex">
+		<EditLink />
+		<LastUpdated />
+	</div>
+
+	{
+		showFeatured && (
+			<div class="featured">
+				<p class="featured-label">{featuredLabel}</p>
+				<div class="featured-badges">
+					{
+						badges.map((badge) => (
+							<a href={badge.href} target="_blank" rel="noopener noreferrer" class="badge-link">
+								<img src={badge.src} alt={badge.alt} loading="lazy" />
+							</a>
+						))
+					}
+				</div>
+			</div>
+		)
+	}
+
+	<Pagination />
+
+	{
+		config.credits && (
+			<a class="kudos sl-flex" href="https://starlight.astro.build">
+				<Icon name={"starlight"} /> {Astro.locals.t("builtWithStarlight.label")}
+			</a>
+		)
+	}
+</footer>
+
+<style>
+	@layer starlight.core {
+		footer {
+			flex-direction: column;
+			gap: 1.5rem;
+		}
+
+		.meta {
+			gap: 0.75rem 3rem;
+			justify-content: space-between;
+			flex-wrap: wrap;
+			margin-top: 3rem;
+			font-size: var(--sl-text-sm);
+			color: var(--sl-color-gray-3);
+		}
+
+		.meta > :global(p:only-child) {
+			margin-inline-start: auto;
+		}
+
+		.featured {
+			padding: 1rem 1.1rem;
+			border: 1px solid var(--sl-color-gray-5);
+			border-radius: 0.9rem;
+			background: linear-gradient(180deg, rgba(255, 164, 72, 0.09), rgba(255, 255, 255, 0));
+		}
+
+		.featured-label {
+			margin: 0 0 0.9rem;
+			font-size: var(--sl-text-xs);
+			font-weight: 700;
+			letter-spacing: 0.06em;
+			text-transform: uppercase;
+			color: var(--sl-color-gray-2);
+		}
+
+		.featured-badges {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0.75rem;
+			align-items: center;
+		}
+
+		.badge-link {
+			display: inline-flex;
+			line-height: 0;
+		}
+
+		.badge-link img {
+			height: 32px;
+			width: auto;
+			max-width: 100%;
+			border-radius: 0.4rem;
+		}
+
+		.kudos {
+			align-items: center;
+			gap: 0.5em;
+			margin: 1.5rem auto;
+			font-size: var(--sl-text-xs);
+			text-decoration: none;
+			color: var(--sl-color-gray-3);
+		}
+
+		.kudos:hover {
+			color: var(--sl-color-white);
+		}
+	}
+
+	@layer starlight.components {
+		.kudos :global(svg) {
+			color: var(--sl-color-orange);
+		}
+	}
+</style>
